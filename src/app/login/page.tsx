@@ -1,78 +1,119 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/browser";
-
-function getCanonicalBaseUrl() {
-  const { protocol, hostname } = window.location;
-
-  // Codespaces forwarded domain ya incluye el puerto en el subdominio: "-3000.app.github.dev"
-  // En ese caso, NUNCA debemos añadir ":3000"
-  if (hostname.endsWith(".app.github.dev") && hostname.includes("-3000")) {
-    return `${protocol}//${hostname}`;
-  }
-
-  // En local u otros entornos, sí usamos origin completo (incluye puerto si aplica)
-  return window.location.origin;
-}
+import type React from "react";
+import { useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const supabase = createClient();
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
 
-  async function sendMagicLink(e: React.FormEvent) {
+  const searchParams = useSearchParams();
+  const error = searchParams.get("error");
+
+  // ✅ Default: Super Admin dashboard (según tu decisión)
+  const next = searchParams.get("next") ?? "/control-room/dashboard";
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    setStatus(null);
+    setMsg(null);
 
-    const baseUrl = getCanonicalBaseUrl();
+    try {
+      const supabase = createClient();
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${baseUrl}/auth/callback`,
-      },
-    });
+      // ✅ Robusto: en navegador usa origin real; fallback a env
+      const siteUrl =
+        (typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL)?.replace(/\/$/, "");
 
-    setLoading(false);
+      if (!siteUrl) {
+        setLoading(false);
+        setMsg("Falta NEXT_PUBLIC_SITE_URL o no se detecta el origin.");
+        return;
+      }
 
-    if (error) setStatus(`Error: ${error.message}`);
-    else
-      setStatus(
-        "✅ Enlace enviado. Ábrelo en ESTE mismo navegador (mismo perfil)."
-      );
+      const emailRedirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent(next)}`;
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo,
+        },
+      });
+
+      if (error) {
+        setLoading(false);
+        setMsg(error.message);
+        return;
+      }
+
+      setSent(true);
+      setLoading(false);
+    } catch (err: any) {
+      setLoading(false);
+      setMsg(err?.message ?? "Error desconocido");
+    }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-4">
-        <h1 className="text-2xl font-semibold">Acceso al portal</h1>
-        <p className="text-sm opacity-80">
-          Introduce tu email y recibirás un enlace de acceso.
-        </p>
+    <div style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
+      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>Login</h1>
 
-        <form onSubmit={sendMagicLink} className="space-y-3">
+      {error ? (
+        <p style={{ color: "crimson", marginBottom: 12 }}>
+          Error: <b>{error}</b>
+        </p>
+      ) : null}
+
+      {msg ? (
+        <p style={{ color: "crimson", marginBottom: 12 }}>
+          {msg}
+        </p>
+      ) : null}
+
+      {sent ? (
+        <div>
+          <p style={{ marginBottom: 12 }}>
+            Te he enviado un magic link a <b>{email}</b>. Abre el correo y haz clic.
+          </p>
+          <button
+            onClick={() => {
+              setSent(false);
+              setEmail("");
+              setMsg(null);
+            }}
+          >
+            Enviar a otro email
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={onSubmit}>
+          <label style={{ display: "block", marginBottom: 6 }}>Email</label>
           <input
-            className="w-full border rounded-md p-3"
-            type="email"
-            placeholder="tu@email.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            type="email"
             required
+            placeholder="tu@email.com"
+            style={{ width: "100%", padding: 10, marginBottom: 12 }}
           />
+
           <button
-            className="w-full rounded-md bg-black text-white p-3 disabled:opacity-50"
-            disabled={loading || !email}
             type="submit"
+            disabled={loading}
+            style={{ padding: "10px 14px", width: "100%" }}
           >
             {loading ? "Enviando..." : "Enviar magic link"}
           </button>
-        </form>
 
-        {status && <p className="text-sm">{status}</p>}
-      </div>
-    </main>
+          <p style={{ marginTop: 12, fontSize: 12, opacity: 0.8 }}>
+            Al entrar, te redirige a: <b>{next}</b>
+          </p>
+        </form>
+      )}
+    </div>
   );
 }
