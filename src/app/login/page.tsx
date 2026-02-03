@@ -1,21 +1,19 @@
+// src/app/login/page.tsx
 "use client";
 
-import { useState } from "react";
 import type React from "react";
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  const sp = useSearchParams();
+  const error = sp.get("error");
+
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-
-  const searchParams = useSearchParams();
-  const error = searchParams.get("error");
-
-  // ✅ Default: Super Admin dashboard (según tu decisión)
-  const next = searchParams.get("next") ?? "/control-room/dashboard";
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,23 +23,9 @@ export default function LoginPage() {
     try {
       const supabase = createClient();
 
-      // ✅ Robusto: en navegador usa origin real; fallback a env
-      const siteUrl =
-        (typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL)?.replace(/\/$/, "");
-
-      if (!siteUrl) {
-        setLoading(false);
-        setMsg("Falta NEXT_PUBLIC_SITE_URL o no se detecta el origin.");
-        return;
-      }
-
-      const emailRedirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent(next)}`;
-
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo,
-        },
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
       });
 
       if (error) {
@@ -50,11 +34,18 @@ export default function LoginPage() {
         return;
       }
 
-      setSent(true);
-      setLoading(false);
+      if (!data?.session) {
+        setLoading(false);
+        setMsg("No se pudo iniciar sesión. Revisa email y contraseña.");
+        return;
+      }
+
+      // Importante: dejamos que tu lógica central redirija por rol
+      // (src/app/page.tsx y/o /dashboard)
+      window.location.assign("/");
     } catch (err: any) {
-      setLoading(false);
       setMsg(err?.message ?? "Error desconocido");
+      setLoading(false);
     }
   }
 
@@ -69,51 +60,44 @@ export default function LoginPage() {
       ) : null}
 
       {msg ? (
-        <p style={{ color: "crimson", marginBottom: 12 }}>
-          {msg}
-        </p>
+        <p style={{ color: "crimson", marginBottom: 12 }}>{msg}</p>
       ) : null}
 
-      {sent ? (
-        <div>
-          <p style={{ marginBottom: 12 }}>
-            Te he enviado un magic link a <b>{email}</b>. Abre el correo y haz clic.
-          </p>
-          <button
-            onClick={() => {
-              setSent(false);
-              setEmail("");
-              setMsg(null);
-            }}
-          >
-            Enviar a otro email
-          </button>
-        </div>
-      ) : (
-        <form onSubmit={onSubmit}>
-          <label style={{ display: "block", marginBottom: 6 }}>Email</label>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            type="email"
-            required
-            placeholder="tu@email.com"
-            style={{ width: "100%", padding: 10, marginBottom: 12 }}
-          />
+      <form onSubmit={onSubmit}>
+        <label style={{ display: "block", marginBottom: 6 }}>Email</label>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          required
+          placeholder="tu@email.com"
+          autoComplete="email"
+          style={{ width: "100%", padding: 10, marginBottom: 12 }}
+        />
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{ padding: "10px 14px", width: "100%" }}
-          >
-            {loading ? "Enviando..." : "Enviar magic link"}
-          </button>
+        <label style={{ display: "block", marginBottom: 6 }}>Contraseña</label>
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          required
+          placeholder="••••••••"
+          autoComplete="current-password"
+          style={{ width: "100%", padding: 10, marginBottom: 12 }}
+        />
 
-          <p style={{ marginTop: 12, fontSize: 12, opacity: 0.8 }}>
-            Al entrar, te redirige a: <b>{next}</b>
-          </p>
-        </form>
-      )}
+        <button
+          type="submit"
+          disabled={loading}
+          style={{ padding: "10px 14px", width: "100%" }}
+        >
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
+
+        <p style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
+          Acceso solo con email + contraseña.
+        </p>
+      </form>
     </div>
   );
 }

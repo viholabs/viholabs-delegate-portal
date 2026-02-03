@@ -56,7 +56,8 @@ function badgeChannel(ch?: string | null) {
 export default function InvoicesPage() {
   const supabase = useMemo(() => createClient(), []);
 
-  const [month, setMonth] = useState<string>("2026-01-01");
+  // ✅ Mes estándar: YYYY-MM (como importación / dashboard)
+  const [month, setMonth] = useState<string>("2026-01");
   const [q, setQ] = useState<string>("");
 
   const [loading, setLoading] = useState(false);
@@ -103,11 +104,20 @@ export default function InvoicesPage() {
     setError(null);
 
     try {
+      if (!/^\d{4}-\d{2}$/.test(month)) {
+        throw new Error("Mes inválido. Debe ser YYYY-MM (ej: 2026-01)");
+      }
+
       const token = await getAccessTokenOrThrow();
-      const res = await fetch("/api/control-room/invoices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ month: month || null, q: q?.trim() ? q.trim() : null }),
+
+      // ✅ 405 FIX: usar GET (no POST) en /api/control-room/invoices
+      const url = new URL("/api/control-room/invoices", window.location.origin);
+      url.searchParams.set("month", month);
+      if (q?.trim()) url.searchParams.set("q", q.trim());
+
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       const j = await res.json().catch(() => null);
@@ -199,8 +209,11 @@ export default function InvoicesPage() {
   const totals = useMemo(() => {
     const paid = rows.filter((r) => r.is_paid).length;
     const unpaid = rows.length - paid;
-    const gross = rows.reduce((acc, r) => acc + (Number(r.total_gross) || 0), 0);
-    return { paid, unpaid, gross };
+
+    // ✅ Negocio: neto producto vendido
+    const totalNet = rows.reduce((acc, r) => acc + (Number(r.total_net) || 0), 0);
+
+    return { paid, unpaid, totalNet };
   }, [rows]);
 
   return (
@@ -231,9 +244,9 @@ export default function InvoicesPage() {
 
         <Card className="shadow-sm">
           <CardHeader>
-            <CardTitle className="text-sm text-text-soft">Total bruto (suma)</CardTitle>
+            <CardTitle className="text-sm text-text-soft">Total neto producto (suma)</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-semibold">{fmtEUR(totals.gross)}</CardContent>
+          <CardContent className="text-2xl font-semibold">{fmtEUR(totals.totalNet)}</CardContent>
         </Card>
       </div>
 
@@ -244,12 +257,12 @@ export default function InvoicesPage() {
         <CardContent>
           <div className="flex flex-col gap-3 md:flex-row md:items-end">
             <div className="flex flex-col gap-1">
-              <div className="text-xs text-text-soft">Mes (YYYY-MM-01)</div>
+              <div className="text-xs text-text-soft">Mes (YYYY-MM)</div>
               <input
+                type="month"
                 className="h-10 w-[180px] rounded-md border px-3"
                 value={month}
                 onChange={(e) => setMonth(e.target.value)}
-                placeholder="2026-01-01"
               />
             </div>
 
@@ -267,7 +280,14 @@ export default function InvoicesPage() {
               <Button onClick={loadInvoices} disabled={loading}>
                 {loading ? "Cargando..." : "Aplicar"}
               </Button>
-              <Button variant="outline" onClick={() => setQ("")} disabled={loading}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setQ("");
+                  // no auto-load; tú decides pulsar Aplicar
+                }}
+                disabled={loading}
+              >
                 Limpiar búsqueda
               </Button>
             </div>
@@ -287,9 +307,7 @@ export default function InvoicesPage() {
         </CardHeader>
 
         <CardContent>
-          {/* CLAVE: contenedor con scroll horizontal real */}
           <div className="w-full overflow-x-auto">
-            {/* CLAVE: min-w grande para que no comprima columnas */}
             <div className="min-w-[1200px]">
               <Table>
                 <TableHeader>
@@ -300,7 +318,7 @@ export default function InvoicesPage() {
                     <TableHead className="w-[140px] text-center">Pagada</TableHead>
                     <TableHead className="w-[160px] text-center">Origen</TableHead>
                     <TableHead className="w-[380px]">Delegado</TableHead>
-                    <TableHead className="w-[140px] text-right">Bruto</TableHead>
+                    <TableHead className="w-[140px] text-right">Neto</TableHead>
                     <TableHead className="w-[140px] text-right">Acción</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -316,7 +334,6 @@ export default function InvoicesPage() {
 
                     return (
                       <TableRow key={r.id}>
-                        {/* FACTURA: compacta + truncado */}
                         <TableCell className="align-top">
                           <div className="font-medium">{r.invoice_number}</div>
                           <div className="mt-1 max-w-[170px] truncate text-xs text-text-soft" title={r.source_filename ?? ""}>
@@ -326,7 +343,6 @@ export default function InvoicesPage() {
 
                         <TableCell className="align-top whitespace-nowrap">{r.invoice_date ?? "—"}</TableCell>
 
-                        {/* CLIENTE: truncado + title */}
                         <TableCell className="align-top">
                           <div className="max-w-[250px] truncate" title={r.client_name ?? ""}>
                             {r.client_name ?? "—"}
@@ -403,7 +419,7 @@ export default function InvoicesPage() {
                           </label>
                         </TableCell>
 
-                        <TableCell className="align-top text-right whitespace-nowrap">{fmtEUR(r.total_gross)}</TableCell>
+                        <TableCell className="align-top text-right whitespace-nowrap">{fmtEUR(r.total_net)}</TableCell>
 
                         <TableCell className="align-top text-right">
                           <Button onClick={() => saveRow(r.id)} disabled={savingId === r.id || loading}>
@@ -426,7 +442,6 @@ export default function InvoicesPage() {
             </div>
           </div>
 
-          {/* Tip UX: aviso de scroll */}
           <div className="mt-3 text-xs text-text-soft">
             Tip: si no ves la derecha, desplázate horizontalmente en la tabla.
           </div>
