@@ -1,6 +1,9 @@
 // src/app/api/control-room/invoices/validate/route.ts
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 
@@ -11,13 +14,6 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
-}
-
-function getBearerToken(req: Request) {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!h) return null;
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
 }
 
 type Payload = {
@@ -44,49 +40,87 @@ type Payload = {
   }>;
 };
 
+function getServiceClientOrThrow() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
+    throw new Error(
+      "Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / NEXT_PUBLIC_SUPABASE_ANON_KEY"
+    );
+  }
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
+}
+
+function hasAnyPermission(
+  eff: { isSuperAdmin: boolean; has: (code: string) => boolean },
+  codes: string[]
+) {
+  if (eff.isSuperAdmin) return true;
+  return codes.some((c) => eff.has(c));
+}
+
 export async function POST(req: Request) {
+  let stage = "init";
+
   try {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
-      return json(500, {
+    // ✅ Auth canónica (una sola vez)
+    stage = "getActorFromRequest";
+    const r = await getActorFromRequest(req);
+    if (!r.ok) return json(r.status, { ok: false, stage, error: r.error });
+
+    // ✅ Permisos efectivos (Biblia: no roles hardcoded)
+    stage = "effective_permissions";
+    const eff = await getEffectivePermissionsByActorId(String(r.actor.id));
+
+    stage = "authorize";
+    const allowed = hasAnyPermission(eff, [
+      "control_room.invoices.validate",
+      "control_room.invoices.manage",
+      "invoices.manage",
+      "invoices.write",
+    ]);
+
+    if (!allowed) {
+      return json(403, {
         ok: false,
-        error: "Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        stage,
+        error: "No autorizado (control_room.invoices.validate)",
       });
     }
 
-    const token = getBearerToken(req);
-    if (!token) return json(401, { ok: false, error: "Missing Bearer token" });
+    // ✅ Escrituras: service role
+    stage = "service_client";
+    const supabase = getServiceClientOrThrow();
 
-    const supabaseAuth = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { data: userData, error: userErr } = await supabaseAuth.auth.getUser(token);
-    if (userErr || !userData?.user) return json(401, { ok: false, error: "Invalid token" });
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-    const body = (await req.json()) as Payload;
-    if (!body?.invoice_id) return json(400, { ok: false, error: "Missing invoice_id" });
+    stage = "body";
+    const body = (await req.json().catch(() => null)) as Payload | null;
+    if (!body?.invoice_id) return json(400, { ok: false, stage, error: "Missing invoice_id" });
 
     // 1) Leer invoice para obtener client_id si no viene
+    stage = "invoices.select";
     const { data: inv, error: eInv } = await supabase
       .from("invoices")
       .select("id, client_id, needs_review")
       .eq("id", body.invoice_id)
       .single();
 
-    if (eInv) return json(500, { ok: false, error: `invoices.select: ${eInv.message}` });
+    if (eInv) return json(500, { ok: false, stage, error: `invoices.select: ${eInv.message}` });
 
     const clientId = body.client_id || inv.client_id;
-    if (!clientId) return json(400, { ok: false, error: "Invoice has no client_id" });
+    if (!clientId) return json(400, { ok: false, stage, error: "Invoice has no client_id" });
 
     // 2) Setear delegate en CLIENTS (solo si estaba NULL, para respetar triggers de inmutabilidad)
     if (body.delegate_id) {
+      stage = "clients.select";
       const { data: c0, error: eC0 } = await supabase
         .from("clients")
         .select("id, delegate_id")
         .eq("id", clientId)
         .single();
-      if (eC0) return json(500, { ok: false, error: `clients.select: ${eC0.message}` });
+      if (eC0) return json(500, { ok: false, stage, error: `clients.select: ${eC0.message}` });
 
       if (!c0.delegate_id) {
+        stage = "clients.set_delegate";
         const { error: eCUp } = await supabase
           .from("clients")
           .update({
@@ -95,13 +129,16 @@ export async function POST(req: Request) {
           })
           .eq("id", clientId);
 
-        if (eCUp) return json(500, { ok: false, error: `clients.set_delegate: ${eCUp.message}` });
+        if (eCUp) return json(500, { ok: false, stage, error: `clients.set_delegate: ${eCUp.message}` });
       }
-      // Si ya tenía delegate_id, NO lo cambiamos aquí (evita romper triggers / reglas)
+      // Si ya tenía delegate_id, NO lo cambiamos aquí
     }
 
     // 3) Assignments coordinadores (commercial/technical) sobre entity_type='client'
-    async function upsertAssignment(kind: "commercial" | "technical", coordinatorActorId: string | null | undefined) {
+    async function upsertAssignment(
+      kind: "commercial" | "technical",
+      coordinatorActorId: string | null | undefined
+    ) {
       if (!coordinatorActorId) return;
 
       const { data: existing, error: eSel } = await supabase
@@ -115,7 +152,6 @@ export async function POST(req: Request) {
       if (eSel) throw new Error(`assignments.select(${kind}): ${eSel.message}`);
 
       if (existing?.id) {
-        // si existe, lo ponemos activo y actualizamos coordinator_actor_id (si quieres que sea inmutable, quita esto)
         const { error: eUp } = await supabase
           .from("assignments")
           .update({
@@ -139,20 +175,22 @@ export async function POST(req: Request) {
       }
     }
 
+    stage = "assignments.upsert";
     await upsertAssignment("commercial", body.coordinator_commercial_actor_id ?? null);
     await upsertAssignment("technical", body.coordinator_technical_actor_id ?? null);
 
     // 4) Recomendaciones (rémoras): client_recommendations
     // Regla: no duplicar. Si existe para (recommender_client_id, referred_client_id) -> update activo/porcentaje/mode.
     if (Array.isArray(body.recommender_client_ids)) {
-      for (const r of body.recommender_client_ids) {
-        const recommenderId = r?.recommender_client_id;
+      stage = "client_recommendations.upsert";
+      for (const r0 of body.recommender_client_ids) {
+        const recommenderId = r0?.recommender_client_id;
         if (!recommenderId) continue;
 
-        const percentage = typeof r.percentage === "number" ? r.percentage : 7;
-        const mode = r.mode === "additive" ? "additive" : "deduct";
-        const active = typeof r.active === "boolean" ? r.active : true;
-        const notes = r.notes ?? null;
+        const percentage = typeof r0.percentage === "number" ? r0.percentage : 7;
+        const mode = r0.mode === "additive" ? "additive" : "deduct";
+        const active = typeof r0.active === "boolean" ? r0.active : true;
+        const notes = r0.notes ?? null;
 
         const { data: ex, error: eSel } = await supabase
           .from("client_recommendations")
@@ -192,10 +230,11 @@ export async function POST(req: Request) {
     }
 
     // 5) Marcar factura como revisada + flags
+    stage = "invoices.update";
     const invoiceUpdate: any = {
       needs_review: false,
       reviewed_at: new Date().toISOString(),
-      reviewed_by_actor_id: null, // si tienes actor del usuario, lo podemos setear luego
+      reviewed_by_actor_id: r.actor.id, // ✅ ahora sí lo dejamos trazable
       updated_at: new Date().toISOString(),
     };
 
@@ -207,7 +246,7 @@ export async function POST(req: Request) {
       .update(invoiceUpdate)
       .eq("id", body.invoice_id);
 
-    if (eUpInv) return json(500, { ok: false, error: `invoices.update: ${eUpInv.message}` });
+    if (eUpInv) return json(500, { ok: false, stage, error: `invoices.update: ${eUpInv.message}` });
 
     return json(200, {
       ok: true,
@@ -230,6 +269,6 @@ export async function POST(req: Request) {
       },
     });
   } catch (e: any) {
-    return json(500, { ok: false, error: e?.message || String(e) });
+    return json(500, { ok: false, stage, error: e?.message || String(e) });
   }
 }
