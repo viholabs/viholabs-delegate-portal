@@ -1,66 +1,99 @@
 // src/app/api/delegate/orders/status/route.ts
+
 import { NextResponse } from "next/server";
 import { getActorFromRequest, json, resolveDelegateIdOrThrow } from "../../_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 
-const ALLOWED: string[] = ["pending", "received", "prepared", "shipped", "delivered", "invoiced"];
+function pickDelegateIdOrThrow(args: {
+  delegateIdQuery: string | null;
+  eff: { isSuperAdmin: boolean; has: (code: string) => boolean };
+}) {
+  const { delegateIdQuery, eff } = args;
 
-function normStatus(s: any) {
-  return String(s ?? "").toLowerCase().trim();
+  if (delegateIdQuery) {
+    const allowed =
+      eff.isSuperAdmin ||
+      eff.has("actors.read") ||
+      eff.has("control_room.delegates.read");
+
+    if (!allowed) {
+      throw new Error("No autorizado para supervisión (actors.read)");
+    }
+    return delegateIdQuery;
+  }
+
+  return null;
 }
 
-export async function PUT(req: Request) {
+export async function POST(req: Request) {
   const r = await getActorFromRequest(req);
   if (!r.ok) return json(r.status, { ok: false, error: r.error });
 
-  const url = new URL(req.url);
-  const delegateIdQuery = url.searchParams.get("delegateId");
+  let stage = "init";
 
   try {
-    const delegateId = await resolveDelegateIdOrThrow({
-      supaRls: r.supaRls,
-      actor: r.actor,
-      delegateIdFromQuery: delegateIdQuery,
-    });
+    const url = new URL(req.url);
+    const delegateIdQuery = url.searchParams.get("delegateId");
 
-    const body = await req.json().catch(() => ({} as any));
-    const orderId = String(body?.order_id ?? body?.id ?? "").trim();
-    const status = normStatus(body?.status);
+    stage = "effective_permissions";
+    const eff = await getEffectivePermissionsByActorId(String(r.actor.id));
 
-    if (!orderId) return json(400, { ok: false, error: "order_id required" });
-    if (!status) return json(400, { ok: false, error: "status required" });
-    if (!ALLOWED.includes(status)) {
-      return json(400, { ok: false, error: `Invalid status. Allowed: ${ALLOWED.join(", ")}` });
+    stage = "authorize";
+    const allowed =
+      eff.isSuperAdmin ||
+      eff.has("orders.manage");
+
+    if (!allowed) {
+      return json(403, { ok: false, stage, error: "No autorizado (orders.manage)" });
     }
 
-    // 1) Comprobar ownership con RLS (si no lo puede ver, no lo puede tocar)
-    const { data: ord, error: oErr } = await r.supaRls
+    stage = "resolve_delegate";
+    const forcedDelegateId = pickDelegateIdOrThrow({ delegateIdQuery, eff });
+
+    const delegateId = forcedDelegateId
+      ? forcedDelegateId
+      : await resolveDelegateIdOrThrow({
+          supaRls: r.supaRls,
+          actor: r.actor,
+          delegateIdFromQuery: null,
+        });
+
+    stage = "body";
+    const body = await req.json().catch(() => ({} as any));
+    const order_id = String(body?.order_id ?? "").trim();
+    const status = String(body?.status ?? "").trim();
+
+    if (!order_id) {
+      return json(400, { ok: false, stage, error: "order_id required" });
+    }
+    if (!status) {
+      return json(400, { ok: false, stage, error: "status required" });
+    }
+
+    // Escritura controlada con SERVICE ROLE
+    stage = "update_status";
+    const { error } = await r.supaService
       .from("orders")
-      .select("id, delegate_id, status")
-      .eq("id", orderId)
-      .eq("delegate_id", delegateId)
-      .maybeSingle();
+      .update({ status })
+      .eq("id", order_id)
+      .eq("delegate_id", delegateId);
 
-    if (oErr) return json(500, { ok: false, error: oErr.message });
-    if (!ord) return json(404, { ok: false, error: "Order not found (or not in delegate scope)" });
+    if (error) {
+      return json(500, { ok: false, stage, error: error.message });
+    }
 
-    // 2) Update con SERVICE ROLE (escritura interna controlada)
-    const { data: updated, error: uErr } = await r.supaService
-      .from("orders")
-      .update({
-        status,
-        updated_by_actor_id: r.actor.id,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", orderId)
-      .select("id, status, updated_at")
-      .single();
-
-    if (uErr) return json(500, { ok: false, error: uErr.message });
-
-    return NextResponse.json({ ok: true, order: updated });
+    return NextResponse.json({
+      ok: true,
+      order_id,
+      status,
+    });
   } catch (e: any) {
-    return json(403, { ok: false, error: e?.message ?? "Forbidden" });
+    return json(500, {
+      ok: false,
+      stage,
+      error: e?.message ?? "Error actualizando estado del pedido",
+    });
   }
 }
