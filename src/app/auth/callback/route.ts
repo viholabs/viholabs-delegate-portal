@@ -1,24 +1,21 @@
+// src/app/auth/callback/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { entryForActor } from "@/lib/auth/roles";
 
 function safeNext(nextRaw: string | null) {
-  // Por defecto: super admin
-  const fallback = "/control-room/dashboard";
-
-  if (!nextRaw) return fallback;
-  if (!nextRaw.startsWith("/")) return fallback;
-  if (nextRaw.startsWith("//")) return fallback;
-
-  // Prohibimos / y /dashboard
-  if (nextRaw === "/" || nextRaw === "/dashboard") return fallback;
-
-  return nextRaw;
+  if (!nextRaw) return null;
+  const v = String(nextRaw).trim();
+  if (!v.startsWith("/")) return null;
+  if (v.startsWith("//")) return null;
+  if (v === "/" || v === "/dashboard") return null;
+  return v;
 }
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-
   const code = url.searchParams.get("code");
+
   if (!code) {
     const loginUrl = new URL("/login", url.origin);
     loginUrl.searchParams.set("error", "missing_code");
@@ -34,20 +31,34 @@ export async function GET(req: Request) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 🔥 DECISIÓN FINAL AQUÍ (sin depender de /dashboard)
   const { data } = await supabase.auth.getUser();
-  const email = (data?.user?.email ?? "").toLowerCase();
+  const user = data?.user;
 
-  const isSuperAdmin = email === "vila@viholabs.com";
-  const destination = isSuperAdmin ? "/control-room/dashboard" : "/delegate/dashboard";
+  if (!user) {
+    const loginUrl = new URL("/login", url.origin);
+    loginUrl.searchParams.set("error", "no_user");
+    return NextResponse.redirect(loginUrl);
+  }
 
-  // Si viene next válido y NO es /dashboard, lo respetamos (opcional)
+  const { data: actor, error: aErr } = await supabase
+    .from("actors")
+    .select("id, role, status, commission_level")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+
+  if (aErr || !actor || actor.status !== "active") {
+    const loginUrl = new URL("/login", url.origin);
+    loginUrl.searchParams.set("error", "no_actor");
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const destination = entryForActor({
+    role: actor.role,
+    commission_level: actor.commission_level,
+  });
+
   const next = safeNext(url.searchParams.get("next"));
   const finalUrl = next ? next : destination;
 
-  // Si next apuntaba a zona genérica, manda al destino por rol
-  const final =
-    finalUrl === "/dashboard" || finalUrl === "/" ? destination : finalUrl;
-
-  return NextResponse.redirect(new URL(final, url.origin));
+  return NextResponse.redirect(new URL(finalUrl, url.origin));
 }

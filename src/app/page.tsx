@@ -1,23 +1,13 @@
+// src/app/page.tsx
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { requireCurrentActor } from "@/lib/auth/current-actor";
+import { entryForActor } from "@/lib/auth/roles";
 
 export default async function RootPage() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getUser();
-
-  // Sin sesión → login
-  if (!data?.user) {
-    redirect("/login");
+  try {
+    const actor = await requireCurrentActor();
+    redirect(entryForActor({ role: actor.role, commission_level: actor.commission_level }));
+  } catch {
+    redirect("/login?error=no_actor");
   }
-
-  // 🔥 Decisión de rol CENTRAL
-  const email = (data.user.email ?? "").toLowerCase();
-
-  // Super Admin
-  if (email === "vila@viholabs.com") {
-    redirect("/control-room/dashboard");
-  }
-
-  // Delegate / resto
-  redirect("/delegate/dashboard");
 }
