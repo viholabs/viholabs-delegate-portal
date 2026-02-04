@@ -1,12 +1,18 @@
 // src/app/api/delegate/_utils.ts
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-export function json(status: number, body: any) {
+export function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
+
+type EffectivePerms = {
+  isSuperAdmin: boolean;
+  has: (perm: string) => boolean;
+};
 
 function getBearerToken(req: Request) {
   const h = req.headers.get("authorization") || req.headers.get("Authorization");
@@ -27,91 +33,133 @@ function getEnvOrThrow() {
   return { url, anon, service };
 }
 
+/**
+ * Cliente SERVICE ROLE: bypass RLS.
+ * Úsalo SOLO para tareas internas (lookup actor, escrituras internas auditadas, motores).
+ */
 export function getServiceClient() {
   const { url, service } = getEnvOrThrow();
   return createClient(url, service, { auth: { persistSession: false } });
 }
 
 /**
- * Lee actor (service role) a partir de un request con Authorization: Bearer <access_token>.
- * - Valida el token con ANON (auth.getUser(jwt))
- * - Consulta actor con SERVICE ROLE (bypass RLS)
- * - Fallback por email si actors.auth_user_id no está vinculado
+ * Cliente RLS: usa ANON + JWT del usuario para que apliquen policies RLS.
+ * Este es el cliente que deben usar los endpoints /api/delegate/* para leer datos.
+ */
+export function getRlsClientFromToken(token: string) {
+  const { url, anon } = getEnvOrThrow();
+  return createClient(url, anon, {
+    auth: { persistSession: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  });
+}
+
+/**
+ * Resuelve el actor a partir del JWT.
+ * - Valida token con ANON (auth.getUser)
+ * - Busca actor con SERVICE ROLE por auth_user_id (no por email)
+ * - Devuelve supaRls para el acceso a datos (RLS ON)
  */
 export async function getActorFromRequest(req: Request) {
   try {
     const token = getBearerToken(req);
     if (!token) return { ok: false as const, status: 401, error: "Missing Bearer token" };
 
-    const { url, anon, service } = getEnvOrThrow();
+    const { url, anon } = getEnvOrThrow();
 
     // 1) Validar JWT con ANON
     const supaAnon = createClient(url, anon, { auth: { persistSession: false } });
     const { data: uData, error: uErr } = await supaAnon.auth.getUser(token);
     const user = uData?.user;
+
     if (uErr || !user?.id) return { ok: false as const, status: 401, error: "Invalid token" };
 
     const authUserId = user.id;
-    const email = user.email ?? null;
 
-    // 2) DB con SERVICE ROLE
-    const supa = createClient(url, service, { auth: { persistSession: false } });
-
-    // 3) Buscar actor por auth_user_id
-    const { data: actor, error: aErr } = await supa
+    // 2) Lookup actor SOLO por auth_user_id (service role)
+    const supaService = getServiceClient();
+    const { data: actor, error: aErr } = await supaService
       .from("actors")
       .select("id, role, status, name, email, auth_user_id")
       .eq("auth_user_id", authUserId)
       .maybeSingle();
 
-    // Fallback por email si no está vinculado
-    if (aErr || !actor) {
-      if (!email) return { ok: false as const, status: 403, error: "Actor not found" };
-
-      const { data: actor2, error: a2Err } = await supa
-        .from("actors")
-        .select("id, role, status, name, email, auth_user_id")
-        .eq("email", email)
-        .maybeSingle();
-
-      if (a2Err) return { ok: false as const, status: 500, error: a2Err.message };
-      if (!actor2) return { ok: false as const, status: 403, error: "Actor not found" };
-      if (String(actor2.status ?? "").toLowerCase() !== "active") {
-        return { ok: false as const, status: 403, error: "Actor inactive" };
-      }
-
-      return { ok: true as const, supa, actor: actor2, authUserId };
-    }
+    if (aErr) return { ok: false as const, status: 500, error: aErr.message };
+    if (!actor) return { ok: false as const, status: 403, error: "Actor not found" };
 
     if (String(actor.status ?? "").toLowerCase() !== "active") {
       return { ok: false as const, status: 403, error: "Actor inactive" };
     }
 
-    return { ok: true as const, supa, actor, authUserId };
-  } catch (e: any) {
-    return { ok: false as const, status: 500, error: e?.message ?? "Server error" };
+    // 3) Cliente RLS para queries de negocio
+    const supaRls = getRlsClientFromToken(token);
+
+    return { ok: true as const, supaService, supaRls, actor, authUserId };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Server error";
+    return { ok: false as const, status: 500, error: msg };
   }
 }
 
-export async function resolveDelegateIdOrThrow(args: {
-  supa: any;
-  actor: { id: string; role: string };
+type ResolveDelegateArgs = {
+  supaRls: any;
+  actor: { id: string; role: string | null };
   delegateIdFromQuery?: string | null;
-}) {
-  const { supa, actor, delegateIdFromQuery } = args;
 
-  // Supervisión: admin/superadmin pueden “impersonar” delegateId
-  if (delegateIdFromQuery && (actor.role === "admin" || actor.role === "superadmin")) {
+  /**
+   * ✅ CANÓNICO (nuevo): si lo pasas, la “supervisión” se decide por permisos efectivos, NO por roles hardcoded.
+   * Mantiene compatibilidad: si no lo pasas, cae al comportamiento legacy por rol.
+   */
+  effectivePerms?: EffectivePerms | null;
+};
+
+/**
+ * Resolver delegate_id:
+ * - Self: delegates.actor_id = actor.id
+ * - Supervision/impersonation: solo si viene delegateIdFromQuery y el actor tiene permisos efectivos de supervisión
+ *
+ * IMPORTANTE:
+ * - Para queries de negocio usar supaRls (RLS ON).
+ * - Para tareas internas usar supaService.
+ */
+export async function resolveDelegateIdOrThrow(args: ResolveDelegateArgs) {
+  const { supaRls, actor, delegateIdFromQuery, effectivePerms } = args;
+
+  // ✅ Nuevo: supervisión por permisos (Biblia: NO roles hardcoded)
+  if (delegateIdFromQuery && effectivePerms) {
+    const canImpersonate =
+      effectivePerms.isSuperAdmin ||
+      effectivePerms.has("delegates.read") ||
+      effectivePerms.has("control_room.delegates.read") ||
+      effectivePerms.has("assignments.read");
+
+    if (canImpersonate) return delegateIdFromQuery;
+  }
+
+  // Legacy: compatibilidad (si aún hay endpoints antiguos que no pasan effectivePerms)
+  const role = String(actor.role ?? "").toUpperCase();
+  if (
+    delegateIdFromQuery &&
+    (role === "SUPER_ADMIN" ||
+      role === "ADMINISTRATIVE" ||
+      role === "COORDINATOR_COMMERCIAL" ||
+      role === "COORDINATOR_CECT")
+  ) {
     return delegateIdFromQuery;
   }
 
   // Delegate normal: delegates.actor_id = actor.id
-  const { data: d, error: dErr } = await supa
+  const { data: d, error: dErr } = await supaRls
     .from("delegates")
     .select("id, actor_id, active")
     .eq("actor_id", actor.id)
     .maybeSingle();
 
-  if (dErr || !d?.id) throw new Error("Delegate not found for actor");
+  if (dErr) throw new Error(dErr.message);
+  if (!d?.id) throw new Error("Delegate not found for actor");
   return d.id as string;
 }

@@ -24,12 +24,12 @@ export async function GET(req: Request) {
 
   try {
     const delegateId = await resolveDelegateIdOrThrow({
-      supa: r.supa,
+      supaRls: r.supaRls,
       actor: r.actor,
       delegateIdFromQuery: delegateIdQuery,
     });
 
-    let q = r.supa
+    let q = r.supaRls
       .from("invoices")
       .select(
         `

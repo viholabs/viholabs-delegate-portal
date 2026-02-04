@@ -1,8 +1,36 @@
 // src/app/api/delegate/clients/route.ts
+
 import { NextResponse } from "next/server";
 import { getActorFromRequest, json, resolveDelegateIdOrThrow } from "../_utils";
 
 export const runtime = "nodejs";
+
+type RpcPermRow = { perm_code: string | null };
+
+function normalizePermCode(v: unknown) {
+  return String(v ?? "").trim();
+}
+
+async function getPermsOrThrow(supaService: any, actorId: string) {
+  const { data, error } = await supaService.rpc("effective_permissions", {
+    p_actor_id: actorId,
+  });
+
+  if (error) throw new Error(`effective_permissions failed: ${error.message}`);
+
+  const rows = (data ?? []) as RpcPermRow[];
+  const codes = rows
+    .map((r) => normalizePermCode(r?.perm_code))
+    .filter((x) => x.length > 0);
+
+  const isSuperAdmin = codes.includes("*");
+  const perms = new Set<string>(codes);
+
+  return {
+    isSuperAdmin,
+    has: (perm: string) => (isSuperAdmin ? true : perms.has(perm)),
+  };
+}
 
 function normalize(s: string) {
   return (s ?? "")
@@ -12,7 +40,7 @@ function normalize(s: string) {
     .trim();
 }
 
-function toNum(v: any, fallback = 0) {
+function toNum(v: unknown, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
@@ -26,13 +54,26 @@ export async function GET(req: Request) {
   const q = (url.searchParams.get("q") ?? "").trim();
 
   try {
+    const eff = await getPermsOrThrow(r.supaService, r.actor.id);
+
+    // Autorización canónica: lectura de clientes
+    const allowed =
+      eff.isSuperAdmin ||
+      eff.has("clients.read") ||
+      eff.has("clients.manage");
+
+    if (!allowed) {
+      return json(403, { ok: false, error: "No autorizado (clients.read)" });
+    }
+
     const delegateId = await resolveDelegateIdOrThrow({
-      supa: r.supa,
+      supaRls: r.supaRls,
       actor: r.actor,
       delegateIdFromQuery: delegateIdQuery,
+      effectivePerms: eff,
     });
 
-    let query = r.supa
+    let query = r.supaRls
       .from("clients")
       .select("id, name, tax_id, contact_email, contact_phone, status, profile_type")
       .eq("delegate_id", delegateId)
@@ -40,10 +81,9 @@ export async function GET(req: Request) {
       .limit(20);
 
     if (q) {
-      const nq = normalize(q);
-      query = query.or(
-        `name.ilike.%${q}%,tax_id.ilike.%${q}%`
-      );
+      const _nq = normalize(q);
+      // Búsqueda simple (ilike) — RLS ya limita por delegate_id
+      query = query.or(`name.ilike.%${_nq}%,tax_id.ilike.%${_nq}%`);
     }
 
     const { data, error } = await query;
@@ -53,8 +93,9 @@ export async function GET(req: Request) {
       ok: true,
       items: data ?? [],
     });
-  } catch (e: any) {
-    return json(403, { ok: false, error: e?.message ?? "Forbidden" });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Forbidden";
+    return json(403, { ok: false, error: msg });
   }
 }
 
@@ -66,25 +107,37 @@ export async function POST(req: Request) {
   const delegateIdQuery = url.searchParams.get("delegateId");
 
   try {
+    const eff = await getPermsOrThrow(r.supaService, r.actor.id);
+
+    // Autorización canónica: creación/gestión de clientes
+    const allowed =
+      eff.isSuperAdmin ||
+      eff.has("clients.manage");
+
+    if (!allowed) {
+      return json(403, { ok: false, error: "No autorizado (clients.manage)" });
+    }
+
     const delegateId = await resolveDelegateIdOrThrow({
-      supa: r.supa,
+      supaRls: r.supaRls,
       actor: r.actor,
       delegateIdFromQuery: delegateIdQuery,
+      effectivePerms: eff,
     });
 
-    const body = await req.json().catch(() => ({} as any));
+    const body = (await req.json().catch(() => ({} as Record<string, unknown>))) ?? {};
 
     const name = String(body?.name ?? "").trim();
     const tax_id = String(body?.tax_id ?? "").trim();
     const contact_email = body?.contact_email ? String(body.contact_email) : null;
     const contact_phone = body?.contact_phone ? String(body.contact_phone) : null;
-    const profile_type = body?.profile_type === "client" ? "client" : "client";
+    const profile_type = "client";
 
     if (!name) return json(400, { ok: false, error: "name required" });
     if (!tax_id) return json(400, { ok: false, error: "tax_id required" });
 
-    // Crear cliente
-    const { data: client, error: cErr } = await r.supa
+    // Crear cliente (SERVICE ROLE: escritura interna controlada)
+    const { data: client, error: cErr } = await r.supaService
       .from("clients")
       .insert({
         name,
@@ -100,7 +153,7 @@ export async function POST(req: Request) {
 
     if (cErr) return json(500, { ok: false, error: cErr.message });
 
-    // Recomendación (opcional)
+    // Recomendación (opcional) — se mantiene tal cual estaba (solo añadimos seguridad arriba)
     const recommender_client_id = body?.recommender_client_id
       ? String(body.recommender_client_id)
       : null;
@@ -108,18 +161,23 @@ export async function POST(req: Request) {
     if (recommender_client_id) {
       const percentage = toNum(body?.percentage, 7);
 
-      await r.supa.from("client_recommendations").insert({
+      const { error: recErr } = await r.supaService.from("client_recommendations").insert({
         recommender_client_id,
         referred_client_id: client.id,
         percentage,
         active: true,
-        mode: "delegate",
-        delegate_id: delegateId,
+        // ⚠️ Dejamos campos legacy tal como estaban en tu dump para no abrir melón de schema ahora.
+        // Si el schema final difiere, lo ajustamos en un paso posterior y controlado.
+        mode: "delegate" as any,
+        delegate_id: delegateId as any,
       });
+
+      if (recErr) return json(500, { ok: false, error: recErr.message });
     }
 
     return NextResponse.json({ ok: true, client });
-  } catch (e: any) {
-    return json(500, { ok: false, error: e?.message ?? "Error creando cliente" });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Error creando cliente";
+    return json(500, { ok: false, error: msg });
   }
 }

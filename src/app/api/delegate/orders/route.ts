@@ -113,12 +113,12 @@ export async function GET(req: Request) {
 
   try {
     const delegateId = await resolveDelegateIdOrThrow({
-      supa: r.supa,
+      supaRls: r.supaRls,
       actor: r.actor,
       delegateIdFromQuery: delegateIdQuery,
     });
 
-    let q = r.supa
+    let q = r.supaRls
       .from("orders")
       .select("id, created_at, order_date, status, client_id, delegate_id, shipping_tracking_code, invoiced, paid, source")
       .eq("delegate_id", delegateId)
@@ -145,7 +145,7 @@ export async function POST(req: Request) {
 
   try {
     const delegateId = await resolveDelegateIdOrThrow({
-      supa: r.supa,
+      supaRls: r.supaRls,
       actor: r.actor,
       delegateIdFromQuery: delegateIdQuery,
     });
@@ -178,17 +178,28 @@ export async function POST(req: Request) {
       return json(400, { ok: false, error: "Debe haber al menos 1 item (venta o FOC)" });
     }
 
-    // Cargar cliente (y verificar que exista)
-    const { data: client, error: cErr } = await r.supa
+    // 1) Cargar cliente con RLS + verificar ownership (tiene que ser del delegate)
+    const { data: client, error: cErr } = await r.supaRls
       .from("clients")
-      .select("id, name, tax_id, contact_email, contact_phone")
+      .select("id, name, tax_id, contact_email, contact_phone, delegate_id")
       .eq("id", client_id)
+      .eq("delegate_id", delegateId)
       .maybeSingle();
 
-    if (cErr || !client) return json(400, { ok: false, error: "Client not found" });
+    if (cErr) return json(500, { ok: false, error: cErr.message });
+    if (!client) return json(400, { ok: false, error: "Client not found (or not owned by delegate)" });
 
-    // Crear pedido
-    const { data: order, error: oErr } = await r.supa
+    // 2) Resolver nombres de producto (para email) con RLS
+    const allPids = Array.from(new Set([...sale.map((x) => x.product_id), ...foc.map((x) => x.product_id)]));
+    const nameById = new Map<string, string>();
+    if (allPids.length) {
+      const { data: prodRows, error: pErr } = await r.supaRls.from("products").select("id, name").in("id", allPids);
+      if (pErr) return json(500, { ok: false, error: pErr.message });
+      for (const p of prodRows ?? []) nameById.set(String((p as any).id), String((p as any).name ?? "Producto"));
+    }
+
+    // 3) Crear pedido (SERVICE ROLE: escritura interna controlada)
+    const { data: order, error: oErr } = await r.supaService
       .from("orders")
       .insert({
         delegate_id: delegateId,
@@ -196,32 +207,24 @@ export async function POST(req: Request) {
         created_by_actor_id: r.actor.id,
         status: "pending" as OrderStatus,
         source: "portal",
+        notes,
       })
       .select("id, status, created_at")
       .single();
 
     if (oErr) return json(500, { ok: false, error: oErr.message });
 
-    // Resolver nombres de producto (para email)
-    const allPids = Array.from(new Set([...sale.map((x) => x.product_id), ...foc.map((x) => x.product_id)]));
-    const nameById = new Map<string, string>();
-    if (allPids.length) {
-      const { data: prodRows } = await r.supa.from("products").select("id, name").in("id", allPids);
-      for (const p of prodRows ?? []) nameById.set(String((p as any).id), String((p as any).name ?? "Producto"));
-    }
-
-    // Items: venta a precio ref (31) y FOC a 0
+    // 4) Items: venta a precio ref (31) y FOC a 0
     const REF_PRICE = 31;
-
     const itemsToInsert = [
       ...sale.map((x) => ({ order_id: order.id, product_id: x.product_id, units: x.units, unit_price: REF_PRICE })),
       ...foc.map((x) => ({ order_id: order.id, product_id: x.product_id, units: x.units, unit_price: 0 })),
     ];
 
-    const { error: iErr } = await r.supa.from("order_items").insert(itemsToInsert);
+    const { error: iErr } = await r.supaService.from("order_items").insert(itemsToInsert);
     if (iErr) return json(500, { ok: false, error: iErr.message });
 
-    // Email (no bloquea el pedido si falla)
+    // 5) Email (no bloquea el pedido si falla)
     let emailRes: any = null;
     try {
       emailRes = await sendOrderEmail({

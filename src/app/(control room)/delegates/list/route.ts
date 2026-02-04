@@ -1,5 +1,6 @@
+// src/app/(control room)/delegates/list/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getActorFromRequest } from "@/app/api/delegate/_utils";
 
 export const runtime = "nodejs";
 
@@ -7,58 +8,31 @@ function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
-function getBearerToken(req: Request) {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!h) return null;
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
-}
-
-function createAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Faltan NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false } });
-}
-
 export async function POST(req: Request) {
   let stage = "init";
 
   try {
-    stage = "auth_token";
-    const token = getBearerToken(req);
-    if (!token) return json(401, { ok: false, stage, error: "Falta Authorization Bearer token" });
+    // 1) Auth + actor + cliente RLS
+    stage = "actor_from_request";
+    const ar = await getActorFromRequest(req);
+    if (!ar.ok) return json(ar.status, { ok: false, stage, error: ar.error });
 
-    stage = "supabase_admin";
-    const supabase = createAdminClient();
+    const { actor, supaRls } = ar;
 
-    stage = "auth_get_user";
-    const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userRes?.user?.id) {
-      return json(401, { ok: false, stage, error: "Sesión inválida" });
-    }
+    // 2) Autorización (temporal por rol, hasta que tengamos requirePermission global)
+    stage = "authorize";
+    const role = String(actor.role ?? "").toUpperCase();
+    const allowed =
+      role === "SUPER_ADMIN" ||
+      role === "ADMINISTRATIVE" ||
+      role === "COORDINATOR_COMMERCIAL" ||
+      role === "COORDINATOR_CECT";
 
-    const userId = userRes.user.id;
+    if (!allowed) return json(403, { ok: false, stage, error: "No autorizado" });
 
-    stage = "actor_lookup";
-    const { data: actor, error: actorErr } = await supabase
-      .from("actors")
-      .select("id, role, name, email, status")
-      .eq("auth_user_id", userId)
-      .maybeSingle();
-
-    if (actorErr) return json(500, { ok: false, stage, error: actorErr.message });
-    if (!actor?.id) return json(403, { ok: false, stage, error: "Actor no encontrado" });
-    if (String(actor.status || "").toLowerCase() === "inactive") {
-      return json(403, { ok: false, stage, error: "Actor inactivo" });
-    }
-
-    const role = String(actor.role ?? "").toLowerCase();
-    const isAdmin = role === "admin" || role === "super_admin" || role === "superadmin";
-    if (!isAdmin) return json(403, { ok: false, stage, error: "No autorizado" });
-
+    // 3) Lectura con RLS (la BD decide qué delegates puede ver este actor)
     stage = "delegates_select";
-    const { data: rows, error: dErr } = await supabase
+    const { data: rows, error: dErr } = await supaRls
       .from("delegates")
       .select("id, name, email")
       .order("name", { ascending: true });
@@ -67,7 +41,7 @@ export async function POST(req: Request) {
 
     return json(200, {
       ok: true,
-      actor: { id: actor.id, role: actor.role, name: actor.name ?? null },
+      actor: { id: actor.id, role: actor.role, name: (actor as any).name ?? null },
       delegates: Array.isArray(rows) ? rows : [],
     });
   } catch (e: any) {

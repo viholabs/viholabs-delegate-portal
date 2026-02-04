@@ -38,11 +38,7 @@ function fmtEUR(n: number | null | undefined) {
 }
 
 function badgePaid(isPaid: boolean) {
-  return isPaid ? (
-    <Badge className="bg-success text-white">Pagada</Badge>
-  ) : (
-    <Badge className="bg-muted text-white">No pagada</Badge>
-  );
+  return isPaid ? <Badge className="bg-success text-white">Pagada</Badge> : <Badge className="bg-muted text-white">No pagada</Badge>;
 }
 
 function badgeChannel(ch?: string | null) {
@@ -54,22 +50,27 @@ function badgeChannel(ch?: string | null) {
 }
 
 export default function InvoicesPage() {
-  const supabase = useMemo(() => createClient(), []);
+  // ✅ FIX TS18048: createClient() tipado como SupabaseClient | undefined en tu repo
+  const supabase = useMemo(() => createClient()!, []);
 
-  // ✅ Mes estándar: YYYY-MM (como importación / dashboard)
   const [month, setMonth] = useState<string>("2026-01");
   const [q, setQ] = useState<string>("");
 
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [delegates, setDelegates] = useState<DelegateLite[]>([]);
   const [rows, setRows] = useState<InvoiceRow[]>([]);
 
+  // draft por fila (edición)
   const [draft, setDraft] = useState<
     Record<string, { is_paid: boolean; source_channel: string; delegate_id: string | ""; apply_delegate_to_client: boolean }>
   >({});
+
+  // selección de filas
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
 
   async function getAccessTokenOrThrow() {
     const { data, error } = await supabase.auth.getSession();
@@ -104,13 +105,10 @@ export default function InvoicesPage() {
     setError(null);
 
     try {
-      if (!/^\d{4}-\d{2}$/.test(month)) {
-        throw new Error("Mes inválido. Debe ser YYYY-MM (ej: 2026-01)");
-      }
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("Mes inválido. Debe ser YYYY-MM (ej: 2026-01)");
 
       const token = await getAccessTokenOrThrow();
 
-      // ✅ 405 FIX: usar GET (no POST) en /api/control-room/invoices
       const url = new URL("/api/control-room/invoices", window.location.origin);
       url.searchParams.set("month", month);
       if (q?.trim()) url.searchParams.set("q", q.trim());
@@ -129,7 +127,7 @@ export default function InvoicesPage() {
             invoice_number: String(x.invoice_number ?? "—"),
             invoice_date: x.invoice_date ? String(x.invoice_date) : null,
             client_id: x.client_id ? String(x.client_id) : null,
-            client_name: x.client_name ? String(x.client_name) : null,
+            client_name: x.client_name ? String(x.client_name) : (x.clients?.name ? String(x.clients.name) : null),
             delegate_id: x.delegate_id ? String(x.delegate_id) : null,
             is_paid: !!x.is_paid,
             paid_date: x.paid_date ? String(x.paid_date) : null,
@@ -145,7 +143,9 @@ export default function InvoicesPage() {
 
       setRows(list);
 
+      // inicializar draft
       const d: any = {};
+      const sel: any = {};
       for (const r of list) {
         d[r.id] = {
           is_paid: !!r.is_paid,
@@ -153,14 +153,42 @@ export default function InvoicesPage() {
           delegate_id: r.delegate_id ? String(r.delegate_id) : "",
           apply_delegate_to_client: false,
         };
+        sel[r.id] = false;
       }
       setDraft(d);
+      setSelected(sel);
     } catch (e: any) {
       setError(e?.message ?? "Error cargando facturas");
     } finally {
       setLoading(false);
     }
   }
+
+  // detectar filas cambiadas (dirty)
+  const dirtyIds = useMemo(() => {
+    const out: string[] = [];
+    for (const r of rows) {
+      const d = draft[r.id];
+      if (!d) continue;
+
+      const base_delegate = r.delegate_id ? String(r.delegate_id) : "";
+      const base_channel = String(r.source_channel ?? "unknown") || "unknown";
+      const base_paid = !!r.is_paid;
+
+      if (
+        !!d.is_paid !== base_paid ||
+        String(d.source_channel || "unknown") !== base_channel ||
+        String(d.delegate_id || "") !== base_delegate
+      ) {
+        out.push(r.id);
+      }
+    }
+    return out;
+  }, [rows, draft]);
+
+  const selectedIds = useMemo(() => Object.keys(selected).filter((id) => selected[id]), [selected]);
+
+  const allSelected = useMemo(() => rows.length > 0 && selectedIds.length === rows.length, [rows.length, selectedIds.length]);
 
   async function saveRow(id: string) {
     setSavingId(id);
@@ -194,6 +222,51 @@ export default function InvoicesPage() {
     }
   }
 
+  async function bulkSave(ids: string[]) {
+    setBulkSaving(true);
+    setError(null);
+
+    try {
+      if (!ids.length) throw new Error("No hay filas para guardar");
+
+      const token = await getAccessTokenOrThrow();
+
+      const updates = ids.map((id) => {
+        const d = draft[id];
+        if (!d) return null;
+        return {
+          invoice_id: id,
+          is_paid: !!d.is_paid,
+          source_channel: d.source_channel || "unknown",
+          delegate_id: d.delegate_id ? d.delegate_id : null,
+          apply_delegate_to_client: !!d.apply_delegate_to_client,
+        };
+      }).filter(Boolean);
+
+      const res = await fetch("/api/control-room/invoices/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ updates }),
+      });
+
+      const j = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(j?.error || `Error ${res.status}`);
+
+      if (!j?.ok) {
+        // mostramos resumen pero recargamos igual
+        const summary = j?.summary ? ` (${j.summary.ok}/${j.summary.total} ok, ${j.summary.errors} errores)` : "";
+        throw new Error(`Guardado parcial${summary}. Mira results en consola.`);
+      }
+
+      await loadInvoices();
+    } catch (e: any) {
+      setError(e?.message ?? "Error guardando en bloque");
+      // Tip: si hubo “ok parcial”, la UI ya te indica; recarga manual si quieres.
+    } finally {
+      setBulkSaving(false);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -209,10 +282,7 @@ export default function InvoicesPage() {
   const totals = useMemo(() => {
     const paid = rows.filter((r) => r.is_paid).length;
     const unpaid = rows.length - paid;
-
-    // ✅ Negocio: neto producto vendido
     const totalNet = rows.reduce((acc, r) => acc + (Number(r.total_net) || 0), 0);
-
     return { paid, unpaid, totalNet };
   }, [rows]);
 
@@ -255,40 +325,80 @@ export default function InvoicesPage() {
           <CardTitle className="text-base">Filtros</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col gap-3 md:flex-row md:items-end">
-            <div className="flex flex-col gap-1">
-              <div className="text-xs text-text-soft">Mes (YYYY-MM)</div>
-              <input
-                type="month"
-                className="h-10 w-[180px] rounded-md border px-3"
-                value={month}
-                onChange={(e) => setMonth(e.target.value)}
-              />
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end">
+              <div className="flex flex-col gap-1">
+                <div className="text-xs text-text-soft">Mes (YYYY-MM)</div>
+                <input
+                  type="month"
+                  className="h-10 w-[180px] rounded-md border px-3"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <div className="text-xs text-text-soft">Buscar (nº factura o cliente)</div>
+                <input
+                  className="h-10 w-[320px] rounded-md border px-3"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="F260001 o Ivette"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Button onClick={loadInvoices} disabled={loading}>
+                  {loading ? "Cargando..." : "Aplicar"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setQ("")}
+                  disabled={loading}
+                >
+                  Limpiar
+                </Button>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <div className="text-xs text-text-soft">Buscar (nº factura o cliente)</div>
-              <input
-                className="h-10 w-[320px] rounded-md border px-3"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="F260001 o Ivette"
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <Button onClick={loadInvoices} disabled={loading}>
-                {loading ? "Cargando..." : "Aplicar"}
-              </Button>
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 onClick={() => {
-                  setQ("");
-                  // no auto-load; tú decides pulsar Aplicar
+                  const next: any = {};
+                  for (const r of rows) next[r.id] = true;
+                  setSelected(next);
                 }}
-                disabled={loading}
+                disabled={loading || rows.length === 0}
               >
-                Limpiar búsqueda
+                Seleccionar todo
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const next: any = {};
+                  for (const r of rows) next[r.id] = false;
+                  setSelected(next);
+                }}
+                disabled={loading || rows.length === 0}
+              >
+                Deseleccionar
+              </Button>
+
+              <Button
+                onClick={() => bulkSave(selectedIds)}
+                disabled={bulkSaving || loading || selectedIds.length === 0}
+              >
+                {bulkSaving ? "Guardando..." : `Guardar seleccionados (${selectedIds.length})`}
+              </Button>
+
+              <Button
+                variant="secondary"
+                onClick={() => bulkSave(dirtyIds)}
+                disabled={bulkSaving || loading || dirtyIds.length === 0}
+              >
+                {bulkSaving ? "Guardando..." : `Guardar cambios (${dirtyIds.length})`}
               </Button>
             </div>
           </div>
@@ -308,10 +418,23 @@ export default function InvoicesPage() {
 
         <CardContent>
           <div className="w-full overflow-x-auto">
-            <div className="min-w-[1200px]">
+            <div className="min-w-[1320px]">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[60px] text-center">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          const next: any = {};
+                          for (const r of rows) next[r.id] = checked;
+                          setSelected(next);
+                        }}
+                        aria-label="Seleccionar todo"
+                      />
+                    </TableHead>
                     <TableHead className="w-[180px]">Factura</TableHead>
                     <TableHead className="w-[120px]">Fecha</TableHead>
                     <TableHead className="w-[260px]">Cliente</TableHead>
@@ -332,11 +455,30 @@ export default function InvoicesPage() {
                       apply_delegate_to_client: false,
                     };
 
+                    const isDirty = dirtyIds.includes(r.id);
+
                     return (
                       <TableRow key={r.id}>
+                        <TableCell className="align-top text-center">
+                          <input
+                            type="checkbox"
+                            checked={!!selected[r.id]}
+                            onChange={(e) =>
+                              setSelected((prev) => ({ ...prev, [r.id]: e.target.checked }))
+                            }
+                            aria-label={`Seleccionar ${r.invoice_number}`}
+                          />
+                          {isDirty ? (
+                            <div className="mt-1 text-[10px] text-text-soft">cambio</div>
+                          ) : null}
+                        </TableCell>
+
                         <TableCell className="align-top">
                           <div className="font-medium">{r.invoice_number}</div>
-                          <div className="mt-1 max-w-[170px] truncate text-xs text-text-soft" title={r.source_filename ?? ""}>
+                          <div
+                            className="mt-1 max-w-[170px] truncate text-xs text-text-soft"
+                            title={r.source_filename ?? ""}
+                          >
                             {r.source_filename ?? "—"}
                           </div>
                         </TableCell>
@@ -422,7 +564,7 @@ export default function InvoicesPage() {
                         <TableCell className="align-top text-right whitespace-nowrap">{fmtEUR(r.total_net)}</TableCell>
 
                         <TableCell className="align-top text-right">
-                          <Button onClick={() => saveRow(r.id)} disabled={savingId === r.id || loading}>
+                          <Button onClick={() => saveRow(r.id)} disabled={savingId === r.id || loading || bulkSaving}>
                             {savingId === r.id ? "Guardando..." : "Guardar"}
                           </Button>
                         </TableCell>
@@ -432,7 +574,7 @@ export default function InvoicesPage() {
 
                   {rows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="py-10 text-center text-sm text-text-soft">
+                      <TableCell colSpan={9} className="py-10 text-center text-sm text-text-soft">
                         No hay facturas con estos filtros.
                       </TableCell>
                     </TableRow>
@@ -443,7 +585,7 @@ export default function InvoicesPage() {
           </div>
 
           <div className="mt-3 text-xs text-text-soft">
-            Tip: si no ves la derecha, desplázate horizontalmente en la tabla.
+            Tip: usa “Guardar cambios” para lo que has modificado, o “Guardar seleccionados” si quieres forzar un lote.
           </div>
         </CardContent>
       </Card>

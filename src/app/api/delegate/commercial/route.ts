@@ -1,5 +1,6 @@
+// src/app/api/delegate/commercial/route.ts
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getActorFromRequest, resolveDelegateIdOrThrow } from "@/app/api/delegate/_utils";
 
 export const runtime = "nodejs";
 
@@ -9,13 +10,6 @@ function json(status: number, body: any) {
 
 function isValidMonthYYYYMM01(value: string) {
   return /^\d{4}-\d{2}-01$/.test(value);
-}
-
-function getBearerToken(req: NextRequest): string | null {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!h) return null;
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
 }
 
 function toNum(v: any, fallback = 0): number {
@@ -41,44 +35,11 @@ function monthRange(month01: string) {
   };
 }
 
-async function getUserFromTokenOrThrow(url: string, anonKey: string, token: string) {
-  const supaAuth = createClient(url, anonKey, {
-    auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-
-  const { data, error } = await supaAuth.auth.getUser();
-  if (error) throw new Error(error.message);
-  if (!data?.user?.id) throw new Error("Usuario no autenticado");
-  return data.user;
-}
-
-async function getActorByAuthUserIdOrThrow(supaSvc: any, authUserId: string) {
-  const { data: actor, error: actorErr } = await supaSvc
-    .from("actors")
-    .select("id, role, status, name, email, auth_user_id")
-    .eq("auth_user_id", authUserId)
-    .maybeSingle();
-
-  if (actorErr) throw new Error(actorErr.message);
-  if (!actor?.id) throw new Error("Actor no encontrado");
-  if (String(actor.status ?? "") !== "active") throw new Error("Actor inactivo");
-  return actor;
-}
-
 export async function POST(req: NextRequest) {
   const stageBase = "api/delegate/commercial";
   let stage = stageBase;
 
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!url || !anon || !service) {
-      return json(500, { ok: false, stage: `${stageBase}:env`, error: "Faltan variables de entorno" });
-    }
-
     const body = await req.json().catch(() => null);
     const month = String(body?.month ?? "");
     const delegate_id_input = body?.delegate_id ? String(body.delegate_id) : null;
@@ -87,110 +48,75 @@ export async function POST(req: NextRequest) {
       return json(422, { ok: false, stage: `${stageBase}:input`, error: "month inválido (YYYY-MM-01)" });
     }
 
-    const token = getBearerToken(req);
-    if (!token) {
-      return json(401, { ok: false, stage: `${stageBase}:auth`, error: "Falta Authorization Bearer token" });
-    }
+    // 1) Actor + clientes supabase (RLS + Service) desde _utils
+    const ar = await getActorFromRequest(req);
+    if (!ar.ok) return json(ar.status, { ok: false, stage: `${stageBase}:auth`, error: ar.error });
 
-    const user = await getUserFromTokenOrThrow(url, anon, token);
-    const supabase = createClient(url, service, { auth: { persistSession: false } });
-    const actor = await getActorByAuthUserIdOrThrow(supabase, user.id);
+    const { actor, supaRls } = ar;
 
-    // Resolver delegate
+    // 2) Resolver delegateId (self o supervision)
     stage = "resolve_delegate";
-    let mode: "self" | "supervision" = "self";
-    let delegate: any = null;
+    const delegateId = await resolveDelegateIdOrThrow({
+      supaRls,
+      actor,
+      delegateIdFromQuery: delegate_id_input,
+    });
 
-    if (delegate_id_input) {
-      mode = "supervision";
-      if (!["admin", "superadmin"].includes(String(actor.role ?? ""))) {
-        return json(403, { ok: false, stage, error: "No autorizado para modo supervisión" });
-      }
-      const { data, error } = await supabase
-        .from("delegates")
-        .select("id, actor_id, name, email, created_at")
-        .eq("id", delegate_id_input)
-        .maybeSingle();
+    const mode: "self" | "supervision" = delegate_id_input ? "supervision" : "self";
 
-      if (error) return json(500, { ok: false, stage, error: error.message });
-      if (!data?.id) return json(404, { ok: false, stage, error: "Delegate no encontrado" });
-      delegate = data;
-    } else {
-      if (["admin", "superadmin"].includes(String(actor.role ?? ""))) {
-        return json(422, {
-          ok: false,
-          stage,
-          error: "Modo supervisión: falta delegate_id. Entra con /delegate/dashboard?delegateId=UUID",
-        });
-      }
-
-      const { data, error } = await supabase
-        .from("delegates")
-        .select("id, actor_id, name, email, created_at")
-        .eq("actor_id", actor.id)
-        .maybeSingle();
-
-      if (error) return json(500, { ok: false, stage, error: error.message });
-      if (!data?.id) return json(404, { ok: false, stage, error: "Delegate no encontrado para este actor" });
-      delegate = data;
-    }
-
-    // Clientes del delegate
+    // 3) Cargar clientes del delegado (RLS filtra)
     stage = "clients";
-    const { data: clientsRows, error: cErr } = await supabase
+    const clientsRes = await supaRls
       .from("clients")
       .select("id, name, contact_email, delegate_id")
-      .eq("delegate_id", delegate.id);
+      .eq("delegate_id", delegateId);
 
-    if (cErr) return json(500, { ok: false, stage, error: cErr.message });
+    if (clientsRes.error) return json(500, { ok: false, stage, error: clientsRes.error.message });
 
-    const clientIds = (clientsRows ?? []).map((c: any) => String(c.id)).filter(Boolean);
+    const clientsRows = clientsRes.data ?? [];
+    const clientIds = clientsRows.map((c: any) => String(c.id)).filter(Boolean);
 
-    const applyOwnershipFilter = (q: any) => {
-      if (clientIds.length > 0) {
-        const inList = `(${clientIds.join(",")})`;
-        return q.or(`delegate_id.eq.${delegate.id},client_id.in.${inList}`);
-      }
-      return q.eq("delegate_id", delegate.id);
-    };
-
-    // Facturas del mes
+    // 4) Facturas del mes (dos estrategias: por fecha y por source_month), siempre RLS
     stage = "invoices_month";
     const { startISO, endISO } = monthRange(month);
     const monthKey = month.slice(0, 7);
 
-    const byDateBase = supabase
-      .from("invoices")
-      .select("id, is_paid, invoice_date, client_id, total_net, delegate_id, source_month")
-      .gte("invoice_date", startISO)
-      .lt("invoice_date", endISO);
-
-    const bySourceBase = supabase
-      .from("invoices")
-      .select("id, is_paid, invoice_date, client_id, total_net, delegate_id, source_month")
-      .eq("source_month", monthKey);
-
-    const [byDateRes, bySourceRes] = await Promise.all([
-      applyOwnershipFilter(byDateBase),
-      applyOwnershipFilter(bySourceBase),
-    ]);
-
-    if (byDateRes.error) return json(500, { ok: false, stage, error: byDateRes.error.message });
-    if (bySourceRes.error) return json(500, { ok: false, stage, error: bySourceRes.error.message });
-
     const invMap = new Map<string, any>();
-    for (const inv of byDateRes.data ?? []) invMap.set(String(inv.id), inv);
-    for (const inv of bySourceRes.data ?? []) invMap.set(String(inv.id), inv);
+
+    // 4a) Por fecha: preferimos por client_id (más robusto si delegate_id faltase)
+    if (clientIds.length > 0) {
+      const invByDate = await supaRls
+        .from("invoices")
+        .select("id, is_paid, invoice_date, client_id, total_net, delegate_id, source_month")
+        .gte("invoice_date", startISO)
+        .lt("invoice_date", endISO)
+        .in("client_id", clientIds);
+
+      if (invByDate.error) return json(500, { ok: false, stage, error: invByDate.error.message });
+      for (const inv of invByDate.data ?? []) invMap.set(String(inv.id), inv);
+    }
+
+    // 4b) Por source_month (fallback para casos con invoice_date rara)
+    if (clientIds.length > 0) {
+      const invBySource = await supaRls
+        .from("invoices")
+        .select("id, is_paid, invoice_date, client_id, total_net, delegate_id, source_month")
+        .eq("source_month", monthKey)
+        .in("client_id", clientIds);
+
+      if (invBySource.error) return json(500, { ok: false, stage, error: invBySource.error.message });
+      for (const inv of invBySource.data ?? []) invMap.set(String(inv.id), inv);
+    }
+
     const invoicesMonth = Array.from(invMap.values());
-
+    const allInvoiceIds = invoicesMonth.map((x: any) => String(x.id)).filter(Boolean);
     const paidInvoiceIds = invoicesMonth.filter((x: any) => !!x.is_paid).map((x: any) => String(x.id));
-    const allInvoiceIds = invoicesMonth.map((x: any) => String(x.id));
 
-    // Items
+    // 5) Items del mes (para unidades vendidas)
     stage = "items_month";
     let itemsMonth: any[] = [];
     if (allInvoiceIds.length > 0) {
-      const itemsRes = await supabase
+      const itemsRes = await supaRls
         .from("invoice_items")
         .select("invoice_id, units, line_type")
         .in("invoice_id", allInvoiceIds);
@@ -201,10 +127,11 @@ export async function POST(req: NextRequest) {
 
     const paidSet = new Set<string>(paidInvoiceIds);
 
-    // Top clients (por ventas cobradas)
+    // 6) Top clients (ventas cobradas + unidades cobradas)
     stage = "top_clients";
     const byClient = new Map<string, { units: number; base: number; invoices: number; last: string | null }>();
 
+    // 6a) Base e invoices por cliente (solo cobradas)
     for (const inv of invoicesMonth) {
       if (!inv.client_id) continue;
       const cid = String(inv.client_id);
@@ -219,6 +146,7 @@ export async function POST(req: NextRequest) {
       byClient.set(cid, prev);
     }
 
+    // 6b) Unidades vendidas por cliente (solo items sale y solo facturas cobradas)
     for (const it of itemsMonth) {
       const invId = String(it.invoice_id ?? "");
       if (!invId || !paidSet.has(invId)) continue;
@@ -235,6 +163,7 @@ export async function POST(req: NextRequest) {
     }
 
     const clientsById = new Map<string, any>((clientsRows ?? []).map((c: any) => [String(c.id), c]));
+
     const top_clients = Array.from(byClient.entries())
       .map(([cid, agg]) => ({
         id: cid,
@@ -247,35 +176,36 @@ export async function POST(req: NextRequest) {
       .sort((a, b) => (b.units_sale_paid ?? 0) - (a.units_sale_paid ?? 0))
       .slice(0, 10);
 
-    // Recommender tree (si existe client_recommendations)
+    // 7) Recommender tree (si existe client_recommendations)
     stage = "recommender_tree";
     const recommender_tree: any[] = [];
 
     if (clientIds.length > 0) {
-      const { data: recs, error: recErr } = await supabase
+      const recsRes = await supaRls
         .from("client_recommendations")
         .select("id, mode, percentage, recommender_client_id, referred_client_id, active")
         .eq("active", true)
         .in("referred_client_id", clientIds);
 
-      if (recErr) return json(500, { ok: false, stage, error: recErr.message });
+      if (recsRes.error) return json(500, { ok: false, stage, error: recsRes.error.message });
 
-      for (const r of recs ?? []) {
+      for (const r of recsRes.data ?? []) {
         const recommId = String((r as any).recommender_client_id);
         const refId = String((r as any).referred_client_id);
         const perc = toNum((r as any).percentage, 0);
         const modeR = String((r as any).mode ?? "deduct") as "deduct" | "additive";
 
-        // Impacto del mes: ventas cobradas del referido
         let units_sale_paid = 0;
         let base_paid = 0;
 
+        // Base pagada del referido
         for (const inv of invoicesMonth) {
           if (!inv.client_id) continue;
           if (String(inv.client_id) !== refId) continue;
           if (!!inv.is_paid) base_paid += toNum(inv.total_net, 0);
         }
 
+        // Unidades pagadas del referido
         for (const it of itemsMonth) {
           const invId = String(it.invoice_id ?? "");
           if (!invId || !paidSet.has(invId)) continue;
@@ -299,7 +229,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Sleeping clients (>= 30/60/90 días sin factura)
+    // 8) Sleeping clients (>= 30/60/90 días sin factura)
     stage = "sleeping_clients";
     const sleeping_clients: Array<any> = [];
     const cutoffWarn = 30;
@@ -307,16 +237,16 @@ export async function POST(req: NextRequest) {
     const cutoffCritical = 90;
 
     if (clientIds.length > 0) {
-      const { data: lastInvRows, error: lastInvErr } = await supabase
+      const lastInvRes = await supaRls
         .from("invoices")
         .select("client_id, invoice_date")
         .in("client_id", clientIds)
         .order("invoice_date", { ascending: false });
 
-      if (lastInvErr) return json(500, { ok: false, stage, error: lastInvErr.message });
+      if (lastInvRes.error) return json(500, { ok: false, stage, error: lastInvRes.error.message });
 
       const lastByClient = new Map<string, string>();
-      for (const r of lastInvRows ?? []) {
+      for (const r of lastInvRes.data ?? []) {
         const cid = r.client_id ? String(r.client_id) : "";
         const d = r.invoice_date ? String(r.invoice_date) : "";
         if (!cid || !d) continue;
@@ -350,6 +280,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       month,
       mode,
+      delegate_id: delegateId,
       top_clients,
       recommender_tree,
       sleeping_clients,

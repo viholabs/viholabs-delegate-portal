@@ -7,8 +7,7 @@ export const runtime = "nodejs";
 const ALLOWED: string[] = ["pending", "received", "prepared", "shipped", "delivered", "invoiced"];
 
 function normStatus(s: any) {
-  const v = String(s ?? "").toLowerCase().trim();
-  return v;
+  return String(s ?? "").toLowerCase().trim();
 }
 
 export async function PUT(req: Request) {
@@ -20,7 +19,7 @@ export async function PUT(req: Request) {
 
   try {
     const delegateId = await resolveDelegateIdOrThrow({
-      supa: r.supa,
+      supaRls: r.supaRls,
       actor: r.actor,
       delegateIdFromQuery: delegateIdQuery,
     });
@@ -35,20 +34,19 @@ export async function PUT(req: Request) {
       return json(400, { ok: false, error: `Invalid status. Allowed: ${ALLOWED.join(", ")}` });
     }
 
-    // Comprobar que el pedido pertenece a ese delegate
-    const { data: ord, error: oErr } = await r.supa
+    // 1) Comprobar ownership con RLS (si no lo puede ver, no lo puede tocar)
+    const { data: ord, error: oErr } = await r.supaRls
       .from("orders")
       .select("id, delegate_id, status")
       .eq("id", orderId)
+      .eq("delegate_id", delegateId)
       .maybeSingle();
 
     if (oErr) return json(500, { ok: false, error: oErr.message });
-    if (!ord) return json(404, { ok: false, error: "Order not found" });
-    if (String((ord as any).delegate_id) !== String(delegateId)) {
-      return json(403, { ok: false, error: "Forbidden (order not in delegate scope)" });
-    }
+    if (!ord) return json(404, { ok: false, error: "Order not found (or not in delegate scope)" });
 
-    const { data: updated, error: uErr } = await r.supa
+    // 2) Update con SERVICE ROLE (escritura interna controlada)
+    const { data: updated, error: uErr } = await r.supaService
       .from("orders")
       .update({
         status,
