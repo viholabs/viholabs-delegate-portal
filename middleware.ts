@@ -1,45 +1,71 @@
 // middleware.ts
-import { NextResponse, type NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "./src/lib/supabase/middleware"; // ✅ ruta REAL, sin alias "@/"
 
-/**
- * FIX: el middleware NO debe interceptar /api/*
- * Si lo intercepta, puede responder con redirect HTML (login) y el frontend verá "Respuesta no-JSON".
- */
-export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+export const runtime = "nodejs";
 
-  // ✅ 1) Nunca tocar APIs
-  if (pathname.startsWith("/api/")) {
-    return NextResponse.next();
+const PUBLIC_PATHS: string[] = [
+  "/login",
+  "/auth/callback",
+  "/auth/callback-page", // ✅ coherencia con la ruta real
+  "/logout",
+  "/forgot-password",
+  "/reset-password",
+  "/favicon.ico",
+  "/robots.txt",
+  "/sitemap.xml",
+];
+
+const PUBLIC_API_PREFIXES: string[] = [
+  "/api/auth", // ej: /api/auth/magic-link
+];
+
+function isPublicPath(pathname: string) {
+  return (
+    pathname.startsWith("/_next") ||
+    PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))
+  );
+}
+
+function isPublicApi(pathname: string) {
+  return PUBLIC_API_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(p + "/"))
+}
+
+export async function middleware(req: NextRequest) {
+  const pathname = req.nextUrl.pathname;
+
+  // Público: páginas y assets
+  if (isPublicPath(pathname)) return NextResponse.next();
+
+  // Público: APIs auth
+  if (isPublicApi(pathname)) return NextResponse.next();
+
+  // ✅ Supabase SSR en middleware
+  const { supabase, res } = createClient(req);
+
+  const { data } = await supabase.auth.getUser();
+
+  // No logueado -> login con next
+  if (!data?.user) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    url.searchParams.set("next", pathname);
+    return NextResponse.redirect(url);
   }
 
-  // ✅ 2) Nunca tocar assets de Next / estáticos
-  if (
-    pathname.startsWith("/_next/") ||
-    pathname.startsWith("/favicon") ||
-    pathname.startsWith("/public/")
-  ) {
-    return NextResponse.next();
+  // ✅ Ya logueado -> no debe ver /login (Biblia: evitar aterrizajes incorrectos)
+  // Redirigimos a "/" porque ahí ya se decide el rol con requireCurrentActor + entryForActor
+  if (pathname === "/login") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/";
+    url.search = "";
+    return NextResponse.redirect(url);
   }
 
-  // ✅ 3) Rutas públicas (ajusta si quieres)
-  const PUBLIC_PATHS = new Set<string>([
-    "/",
-    "/login",
-    "/logout",
-    "/auth/callback",
-    "/import", // si quieres permitir abrir /import (la auth real ya se controla en UI)
-  ]);
-
-  if (PUBLIC_PATHS.has(pathname)) {
-    return NextResponse.next();
-  }
-
-  // Si tu middleware hacía checks adicionales (cookies, etc.),
-  // aquí NO invento auth, solo evito romper /api y HTML no-json.
-  return NextResponse.next();
+  return res;
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!.*\\.).*)"],
 };
