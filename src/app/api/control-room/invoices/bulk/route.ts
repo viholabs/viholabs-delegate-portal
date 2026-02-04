@@ -1,6 +1,9 @@
 // src/app/api/control-room/invoices/bulk/route.ts
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 
@@ -11,13 +14,6 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
-}
-
-function getBearerToken(req: Request) {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!h) return null;
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
 }
 
 function safeStr(v: any) {
@@ -39,28 +35,15 @@ function parseBoolStrict(v: any): boolean | undefined {
   return undefined;
 }
 
-async function requireAuthOrThrow(req: Request) {
+function getServiceClientOrThrow() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
     throw new Error(
       "Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / NEXT_PUBLIC_SUPABASE_ANON_KEY"
     );
   }
-
-  const token = getBearerToken(req);
-  if (!token) {
-    return { ok: false as const, status: 401, error: "Missing Bearer token" };
-  }
-
-  const supabaseAuth = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  const { data: userData, error: userErr } = await supabaseAuth.auth.getUser(
-    token
-  );
-  if (userErr || !userData?.user) {
-    return { ok: false as const, status: 401, error: "Invalid token" };
-  }
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  return { ok: true as const, supabase, user: userData.user };
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
 }
 
 type BulkUpdate = {
@@ -71,17 +54,53 @@ type BulkUpdate = {
   apply_delegate_to_client?: boolean;
 };
 
+function hasAnyPermission(
+  eff: { isSuperAdmin: boolean; has: (code: string) => boolean },
+  codes: string[]
+) {
+  if (eff.isSuperAdmin) return true;
+  return codes.some((c) => eff.has(c));
+}
+
 export async function POST(req: Request) {
+  let stage = "init";
+
   try {
-    const auth = await requireAuthOrThrow(req);
-    if (!auth.ok) return json(auth.status, { ok: false, error: auth.error });
+    // ✅ Auth canónica (una sola vez)
+    stage = "getActorFromRequest";
+    const r = await getActorFromRequest(req);
+    if (!r.ok) return json(r.status, { ok: false, stage, error: r.error });
 
-    const supabase = auth.supabase;
+    // ✅ Permisos efectivos (Biblia: no roles hardcoded)
+    stage = "effective_permissions";
+    const eff = await getEffectivePermissionsByActorId(String(r.actor.id));
 
+    stage = "authorize";
+    const allowed = hasAnyPermission(eff, [
+      "control_room.invoices.bulk",
+      "control_room.invoices.manage",
+      "invoices.manage",
+      "invoices.write",
+    ]);
+
+    if (!allowed) {
+      return json(403, {
+        ok: false,
+        stage,
+        error: "No autorizado (control_room.invoices.bulk)",
+      });
+    }
+
+    // ✅ Escritura/actualización: service role
+    stage = "service_client";
+    const supabase = getServiceClientOrThrow();
+
+    stage = "body";
     const body = await req.json().catch(() => null);
     const updates: BulkUpdate[] = Array.isArray(body?.updates) ? body.updates : [];
 
-    if (!updates.length) return json(400, { ok: false, error: "Missing updates[]" });
+    if (!updates.length)
+      return json(400, { ok: false, stage, error: "Missing updates[]" });
 
     const clean: BulkUpdate[] = updates
       .map((u: any) => {
@@ -91,15 +110,25 @@ export async function POST(req: Request) {
           is_paid: isPaidParsed, // ✅ aquí: false es false
           source_channel: safeStr(u?.source_channel || ""),
           delegate_id:
-            u?.delegate_id === null ? null : u?.delegate_id ? safeStr(u.delegate_id) : undefined,
+            u?.delegate_id === null
+              ? null
+              : u?.delegate_id
+              ? safeStr(u.delegate_id)
+              : undefined,
           apply_delegate_to_client: !!u?.apply_delegate_to_client,
         };
       })
       .filter((u) => !!u.invoice_id);
 
-    if (!clean.length) return json(400, { ok: false, error: "All updates missing invoice_id" });
+    if (!clean.length)
+      return json(400, {
+        ok: false,
+        stage,
+        error: "All updates missing invoice_id",
+      });
 
     // Validar delegates existentes
+    stage = "validate_delegates";
     const delegateIds = Array.from(
       new Set(
         clean
@@ -114,50 +143,64 @@ export async function POST(req: Request) {
         .select("id")
         .in("id", delegateIds);
 
-      if (derr) return json(500, { ok: false, error: derr.message });
+      if (derr) return json(500, { ok: false, stage, error: derr.message });
 
       const found = new Set((dels || []).map((d: any) => String(d.id)));
       const missing = delegateIds.filter((id) => !found.has(id));
       if (missing.length) {
-        return json(400, { ok: false, error: `delegate_id not found: ${missing.join(", ")}` });
+        return json(400, {
+          ok: false,
+          stage,
+          error: `delegate_id not found: ${missing.join(", ")}`,
+        });
       }
     }
 
     // Lookup invoice_id -> client_id
+    stage = "lookup_invoices";
     const invoiceIds = clean.map((u) => u.invoice_id);
     const { data: invRows, error: invErr } = await supabase
       .from("invoices")
       .select("id, client_id")
       .in("id", invoiceIds);
 
-    if (invErr) return json(500, { ok: false, error: invErr.message });
+    if (invErr) return json(500, { ok: false, stage, error: invErr.message });
 
     const invMap = new Map<string, string | null>();
-    for (const r of invRows || []) invMap.set(String(r.id), r.client_id ? String(r.client_id) : null);
+    for (const r of invRows || [])
+      invMap.set(String(r.id), r.client_id ? String(r.client_id) : null);
 
     const results: any[] = [];
     let okCount = 0;
 
     const clientDelegateToApply = new Map<string, string | null>();
 
+    stage = "apply_updates";
     for (const u of clean) {
       const invoice_id = u.invoice_id;
       const client_id = invMap.get(invoice_id) ?? null;
 
       try {
         const patch: any = {};
-        if (u.is_paid !== undefined) patch.is_paid = u.is_paid; // ✅ ya viene boolean real
+        if (u.is_paid !== undefined) patch.is_paid = u.is_paid; // ✅ boolean real
         if (u.source_channel) patch.source_channel = u.source_channel;
         if (u.delegate_id !== undefined) patch.delegate_id = u.delegate_id;
 
         if (Object.keys(patch).length) {
-          const { error: upInvErr } = await supabase.from("invoices").update(patch).eq("id", invoice_id);
+          const { error: upInvErr } = await supabase
+            .from("invoices")
+            .update(patch)
+            .eq("id", invoice_id);
           if (upInvErr) throw new Error(upInvErr.message);
         }
 
         if (u.apply_delegate_to_client) {
-          if (!client_id) throw new Error("Invoice has no client_id; cannot apply delegate to client");
-          const delId = u.delegate_id === undefined ? null : (u.delegate_id ?? null);
+          if (!client_id)
+            throw new Error(
+              "Invoice has no client_id; cannot apply delegate to client"
+            );
+          const delId =
+            u.delegate_id === undefined ? null : u.delegate_id ?? null;
           clientDelegateToApply.set(client_id, delId);
         }
 
@@ -168,15 +211,27 @@ export async function POST(req: Request) {
       }
     }
 
+    stage = "apply_delegate_to_client";
     for (const [client_id, delId] of clientDelegateToApply.entries()) {
       try {
-        const { error: upClientErr } = await supabase.from("clients").update({ delegate_id: delId }).eq("id", client_id);
+        const { error: upClientErr } = await supabase
+          .from("clients")
+          .update({ delegate_id: delId })
+          .eq("id", client_id);
         if (upClientErr) throw new Error(upClientErr.message);
 
-        const { error: backfillErr } = await supabase.from("invoices").update({ delegate_id: delId }).eq("client_id", client_id);
+        const { error: backfillErr } = await supabase
+          .from("invoices")
+          .update({ delegate_id: delId })
+          .eq("client_id", client_id);
         if (backfillErr) throw new Error(backfillErr.message);
       } catch (e: any) {
-        results.push({ ok: false, stage: "apply_delegate_to_client", client_id, error: e?.message || String(e) });
+        results.push({
+          ok: false,
+          stage: "apply_delegate_to_client",
+          client_id,
+          error: e?.message || String(e),
+        });
       }
     }
 
@@ -188,6 +243,6 @@ export async function POST(req: Request) {
       results,
     });
   } catch (e: any) {
-    return json(500, { ok: false, error: e?.message || String(e) });
+    return json(500, { ok: false, stage, error: e?.message || String(e) });
   }
 }
