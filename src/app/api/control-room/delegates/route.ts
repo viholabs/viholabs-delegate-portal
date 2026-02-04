@@ -1,84 +1,93 @@
+// src/app/api/control-room/delegates/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getActorFromRequest } from "@/app/api/delegate/_utils";
 
 export const runtime = "nodejs";
+
+type RpcPermRow = { perm_code: string | null };
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
-function getBearerToken(req: Request) {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!h) return null;
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
+function normalizePermCode(v: any) {
+  return String(v ?? "").trim();
 }
 
 export async function POST(req: Request) {
   let stage = "init";
 
   try {
-    stage = "auth_token";
-    const token = getBearerToken(req);
-    if (!token) return json(401, { ok: false, stage, error: "Falta Authorization Bearer token" });
+    // 1) Auth + actor + supabase clients (service + RLS) desde el helper canónico del repo
+    stage = "actor_from_request";
+    const ar: any = await getActorFromRequest(req);
 
-    stage = "env";
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    if (!url || !anon || !service) {
-      return json(500, { ok: false, stage, error: "Faltan variables Supabase (URL/ANON/SERVICE_ROLE)" });
+    if (!ar?.ok) {
+      return json(ar?.status ?? 401, {
+        ok: false,
+        stage,
+        error: ar?.error ?? "No autenticado",
+      });
     }
 
-    // 1) Validar usuario con el token (ANON)
-    stage = "auth_get_user";
-    const supaAuth = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-    const { data: userData, error: userErr } = await supaAuth.auth.getUser();
-    const user = userData?.user;
-    if (userErr || !user) return json(401, { ok: false, stage, error: "Sesión inválida" });
+    const { actor, supaService, supaRls } = ar as {
+      actor: { id: string; role: string | null; status?: string | null; name?: string | null; email?: string | null };
+      supaService: any;
+      supaRls: any;
+    };
 
-    // 2) Service client (bypass RLS)
-    stage = "service_client";
-    const supabase = createClient(url, service, { auth: { persistSession: false } });
+    // 2) Permisos efectivos (RBAC + overrides) vía función SQL canonical: effective_permissions(actor_id)
+    //    Biblia: actors.read es permiso canónico para lectura de actores (y listados de personas/identidades).
+    stage = "effective_permissions";
+    const { data: permData, error: permErr } = await supaService.rpc(
+      "effective_permissions",
+      { p_actor_id: actor.id }
+    );
 
-    // 3) Actor + RBAC
-    stage = "actor_lookup";
-    const { data: actor, error: actorErr } = await supabase
-      .from("actors")
-      .select("id, role, status, name, email, auth_user_id")
-      .eq("auth_user_id", user.id)
-      .maybeSingle();
-
-    if (actorErr) return json(500, { ok: false, stage, error: actorErr.message });
-    if (!actor?.id) return json(403, { ok: false, stage, error: "Actor no encontrado para este usuario." });
-
-    if (String(actor.status || "").toLowerCase() === "inactive") {
-      return json(403, { ok: false, stage, error: "Actor inactivo." });
+    if (permErr) {
+      return json(500, { ok: false, stage, error: permErr.message });
     }
 
-    const role = String(actor.role || "").toLowerCase();
-    const isAdmin = role === "admin" || role === "super_admin" || role === "superadmin";
-    if (!isAdmin) return json(403, { ok: false, stage, error: "No autorizado: admin/superadmin." });
+    const rows = (permData ?? []) as RpcPermRow[];
+    const codes = rows
+      .map((r) => normalizePermCode(r?.perm_code))
+      .filter((x) => x.length > 0);
 
-    // 4) Delegates list
+    const isSuperAdmin = codes.includes("*");
+    const perms = new Set<string>(codes);
+
+    const has = (perm: string) => (isSuperAdmin ? true : perms.has(perm));
+
+    stage = "authorize";
+    if (!has("actors.read")) {
+      return json(403, { ok: false, stage, error: "No autorizado (actors.read)" });
+    }
+
+    // 3) Lectura con RLS (la BD decide qué delegates ve este actor)
     stage = "delegates_select";
-    const { data: rows, error: dErr } = await supabase
+    const { data: rowsDelegates, error: dErr } = await supaRls
       .from("delegates")
       .select("id, name, email")
       .order("name", { ascending: true });
 
-    if (dErr) return json(500, { ok: false, stage, error: dErr.message });
+    if (dErr) {
+      return json(500, { ok: false, stage, error: dErr.message });
+    }
 
     return json(200, {
       ok: true,
-      actor: { id: String(actor.id), role: String(actor.role ?? ""), name: actor.name ?? actor.email ?? "—" },
-      delegates: Array.isArray(rows)
-        ? rows.map((d: any) => ({ id: String(d.id), name: d.name ?? null, email: d.email ?? null }))
-        : [],
+      actor: {
+        id: String(actor.id),
+        role: actor.role ?? null,
+        name: (actor as any).name ?? (actor as any).email ?? null,
+      },
+      delegates: Array.isArray(rowsDelegates) ? rowsDelegates : [],
     });
   } catch (e: any) {
-    return json(500, { ok: false, stage, error: e?.message ?? "Error inesperado" });
+    return json(500, {
+      ok: false,
+      stage,
+      error: e?.message ?? "Error inesperado",
+    });
   }
 }
