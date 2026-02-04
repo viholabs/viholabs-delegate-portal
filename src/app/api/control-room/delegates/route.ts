@@ -1,17 +1,12 @@
 // src/app/api/control-room/delegates/route.ts
 import { NextResponse } from "next/server";
 import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 
-type RpcPermRow = { perm_code: string | null };
-
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
-}
-
-function normalizePermCode(v: any) {
-  return String(v ?? "").trim();
 }
 
 export async function POST(req: Request) {
@@ -30,37 +25,36 @@ export async function POST(req: Request) {
       });
     }
 
-    const { actor, supaService, supaRls } = ar as {
-      actor: { id: string; role: string | null; status?: string | null; name?: string | null; email?: string | null };
-      supaService: any;
+    const { actor, supaRls } = ar as {
+      actor: {
+        id: string;
+        role: string | null;
+        status?: string | null;
+        name?: string | null;
+        email?: string | null;
+      };
       supaRls: any;
     };
 
-    // 2) Permisos efectivos (RBAC + overrides) vía función SQL canonical: effective_permissions(actor_id)
-    //    Biblia: actors.read es permiso canónico para lectura de actores (y listados de personas/identidades).
+    // 2) Permisos efectivos (RBAC + overrides) — Biblia
     stage = "effective_permissions";
-    const { data: permData, error: permErr } = await supaService.rpc(
-      "effective_permissions",
-      { p_actor_id: actor.id }
-    );
+    const eff = await getEffectivePermissionsByActorId(actor.id);
 
-    if (permErr) {
-      return json(500, { ok: false, stage, error: permErr.message });
-    }
-
-    const rows = (permData ?? []) as RpcPermRow[];
-    const codes = rows
-      .map((r) => normalizePermCode(r?.perm_code))
-      .filter((x) => x.length > 0);
-
-    const isSuperAdmin = codes.includes("*");
-    const perms = new Set<string>(codes);
-
-    const has = (perm: string) => (isSuperAdmin ? true : perms.has(perm));
-
+    // Permiso canónico recomendado para este endpoint:
+    // - control_room.delegates.read
+    // Compatibilidad temporal: aceptamos actors.read si aún no existe el permiso nuevo en SQL.
     stage = "authorize";
-    if (!has("actors.read")) {
-      return json(403, { ok: false, stage, error: "No autorizado (actors.read)" });
+    const allowed =
+      eff.isSuperAdmin ||
+      eff.has("control_room.delegates.read") ||
+      eff.has("actors.read");
+
+    if (!allowed) {
+      return json(403, {
+        ok: false,
+        stage,
+        error: "No autorizado (control_room.delegates.read)",
+      });
     }
 
     // 3) Lectura con RLS (la BD decide qué delegates ve este actor)
