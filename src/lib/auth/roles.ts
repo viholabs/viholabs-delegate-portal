@@ -5,6 +5,7 @@ export type RoleCode =
   | "COORDINATOR_COMMERCIAL"
   | "COORDINATOR_CECT"
   | "ADMINISTRATIVE"
+  | "KOL"
   | "DELEGATE"
   | "CLIENT"
   | "COMMISSION_AGENT"
@@ -27,17 +28,18 @@ export function normalizeCommissionLevel(v: unknown): CommissionLevel | null {
 }
 
 /**
- * ✅ Compatibilidad total:
- * Muchos archivos antiguos llaman entryForRole(actor.role).
- * Lo mantenemos y NO rompe nada.
+ * ✅ Entrada canónica por rol
+ * (ajustada a los nuevos dashboards separados)
  */
 export function entryForRole(role: unknown) {
   const r = normalizeRole(role);
 
   if (r === "SUPER_ADMIN") return "/control-room/dashboard";
-  if (r === "COORDINATOR_COMMERCIAL") return "/control-room/dashboard";
-  if (r === "COORDINATOR_CECT") return "/control-room/dashboard";
   if (r === "ADMINISTRATIVE") return "/control-room/dashboard";
+  if (r === "COORDINATOR_CECT") return "/control-room/dashboard";
+
+  if (r === "COORDINATOR_COMMERCIAL") return "/commercial/dashboard";
+  if (r === "KOL") return "/kol/dashboard";
 
   if (r === "DELEGATE") return "/delegate/dashboard";
   if (r === "CLIENT") return "/client/dashboard";
@@ -49,9 +51,7 @@ export function entryForRole(role: unknown) {
 }
 
 /**
- * ✅ Opción robusta para miles de usuarios:
- * Entrada por actor (rol + metadatos), sin inventar 5 roles.
- * commission_level = 1..5 es metadato (para reglas de comisión, filtros, UI…).
+ * ✅ Entrada por actor (compatibilidad total)
  */
 export function entryForActor(input: { role: unknown; commission_level?: unknown }) {
   const role = normalizeRole(input.role);
@@ -62,10 +62,7 @@ export function entryForActor(input: { role: unknown; commission_level?: unknown
 
   const lvl = normalizeCommissionLevel(input.commission_level);
 
-  // HOY: 1 dashboard para todos (lo más robusto)
+  // HOY: 1 dashboard para todos
   if (!lvl) return "/commissions/dashboard";
   return "/commissions/dashboard";
-
-  // FUTURO (si un día quieres pantallas por nivel):
-  // return `/commissions/level-${lvl}`;
 }

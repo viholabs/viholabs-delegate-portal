@@ -2,9 +2,26 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import SidebarNav from "@/components/control-room/SidebarNav";
 
+function titleForPath(pathname: string) {
+  if (pathname.startsWith("/control-room/import")) return "Importación";
+  if (pathname.startsWith("/control-room/users")) return "Usuarios";
+  if (pathname.startsWith("/control-room/delegates")) return "Delegados";
+  if (pathname.startsWith("/control-room/clients")) return "Clientes";
+  if (pathname.startsWith("/control-room/commission-rules")) return "Normas de comisiones";
+  if (pathname.startsWith("/control-room/roles")) return "Permisos y roles";
+  if (pathname.startsWith("/control-room/invoices")) return "Facturas";
+  if (pathname.startsWith("/control-room/audit")) return "Auditoría";
+  if (pathname.startsWith("/control-room/dashboard")) return "Dashboard";
+  return "Control Room";
+}
+
 export default function ControlRoomShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname() || "";
+  const title = titleForPath(pathname);
+
   return (
     <div
       className="min-h-screen"
@@ -48,7 +65,27 @@ export default function ControlRoomShell({ children }: { children: ReactNode }) 
             <SidebarNav />
           </aside>
 
-          <main className="min-w-0">{children}</main>
+          <main className="min-w-0">
+            {/* Breadcrumb + título contextual */}
+            <div className="mb-4">
+              <div
+                className="text-xs uppercase tracking-wider"
+                style={{ color: "rgba(89,49,60,0.6)" }}
+              >
+                Control Room
+                {title && title !== "Control Room" ? ` / ${title}` : ""}
+              </div>
+
+              <h2
+                className="mt-1 text-xl font-semibold"
+                style={{ color: "#59313c" }}
+              >
+                {title}
+              </h2>
+            </div>
+
+            {children}
+          </main>
         </div>
       </div>
     </div>

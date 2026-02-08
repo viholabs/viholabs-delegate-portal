@@ -1,4 +1,3 @@
-// src/app/login/LoginClient.tsx
 "use client";
 
 import type React from "react";
@@ -21,11 +20,50 @@ export default function LoginClient() {
     setMsg(null);
 
     try {
-      const supabase = createClient();
+      // 1) Login SSR (server) -> crea cookies
+      const r = await fetch("/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+        }),
+      });
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      const j = await r.json().catch(() => ({} as any));
+
+      if (!r.ok || !j?.ok) {
+        setLoading(false);
+        setMsg(j?.message ?? "No se pudo iniciar sesión. Revisa email y contraseña.");
+        return;
+      }
+
+      // 2) Flux canònic: callback resol actor + redirigeix per rol
+      window.location.assign("/auth/callback");
+    } catch (err: any) {
+      setMsg(err?.message ?? "Error desconocido");
+      setLoading(false);
+    }
+  }
+
+  async function onForgotPassword() {
+    setLoading(true);
+    setMsg(null);
+
+    try {
+      const supabase = createClient();
+      const cleanEmail = email.trim();
+
+      if (!cleanEmail) {
+        setLoading(false);
+        setMsg("Escribe tu email arriba y luego pulsa “He olvidado la contraseña”.");
+        return;
+      }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        // IMPORTANT: no toquem fluxos tancats; això només envia email.
+        // Si més endavant definim una pantalla de reset, ajustarem aquest redirectTo.
+        redirectTo: `${window.location.origin}/login`,
       });
 
       if (error) {
@@ -34,18 +72,11 @@ export default function LoginClient() {
         return;
       }
 
-      if (!data?.session) {
-        setLoading(false);
-        setMsg("No se pudo iniciar sesión. Revisa email y contraseña.");
-        return;
-      }
-
-      // Importante: dejamos que tu lógica central redirija por rol
-      // (src/app/page.tsx y/o /dashboard)
-      window.location.assign("/");
-    } catch (err: any) {
-      setMsg(err?.message ?? "Error desconocido");
       setLoading(false);
+      setMsg("Te hemos enviado un email para restablecer la contraseña (si el email existe).");
+    } catch (err: any) {
+      setLoading(false);
+      setMsg(err?.message ?? "Error desconocido");
     }
   }
 
@@ -92,6 +123,20 @@ export default function LoginClient() {
           {loading ? "Entrando..." : "Entrar"}
         </button>
 
+        <button
+          type="button"
+          onClick={onForgotPassword}
+          disabled={loading}
+          style={{
+            marginTop: 10,
+            padding: "10px 14px",
+            width: "100%",
+            opacity: 0.9,
+          }}
+        >
+          He olvidado la contraseña
+        </button>
+
         <p style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
           Acceso solo con email + contraseña.
         </p>
@@ -99,3 +144,4 @@ export default function LoginClient() {
     </div>
   );
 }
+

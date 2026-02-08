@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# --- VIHOLABS safety: NO dumps / reports / backups in git ---
+REPO_DUMP*.txt
+REPO_DUMP_SAFE*.txt
+REPO_DUMP_SAFE_REPORT.json
+*.BAK.*

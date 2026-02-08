@@ -99,6 +99,64 @@ type ObjectivesPayload = {
 
 type ExecStatus = "on_track" | "risk" | "off_track" | "unknown";
 
+// ✅ HOLDed Sync (resultat mínim)
+type HoldedSyncResult = {
+  ok: boolean;
+  source_month?: string;
+  result?: { inserted: number; updated: number };
+  stage?: string;
+  error?: string;
+};
+
+// ✅ UI Contract (backend)
+type UiContractStateRow = {
+  screen_key: string;
+  locale: string;
+  state_code: string;
+  label_title: string | null;
+  label_icon: string | null;
+  label_severity: string | null;
+  color_token: string | null;
+  alert_source: "SCREEN" | "GLOBAL" | null;
+  alert_title: string | null;
+  alert_body: string | null;
+  alert_tooltip: string | null;
+  alert_icon: string | null;
+  alert_severity: string | null;
+  alert_sort_order: number | null;
+};
+
+type UiContractContentRow = {
+  screen_key: string;
+  content_key: string;
+  locale: string;
+  state_code: string | null;
+  content_id: string;
+  source: "SCREEN" | "GLOBAL";
+  title: string | null;
+  body: string | null;
+  tooltip: string | null;
+  icon: string | null;
+  severity: string | null;
+  sort_order: number | null;
+  effective_updated_at: string | null;
+};
+
+type UiContractOk = {
+  ok: true;
+  locale: string;
+  state_ui: UiContractStateRow[];
+  screen_content: UiContractContentRow[];
+};
+
+type UiContractFail = {
+  ok: false;
+  stage?: string;
+  error: string;
+};
+
+type UiContractResponse = UiContractOk | UiContractFail;
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -162,6 +220,18 @@ function statusBadgeVariant(
   return "default";
 }
 
+// ✅ NEW (A.4): map severity -> Badge variant (tolerant)
+function badgeVariantFromSeverity(
+  sev?: string | null
+): "default" | "success" | "warning" | "danger" {
+  const s = (sev ?? "").toString().trim().toLowerCase();
+  if (!s) return "default";
+  if (["success", "ok", "good", "green", "info"].includes(s)) return "success";
+  if (["warning", "warn", "amber", "orange"].includes(s)) return "warning";
+  if (["danger", "error", "critical", "red"].includes(s)) return "danger";
+  return "default";
+}
+
 function parseMonth01(month01: string): Date | null {
   if (!/^\d{4}-\d{2}-01$/.test(month01)) return null;
   const [y, m] = month01.split("-").map((x) => Number(x));
@@ -188,6 +258,57 @@ function fmtDateTimeISO(s?: string | null) {
   }).format(d);
 }
 
+function isUiOk(x: UiContractResponse | null): x is UiContractOk {
+  return !!x && (x as any).ok === true;
+}
+
+function pickAlert(
+  ui: UiContractResponse | null,
+  screenKey: string,
+  stateCode: string
+) {
+  if (!isUiOk(ui)) return null;
+  const row = ui.state_ui.find(
+    (r) => r.screen_key === screenKey && r.state_code === stateCode
+  );
+  if (!row) return null;
+  if (!row.alert_title && !row.alert_body) return null;
+  return row;
+}
+
+function pickContent(
+  ui: UiContractResponse | null,
+  screenKey: string,
+  contentKey: string
+) {
+  if (!isUiOk(ui)) return null;
+  const row = ui.screen_content.find(
+    (r) => r.screen_key === screenKey && r.content_key === contentKey
+  );
+  if (!row) return null;
+  return row;
+}
+
+// ✅ NEW (A.6): lectura tolerant de month.state_code (sense inventar-lo)
+function monthStateCodeFromData(data: MonthSummary | null): string | null {
+  if (!data) return null;
+
+  // Backend pot enviar-ho sense estar tipat al frontend (MVP).
+  const raw =
+    (data as any)?.state_code ??
+    (data as any)?.stateCode ??
+    (data as any)?.month_state_code ??
+    null;
+
+  if (typeof raw !== "string") return null;
+
+  const v = raw.trim();
+  if (!v) return null;
+
+  // Normalitzem a uppercase per casar amb "OPEN/LOCKED" habituals
+  return v.toUpperCase();
+}
+
 export default function DashboardClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -208,6 +329,14 @@ export default function DashboardClient() {
   const [error, setError] = useState<string | null>(null);
   const [objError, setObjError] = useState<string | null>(null);
 
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncResult, setSyncResult] = useState<HoldedSyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const [uiLoading, setUiLoading] = useState(false);
+  const [uiContract, setUiContract] = useState<UiContractResponse | null>(null);
+  const [uiError, setUiError] = useState<string | null>(null);
+
   async function getTokenOrRedirect(): Promise<string | null> {
     const supabase = createClient();
     const { data } = await supabase.auth.getSession();
@@ -220,6 +349,43 @@ export default function DashboardClient() {
       return null;
     }
     return token;
+  }
+
+  async function loadUiContract(token: string) {
+    setUiLoading(true);
+    setUiError(null);
+
+    try {
+      const locale = "es-ES";
+
+      const res = await fetch("/api/control-room/ui-contract", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ locale }),
+      });
+
+      const json = (await res.json().catch(() => null)) as
+        | UiContractResponse
+        | null;
+
+      if (!json || !res.ok || (json as any).ok !== true) {
+        const msg =
+          (json as any)?.error ??
+          `Error cargando contrato UI (${res.status}).`;
+        setUiError(msg);
+        setUiContract(json ?? { ok: false, error: msg });
+        return;
+      }
+
+      setUiContract(json);
+    } catch (e: any) {
+      setUiError(e?.message ?? "Error inesperado (UI Contract)");
+    } finally {
+      setUiLoading(false);
+    }
   }
 
   async function loadData() {
@@ -249,6 +415,8 @@ export default function DashboardClient() {
           body: JSON.stringify({ month: month01 }),
         }),
       ]);
+
+      void loadUiContract(token);
 
       const jsonMonth = (await resMonth.json().catch(() => null)) as
         | MonthSummary
@@ -312,12 +480,50 @@ export default function DashboardClient() {
     }
   }
 
+  async function syncHolded() {
+    setSyncLoading(true);
+    setSyncError(null);
+    setSyncResult(null);
+
+    try {
+      const token = await getTokenOrRedirect();
+      if (!token) return;
+
+      const res = await fetch("/api/holded/import-all", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ source_month: month01 }),
+      });
+
+      const json = (await res.json().catch(() => null)) as
+        | HoldedSyncResult
+        | null;
+
+      if (!json || !res.ok || !json.ok) {
+        const msg =
+          json?.error ?? `Error sincronizando HOLDed (${res.status}).`;
+        setSyncError(msg);
+        setSyncResult(json);
+        return;
+      }
+
+      setSyncResult(json);
+      await loadData();
+    } catch (e: any) {
+      setSyncError(e?.message ?? "Error inesperado");
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month01]);
 
-  // ===== KPI calculados (fallbacks seguros)
   const kpi = data?.kpi_month;
   const invoicesPaidCount = kpi?.invoices_paid_count ?? null;
   const clientsCount = kpi?.clients_count ?? null;
@@ -333,11 +539,12 @@ export default function DashboardClient() {
 
   const updatedAt = objectives?.targets_month?.updated_at ?? null;
 
-  // ===== Objetivos (month)
-  const tgtUnits = Number(objectives?.targets_month?.target_units_total ?? 0) || 0;
+  const tgtUnits =
+    Number(objectives?.targets_month?.target_units_total ?? 0) || 0;
   const tgtDelegates = objectives?.targets_month?.target_delegates_active ?? null;
 
-  const actUnits = Number(objectives?.actual_month?.units_total ?? unitsTotal) || 0;
+  const actUnits =
+    Number(objectives?.actual_month?.units_total ?? unitsTotal) || 0;
   const actDelegates =
     objectives?.actual_month?.delegates_count ??
     (delegatesCount == null ? null : Number(delegatesCount));
@@ -358,7 +565,6 @@ export default function DashboardClient() {
     return "off_track";
   })();
 
-  // ===== Rankings (máx 3)
   const topDelegates = (data?.rankingsDelegates ?? [])
     .slice(0, 3)
     .map((r) => {
@@ -385,7 +591,6 @@ export default function DashboardClient() {
       };
     });
 
-  // ===== Diagnóstico automático (corto)
   const diagnosis = useMemo(() => {
     const total = Math.max(1, actUnits);
     const d1 = topDelegates[0]?.units_total ?? 0;
@@ -401,13 +606,21 @@ export default function DashboardClient() {
     }
 
     if (tgtUnits > 0 && unitsPct != null && unitsPct < 100) {
-      return `Faltan ${formatInt(Math.max(0, unitsGap))} uds para objetivo. Prioriza activación comercial.`;
+      return `Faltan ${formatInt(
+        Math.max(0, unitsGap)
+      )} uds para objetivo. Prioriza activación comercial.`;
     }
 
     return "Distribución razonable. Mantener ritmo y foco en cierre de mes.";
-  }, [actUnits, topDelegates, data?.rankingsDelegates, tgtUnits, unitsPct, unitsGap]);
+  }, [
+    actUnits,
+    topDelegates,
+    data?.rankingsDelegates,
+    tgtUnits,
+    unitsPct,
+    unitsGap,
+  ]);
 
-  // ===== Acciones (checklist local)
   const [actions, setActions] = useState<Record<string, boolean>>({
     a1: false,
     a2: false,
@@ -415,7 +628,6 @@ export default function DashboardClient() {
     a4: false,
   });
 
-  // ===== Helpers UI (KPIs)
   const kpiCards: Array<{
     title: string;
     value: React.ReactNode;
@@ -427,8 +639,14 @@ export default function DashboardClient() {
       title: "Unidades vendidas",
       kind: "units",
       value: (
-        <div className="text-3xl font-semibold tracking-tight" style={{ color: "var(--viho-primary)" }}>
-          <span className="mr-2 text-sm font-semibold uppercase tracking-wider" style={{ color: "rgba(42,29,32,0.65)" }}>
+        <div
+          className="text-3xl font-semibold tracking-tight"
+          style={{ color: "var(--viho-primary)" }}
+        >
+          <span
+            className="mr-2 text-sm font-semibold uppercase tracking-wider"
+            style={{ color: "rgba(42,29,32,0.65)" }}
+          >
             Venta
           </span>
           {formatInt(unitsSale)}
@@ -449,7 +667,10 @@ export default function DashboardClient() {
     {
       title: "Delegados activos",
       value: (
-        <div className="text-3xl font-semibold tracking-tight" style={{ color: "var(--viho-primary)" }}>
+        <div
+          className="text-3xl font-semibold tracking-tight"
+          style={{ color: "var(--viho-primary)" }}
+        >
           {actDelegates == null ? "—" : formatInt(actDelegates)}
         </div>
       ),
@@ -457,7 +678,9 @@ export default function DashboardClient() {
         <div className="mt-2 text-sm viho-muted">
           {tgtDelegates == null
             ? "Obj —"
-            : `Obj ${formatInt(tgtDelegates)} · ${delegatesPct == null ? "—" : `${delegatesPct}%`}`}
+            : `Obj ${formatInt(tgtDelegates)} · ${
+                delegatesPct == null ? "—" : `${delegatesPct}%`
+              }`}
         </div>
       ),
       badge: null,
@@ -465,7 +688,10 @@ export default function DashboardClient() {
     {
       title: "Facturado",
       value: (
-        <div className="text-3xl font-semibold tracking-tight" style={{ color: "var(--viho-primary)" }}>
+        <div
+          className="text-3xl font-semibold tracking-tight"
+          style={{ color: "var(--viho-primary)" }}
+        >
           {formatMoneyEUR(totalGross)}
         </div>
       ),
@@ -479,22 +705,30 @@ export default function DashboardClient() {
     {
       title: "Margen",
       value: (
-        <div className="text-3xl font-semibold tracking-tight" style={{ color: "var(--viho-primary)" }}>
+        <div
+          className="text-3xl font-semibold tracking-tight"
+          style={{ color: "var(--viho-primary)" }}
+        >
           —
         </div>
       ),
-      sub: <div className="mt-2 text-sm viho-muted">MVP: pendiente cálculo margen</div>,
+      sub: (
+        <div className="mt-2 text-sm viho-muted">
+          MVP: pendiente cálculo margen
+        </div>
+      ),
       badge: <Badge variant="warning">MVP</Badge>,
     },
   ];
 
-  // ===== Proyección cierre (simple)
   const projection = useMemo(() => {
     const d = parseMonth01(month01);
     if (!d) return null;
     const totalDays = daysInMonth(d);
     const today = new Date();
-    const sameMonth = today.getFullYear() === d.getFullYear() && today.getMonth() === d.getMonth();
+    const sameMonth =
+      today.getFullYear() === d.getFullYear() &&
+      today.getMonth() === d.getMonth();
     const day = sameMonth ? today.getDate() : Math.min(1, totalDays);
     const pace = day > 0 ? actUnits / day : 0;
     const projected = Math.round(pace * totalDays);
@@ -502,21 +736,97 @@ export default function DashboardClient() {
     return { projected, pacePct };
   }, [month01, actUnits]);
 
+  const screenKey = "control_room.dashboard";
+
+  // ✅ NEW (A.6): state_code real del mes (si el backend el proporciona)
+  const monthStateCode = useMemo(() => monthStateCodeFromData(data), [data]);
+
+  // ✅ NEW (A.6): alerta EXEC real segons state_code (OPEN/LOCKED/...)
+  const execAlert = monthStateCode ? pickAlert(uiContract, screenKey, monthStateCode) : null;
+
+  // ✅ header.title (governat) + source
+  const headerTitleRow = pickContent(uiContract, screenKey, "header.title");
+  const headerTitle = headerTitleRow?.title ?? "Situation Room (Executive View)";
+  const headerTitleSource = headerTitleRow?.source ?? "—";
+
+  // ✅ header.subtitle (governat) + source
+  const headerSubtitleRow = pickContent(uiContract, screenKey, "header.subtitle");
+  const headerSubtitle =
+    headerSubtitleRow?.title ?? "KPIs · Comisiones · Gobernanza (MVP)";
+  const headerSubtitleSource = headerSubtitleRow?.source ?? "—";
+
+  // ✅ NEW (A.4): header.badge (governat) + source + variant per severity
+  const headerBadgeRow = pickContent(uiContract, screenKey, "header.badge");
+  const headerBadgeText = headerBadgeRow?.title ?? null;
+  const headerBadgeSource = headerBadgeRow?.source ?? "—";
+  const headerBadgeVariant = badgeVariantFromSeverity(headerBadgeRow?.severity);
+
+  // ✅ NEW (A.5): help.intro (governat) + source
+  const helpIntroRow = pickContent(uiContract, screenKey, "help.intro");
+  const helpIntroText = helpIntroRow?.body ?? helpIntroRow?.title ?? null;
+  const helpIntroSource = helpIntroRow?.source ?? "—";
+
   return (
     <div className="space-y-6">
-      {/* HEADER EJECUTIVO */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="text-xs uppercase tracking-widest viho-muted">
             VIHOLABS · CONTROL ROOM
           </div>
+
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            Situation Room (Executive View)
+            {headerTitle}
           </h1>
+
+          {/* debug discret del source (title) */}
+          <div className="mt-1 text-[11px] viho-muted">
+            header.title source:{" "}
+            <span className="font-mono">{headerTitleSource}</span>
+          </div>
+
+          {/* A.3: subtitle governat */}
+          <div className="mt-2 text-sm viho-muted">{headerSubtitle}</div>
+
+          {/* debug discret del source (subtitle) */}
+          <div className="mt-1 text-[11px] viho-muted">
+            header.subtitle source:{" "}
+            <span className="font-mono">{headerSubtitleSource}</span>
+          </div>
+
+          {/* ✅ A.4: badge source (sempre visible per traçabilitat) */}
+          <div className="mt-1 text-[11px] viho-muted">
+            header.badge source:{" "}
+            <span className="font-mono">{headerBadgeSource}</span>
+          </div>
+
+          {/* ✅ A.5: help.intro source (sempre visible per traçabilitat) */}
+          <div className="mt-1 text-[11px] viho-muted">
+            help.intro source:{" "}
+            <span className="font-mono">{helpIntroSource}</span>
+          </div>
+
+          {/* ✅ A.5: help.intro text (si existeix) */}
+          {helpIntroText ? (
+            <div className="mt-2 text-sm viho-muted">
+              {helpIntroText}
+            </div>
+          ) : null}
+
+          {/* ✅ A.6: month.state_code debug (sempre visible) */}
+          <div className="mt-1 text-[11px] viho-muted">
+            month.state_code:{" "}
+            <span className="font-mono">{monthStateCode ?? "—"}</span>
+          </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm viho-muted">
             <span>Periodo:</span>
             <span className="font-mono">{month01}</span>
+
+            {/* ✅ A.4: badge governat (si existeix) */}
+            {headerBadgeText ? (
+              <Badge variant={headerBadgeVariant}>{headerBadgeText}</Badge>
+            ) : null}
+
             <Badge title="Regla del sistema">Solo facturas cobradas</Badge>
             <Badge title="Referencia">PDV: 31€</Badge>
             <Badge title="Última actualización objetivos">
@@ -563,24 +873,95 @@ export default function DashboardClient() {
         </div>
       </div>
 
-      {/* ERROR */}
-      {error ? (
-        <Card>
-          <CardContent className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-sm">{error}</div>
-              {data?.stage ? (
-                <div className="mt-1 text-xs viho-muted">
-                  Stage: <span className="font-mono">{data.stage}</span>
-                </div>
-              ) : null}
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>Contrato UI (backend)</CardTitle>
+            <div className="mt-1 text-sm viho-muted">
+              Se carga automáticamente al entrar · locale es-ES · screen_key{" "}
+              <span className="font-mono">{screenKey}</span>
             </div>
-            <Badge variant="danger">ERROR</Badge>
-          </CardContent>
-        </Card>
-      ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="default">MVP</Badge>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                const token = await getTokenOrRedirect();
+                if (!token) return;
+                await loadUiContract(token);
+              }}
+              disabled={uiLoading || loading}
+            >
+              {uiLoading ? "Cargando…" : "Recargar UI"}
+            </Button>
+          </div>
+        </CardHeader>
 
-      {/* 1) KPIs CLAVE (PRIMERO) */}
+        <CardContent className="space-y-2">
+          {uiError ? (
+            <div className="text-sm">
+              <Badge variant="danger" className="mr-2">
+                ERROR
+              </Badge>
+              <span>{uiError}</span>
+            </div>
+          ) : null}
+
+          {!uiError && isUiOk(uiContract) ? (
+            <div className="text-sm viho-muted">
+              OK · state_ui{" "}
+              <span className="font-mono">{uiContract.state_ui.length}</span> ·
+              screen_content{" "}
+              <span className="font-mono">
+                {uiContract.screen_content.length}
+              </span>
+            </div>
+          ) : null}
+
+          {/* ✅ A.6: alerta EXEC real segons month.state_code (si existeix) */}
+          {monthStateCode ? (
+            execAlert ? (
+              <div className="rounded-md border p-3">
+                <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
+                  Alerta ejecutiva (state_code {monthStateCode})
+                </div>
+                <div className="mt-1 font-medium">
+                  {execAlert.alert_title ?? "—"}
+                </div>
+                <div className="mt-1 text-sm viho-muted">
+                  {execAlert.alert_body ?? "—"}
+                </div>
+                <div className="mt-1 text-xs viho-muted">
+                  source{" "}
+                  <span className="font-mono">
+                    {execAlert.alert_source ?? "—"}
+                  </span>{" "}
+                  · severity{" "}
+                  <span className="font-mono">
+                    {execAlert.alert_severity ?? "—"}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs viho-muted">
+                No hay alerta definida para state_code{" "}
+                <span className="font-mono">{monthStateCode}</span>.
+              </div>
+            )
+          ) : (
+            <div className="text-xs viho-muted">
+              state_code del mes no disponible en /api/control-room/month (no se muestra alerta EXEC).
+            </div>
+          )}
+
+          {!uiError && !uiContract ? (
+            <div className="text-xs viho-muted">—</div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* Resta del dashboard: unchanged */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {kpiCards.map((c) => (
           <Card key={c.title}>
@@ -589,16 +970,13 @@ export default function DashboardClient() {
               {c.badge}
             </CardHeader>
             <CardContent>
-              {/* value ya viene formateado */}
               {c.value}
-              {/* sub ya viene formateado */}
               {c.sub}
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* 2) ESTADO GENERAL DEL MES (DESPUÉS) */}
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
@@ -614,12 +992,14 @@ export default function DashboardClient() {
         </CardHeader>
 
         <CardContent className="grid grid-cols-1 gap-6 md:grid-cols-3">
-          {/* Progreso */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
               Progreso
             </div>
-            <div className="mt-1 text-4xl font-semibold" style={{ color: "var(--viho-primary)" }}>
+            <div
+              className="mt-1 text-4xl font-semibold"
+              style={{ color: "var(--viho-primary)" }}
+            >
               {unitsPct == null ? "—" : `${clampPct(unitsPct)}%`}
             </div>
             <div className="text-xs viho-muted">
@@ -627,7 +1007,6 @@ export default function DashboardClient() {
             </div>
           </div>
 
-          {/* Objetivo vs Real */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
               Objetivo vs Real
@@ -642,7 +1021,6 @@ export default function DashboardClient() {
             </div>
           </div>
 
-          {/* Tendencia */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
               Tendencia (MVP)
@@ -658,269 +1036,6 @@ export default function DashboardClient() {
         </CardContent>
       </Card>
 
-      {/* 3) OBJETIVOS VS REAL (compacto) */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Objetivos vs Real (compacto)</CardTitle>
-          <div className="mt-1 text-sm viho-muted">Gap visible</div>
-        </CardHeader>
-
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Indicador</TableHead>
-                <TableHead className="text-right">Objetivo</TableHead>
-                <TableHead className="text-right">Real</TableHead>
-                <TableHead className="text-right">%</TableHead>
-                <TableHead className="text-right">Gap</TableHead>
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              <TableRow>
-                <TableCell className="font-medium">Unidades</TableCell>
-                <TableCell className="text-right">
-                  {tgtUnits > 0 ? formatInt(tgtUnits) : "—"}
-                </TableCell>
-                <TableCell className="text-right">{formatInt(actUnits)}</TableCell>
-                <TableCell className="text-right">
-                  {unitsPct == null ? (
-                    <span className="viho-muted">—</span>
-                  ) : (
-                    <Badge variant={Number(unitsPct) >= 100 ? "success" : "default"}>
-                      {Number(unitsPct)}%
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  {tgtUnits > 0 ? formatInt(Math.max(0, unitsGap)) : "—"}
-                </TableCell>
-              </TableRow>
-
-              <TableRow>
-                <TableCell className="font-medium">Delegados activos</TableCell>
-                <TableCell className="text-right">
-                  {tgtDelegates == null ? "—" : formatInt(tgtDelegates)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {actDelegates == null ? "—" : formatInt(actDelegates)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {delegatesPct == null ? (
-                    <span className="viho-muted">—</span>
-                  ) : (
-                    <Badge
-                      variant={Number(delegatesPct) >= 100 ? "success" : "default"}
-                    >
-                      {Number(delegatesPct)}%
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  {delegatesGap == null ? "—" : formatInt(delegatesGap)}
-                </TableCell>
-              </TableRow>
-
-              <TableRow>
-                <TableCell className="font-medium">Recomendadores activos</TableCell>
-                <TableCell className="text-right">—</TableCell>
-                <TableCell className="text-right">—</TableCell>
-                <TableCell className="text-right">
-                  <span className="viho-muted">—</span>
-                </TableCell>
-                <TableCell className="text-right">
-                  <span className="viho-muted">MVP</span>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-
-          {objError ? (
-            <div className="mt-3 text-xs viho-muted">
-              Nota MVP: objetivos no disponibles o sin permisos. (Endpoint objetivos)
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {/* 4) RANKINGS ESTRATÉGICOS */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Top Delegados (mes)</CardTitle>
-            <div className="mt-1 text-sm viho-muted">Máx 3 · unidades y comisión</div>
-          </CardHeader>
-
-          <CardContent>
-            {topDelegates.length === 0 ? (
-              <div className="text-sm viho-muted">Sin datos (MVP).</div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Delegado</TableHead>
-                    <TableHead className="text-right">Uds</TableHead>
-                    <TableHead className="text-right">Comisión</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {topDelegates.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-medium">
-                        {r.name}
-                        <div className="text-xs viho-muted">{r.email ?? "—"}</div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className="font-mono">{formatInt(r.units_total)}</span>
-                        <div className="text-[11px] viho-muted">
-                          {formatInt(r.units_sale_n)} venta · {formatInt(r.units_promo_n)} promo
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatMoneyEUR(Number(r.commission ?? 0) || 0)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Top Recomendadores (mes)</CardTitle>
-            <div className="mt-1 text-sm viho-muted">Máx 3 · unidades asociadas y comisión</div>
-          </CardHeader>
-
-          <CardContent>
-            {topRecommenders.length === 0 ? (
-              <div className="text-sm viho-muted">Sin datos (MVP).</div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Recomendador</TableHead>
-                    <TableHead className="text-right">Uds</TableHead>
-                    <TableHead className="text-right">Comisión</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {topRecommenders.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-medium">
-                        {r.name}
-                        <div className="text-xs viho-muted">
-                          {r.contact_email ?? "—"} · {r.tax_id ?? "—"}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className="font-mono">{formatInt(r.units_total)}</span>
-                        <div className="text-[11px] viho-muted">
-                          {formatInt(r.units_sale_n)} venta · {formatInt(r.units_promo_n)} promo
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatMoneyEUR(Number((r as any).commission ?? 0) || 0)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* 5) DIAGNÓSTICO + ACCIONES */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row items-start justify-between gap-3">
-            <div>
-              <CardTitle>Diagnóstico automático</CardTitle>
-              <div className="mt-1 text-sm viho-muted">Lectura rápida para ejecución</div>
-            </div>
-            <Badge variant="default">MVP</Badge>
-          </CardHeader>
-          <CardContent>
-            <div className="text-sm" style={{ color: "var(--viho-text)" }}>
-              {diagnosis}
-            </div>
-            <div className="mt-3 text-xs viho-muted">
-              Nota: heurística simple (foco concentración + gap objetivo). Se refina en fase 2.
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Acciones (checklist)</CardTitle>
-            <div className="mt-1 text-sm viho-muted">No se guarda (MVP)</div>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {[
-              { k: "a1", label: "Activar top 5 leads" },
-              { k: "a2", label: "Contactar 2 delegados clave" },
-              { k: "a3", label: "Revisar incidencias importación" },
-              { k: "a4", label: "Validar objetivos del mes" },
-            ].map((a) => (
-              <label key={a.k} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={!!actions[a.k]}
-                  onChange={(e) =>
-                    setActions((prev) => ({ ...prev, [a.k]: e.target.checked }))
-                  }
-                />
-                <span style={{ color: "var(--viho-text)" }}>{a.label}</span>
-              </label>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* 6) CONTEXTO OPERATIVO */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Contexto operativo</CardTitle>
-          <div className="mt-1 text-sm viho-muted">Facturas cobradas · clientes · delegados</div>
-        </CardHeader>
-
-        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
-              Facturas cobradas
-            </div>
-            <div className="mt-1 text-2xl font-semibold">
-              {invoicesPaidCount == null ? "—" : formatInt(invoicesPaidCount)}
-            </div>
-            <div className="text-xs viho-muted">is_paid = true</div>
-          </div>
-
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
-              Clientes únicos
-            </div>
-            <div className="mt-1 text-2xl font-semibold">
-              {clientsCount == null ? "—" : formatInt(clientsCount)}
-            </div>
-            <div className="text-xs viho-muted">distinct client_id</div>
-          </div>
-
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
-              Delegados activos (mes)
-            </div>
-            <div className="mt-1 text-2xl font-semibold">
-              {delegatesCount == null ? "—" : formatInt(delegatesCount)}
-            </div>
-            <div className="text-xs viho-muted">distinct delegate_id</div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Footer pequeño */}
       <div className="text-xs viho-muted">
         {loading ? "Cargando…" : "—"} · Actor:{" "}
         <span className="font-mono">

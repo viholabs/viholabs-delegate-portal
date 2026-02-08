@@ -1,119 +1,142 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+// src/app/api/control-room/month/route.ts
+import { NextResponse } from "next/server";
+import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-function json(status: number, body: any) {
+function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
-function isValidMonthYYYYMM01(value: string) {
-  return /^\d{4}-\d{2}-01$/.test(value);
+type ActorLite = {
+  id: string;
+  role: string | null;
+  status?: string | null;
+  name?: string | null;
+  email?: string | null;
+};
+
+type ActorFromRequestOk = {
+  ok: true;
+  actor: ActorLite;
+  supaRls: any;
+};
+
+type ActorFromRequestFail = {
+  ok: false;
+  status: number;
+  error: string;
+};
+
+function isOk(ar: any): ar is ActorFromRequestOk {
+  return !!ar && ar.ok === true && !!ar.actor && !!ar.supaRls;
 }
 
-function getBearerToken(req: NextRequest): string | null {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!h) return null;
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
+function isMonth01(s: string) {
+  return /^\d{4}-\d{2}-01$/.test(s);
 }
 
 function pickName(obj: any) {
   return obj?.name ?? obj?.contact_email ?? obj?.email ?? "—";
 }
 
-export async function POST(req: NextRequest) {
-  const stageBase = "api/control-room/month";
+/**
+ * SERVICE ROLE client (SUPER_ADMIN = Déu):
+ * - Al Control Room, el SUPER_ADMIN ha de poder veure KPI i comissions sense RLS.
+ * - Evita errors per policies circulars / permisos incomplets en MVP.
+ */
+function getServiceSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+
+  if (!url || !key) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY"
+    );
+  }
+
+  return createAdminClient(url, key, { auth: { persistSession: false } });
+}
+
+async function handle(req: Request) {
+  let stage = "init";
 
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    // 1) Auth + actor + supaRls (canónico)
+    stage = "actor_from_request";
+    const ar = (await getActorFromRequest(req)) as
+      | ActorFromRequestOk
+      | ActorFromRequestFail
+      | any;
 
-    if (!url || !anon || !service) {
-      return json(500, {
+    if (!isOk(ar)) {
+      return json((ar?.status as number) ?? 401, {
         ok: false,
-        stage: `${stageBase}:env`,
-        error: "Faltan variables de entorno de Supabase",
+        stage,
+        error: (ar?.error as string) ?? "No autenticado",
       });
     }
 
+    const actor = ar.actor;
+    const supaRls = ar.supaRls;
+
+    // 2) Permisos efectivos (SUPER_ADMIN = allowed)
+    stage = "effective_permissions";
+    const eff = await getEffectivePermissionsByActorId(String(actor.id));
+
+    stage = "authorize";
+    const allowed =
+      eff.isSuperAdmin ||
+      eff.has("control_room.dashboard.read") ||
+      eff.has("control_room.month.read") ||
+      eff.has("control_room.invoices.read") ||
+      eff.has("actors.read");
+
+    if (!allowed) {
+      return json(403, {
+        ok: false,
+        stage,
+        error: "No autorizado (control_room.month.read)",
+      });
+    }
+
+    // 3) Input (month)
+    stage = "input";
     const body = await req.json().catch(() => null);
     const month = String(body?.month ?? "");
 
-    if (!isValidMonthYYYYMM01(month)) {
+    if (!isMonth01(month)) {
       return json(422, {
         ok: false,
-        stage: `${stageBase}:input`,
+        stage,
         error: "month inválido (YYYY-MM-01)",
       });
     }
 
-    const token = getBearerToken(req);
-    if (!token) {
-      return json(401, {
-        ok: false,
-        stage: `${stageBase}:auth`,
-        error: "Falta Bearer token",
-      });
-    }
+    // SERVICE ROLE client per tot el bloc "executive view"
+    const admin = getServiceSupabase();
 
-    // 1) Validar sesión con ANON
-    const supabaseAnon = createClient(url, anon, {
-      auth: { persistSession: false },
-    });
-
-    const { data: userData, error: userErr } =
-      await supabaseAnon.auth.getUser(token);
-
-    if (userErr || !userData?.user) {
-      return json(401, {
-        ok: false,
-        stage: `${stageBase}:auth`,
-        error: "Token inválido",
-      });
-    }
-
-    // 2) DB con SERVICE ROLE (bypass RLS)
-    const supabase = createClient(url, service, {
-      auth: { persistSession: false },
-    });
-
-    // 3) Actor (NO bloqueante en MVP)
-    const { data: actor, error: actorErr } = await supabase
-      .from("actors")
-      .select("id, role, status, name, email")
-      .eq("auth_user_id", userData.user.id)
-      .maybeSingle();
-
-    const warning_actor_missing = !!actorErr || !actor;
-
-    if (actor && actor.status === "inactive") {
-      return json(403, {
-        ok: false,
-        stage: `${stageBase}:actor`,
-        error: "Actor inactivo",
-      });
-    }
-
-    // 4) KPI Month Summary (REAL)
-    const { data: kpiMonthRows, error: kpiMonthErr } = await supabase.rpc(
-      "kpi_month_summary",
+    // 4) KPI Month Summary (SERVICE ROLE + función estable v1)
+    stage = "kpi_month_summary";
+    const { data: kpiMonthRows, error: kpiMonthErr } = await admin.rpc(
+      "kpi_month_summary_v1",
       { p_month: month }
     );
 
     if (kpiMonthErr) {
-      return json(500, {
-        ok: false,
-        stage: `${stageBase}:kpi_month_summary`,
-        error: kpiMonthErr.message,
-      });
+      return json(500, { ok: false, stage, error: kpiMonthErr.message });
     }
 
-    const kpi_month = Array.isArray(kpiMonthRows) ? kpiMonthRows[0] : kpiMonthRows;
+    const kpi_month = Array.isArray(kpiMonthRows)
+      ? kpiMonthRows[0]
+      : kpiMonthRows;
 
-    // 5) commission_monthly (en tu schema: units_sale, units_promotion)
-    const { data: cmRows, error: cmErr } = await supabase
+    // 5) commission_monthly (SERVICE ROLE: SUPER_ADMIN ho veu tot)
+    stage = "commission_monthly";
+    const { data: cmRows, error: cmErr } = await admin
       .from("commission_monthly")
       .select(
         "beneficiary_type, beneficiary_id, commission_amount, units_sale, units_promotion, period_month, calc_meta"
@@ -121,11 +144,7 @@ export async function POST(req: NextRequest) {
       .eq("period_month", month);
 
     if (cmErr) {
-      return json(500, {
-        ok: false,
-        stage: `${stageBase}:commission_monthly`,
-        error: cmErr.message,
-      });
+      return json(500, { ok: false, stage, error: cmErr.message });
     }
 
     const rows = Array.isArray(cmRows) ? cmRows : [];
@@ -156,7 +175,8 @@ export async function POST(req: NextRequest) {
       )
       .slice(0, 10);
 
-    // Resolver nombres (delegates + clients)
+    // 6) Resolver nombres (delegates + clients) con SERVICE ROLE
+    stage = "resolve_names";
     const delegateIds = Array.from(
       new Set(delegatesRows.map((r: any) => String(r.beneficiary_id)))
     );
@@ -166,14 +186,14 @@ export async function POST(req: NextRequest) {
 
     const [delegatesRes, clientsRes] = await Promise.all([
       delegateIds.length
-        ? supabase
+        ? admin
             .from("delegates")
             .select("id, name, email, actor_id")
             .in("id", delegateIds)
         : Promise.resolve({ data: [], error: null } as any),
 
       recommClientIds.length
-        ? supabase
+        ? admin
             .from("clients")
             .select("id, name, contact_email, tax_id")
             .in("id", recommClientIds)
@@ -183,14 +203,14 @@ export async function POST(req: NextRequest) {
     if (delegatesRes?.error) {
       return json(500, {
         ok: false,
-        stage: `${stageBase}:delegates`,
+        stage: "delegates_select",
         error: delegatesRes.error.message,
       });
     }
     if (clientsRes?.error) {
       return json(500, {
         ok: false,
-        stage: `${stageBase}:clients`,
+        stage: "clients_select",
         error: clientsRes.error.message,
       });
     }
@@ -227,9 +247,10 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    // Actividad: últimas importaciones (según tu schema real)
+    // 7) Actividad: últimas importaciones (RLS; si falla, no rompe)
+    stage = "recent_imports";
     let recentImports: any[] = [];
-    const { data: ingestaData, error: ingestaErr } = await supabase
+    const { data: ingestaData, error: ingestaErr } = await supaRls
       .from("ingesta_log")
       .select("id, usuario_email, fecha_procesado, num_pdfs, num_ok")
       .order("fecha_procesado", { ascending: false })
@@ -237,25 +258,17 @@ export async function POST(req: NextRequest) {
 
     if (!ingestaErr && Array.isArray(ingestaData)) recentImports = ingestaData;
 
+    // 8) Respuesta
     return json(200, {
       ok: true,
       month,
-      actor: warning_actor_missing
-        ? {
-            id: null,
-            role: "unknown",
-            name:
-              userData.user.user_metadata?.name ??
-              userData.user.email ??
-              "—",
-          }
-        : {
-            id: actor.id,
-            role: actor.role,
-            name: actor.name ?? actor.email ?? "—",
-          },
-      warning_actor_missing,
-      kpi_month,
+      actor: {
+        id: String(actor.id),
+        role: actor.role ?? "unknown",
+        name: actor.name ?? actor.email ?? "—",
+      },
+      warning_actor_missing: false,
+      kpi_month: kpi_month ?? null,
       totals: {
         total_devengado_commissions: Number(totalDevengado.toFixed(2)),
       },
@@ -269,8 +282,12 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     return json(500, {
       ok: false,
-      stage: `api/control-room/month:unhandled`,
-      error: e?.message ?? "Unknown error",
+      stage,
+      error: e?.message ?? "Error inesperado",
     });
   }
+}
+
+export async function POST(req: Request) {
+  return handle(req);
 }

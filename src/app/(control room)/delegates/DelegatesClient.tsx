@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+import { CANON_COLORS, CANON_TINTS } from "@/lib/ui-canon";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -150,7 +151,7 @@ export default function DelegatesClient() {
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
             <CardTitle>Selector de delegado</CardTitle>
-            <div className="mt-1 text-sm" style={{ color: "rgba(17,24,39,0.65)" }}>
+            <div className="mt-1 text-sm" style={{ color: CANON_TINTS.authority.soft }}>
               Lista desde Supabase · orden alfabético
             </div>
           </div>
@@ -159,7 +160,7 @@ export default function DelegatesClient() {
 
         <CardContent className="space-y-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-center">
-            <label className="text-sm font-medium" style={{ color: "#111827" }}>
+            <label className="text-sm font-medium" style={{ color: CANON_COLORS.authority }}>
               Delegado
             </label>
 
@@ -174,7 +175,7 @@ export default function DelegatesClient() {
                 router.replace(`/control-room/delegates?${q.toString()}`);
               }}
               className="w-full rounded-xl border px-3 py-2 text-sm outline-none md:max-w-[420px]"
-              style={{ borderColor: "rgba(15,23,42,0.14)" }}
+              style={{ borderColor: CANON_TINTS.authority.subtle }}
             >
               <option value="">— Selecciona —</option>
               {delegates.map((d) => (
@@ -184,7 +185,7 @@ export default function DelegatesClient() {
               ))}
             </select>
 
-            <div className="text-xs" style={{ color: "rgba(17,24,39,0.6)" }}>
+            <div className="text-xs" style={{ color: CANON_TINTS.authority.soft }}>
               {selected ? (
                 <>
                   Seleccionado: <span className="font-semibold">{formatName(selected)}</span>
@@ -195,7 +196,7 @@ export default function DelegatesClient() {
             </div>
           </div>
 
-          <div className="text-xs" style={{ color: "rgba(17,24,39,0.6)" }}>
+          <div className="text-xs" style={{ color: CANON_TINTS.authority.soft }}>
             Consejo: para simular con tus delegados, usa esta pantalla y abre el cuadro de mando en modo supervisión.
           </div>
         </CardContent>
@@ -205,7 +206,7 @@ export default function DelegatesClient() {
       <Card>
         <CardHeader>
           <CardTitle>Listado</CardTitle>
-          <div className="mt-1 text-sm" style={{ color: "rgba(17,24,39,0.65)" }}>
+          <div className="mt-1 text-sm" style={{ color: CANON_TINTS.authority.soft }}>
             Verificación rápida de nombres y correos.
           </div>
         </CardHeader>
@@ -223,7 +224,7 @@ export default function DelegatesClient() {
             <TableBody>
               {delegates.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-sm" style={{ color: "rgba(17,24,39,0.65)" }}>
+                  <TableCell colSpan={3} className="text-sm" style={{ color: CANON_TINTS.authority.soft }}>
                     {loading ? "Cargando…" : "Sin delegados"}
                   </TableCell>
                 </TableRow>

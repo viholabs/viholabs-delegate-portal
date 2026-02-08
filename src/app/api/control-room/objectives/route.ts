@@ -1,10 +1,11 @@
 // src/app/api/control-room/objectives/route.ts
+
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
-
-type RpcPermRow = { perm_code: string | null };
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -40,9 +41,6 @@ function asNonNegInt(v: any): number | null {
   return n < 0 ? null : n;
 }
 
-/**
- * % tolerante: acepta null/undefined y nunca lanza.
- */
 function pct(
   actual: number | null | undefined,
   target: number | null | undefined
@@ -51,60 +49,27 @@ function pct(
   const t = typeof target === "number" && Number.isFinite(target) ? target : null;
   if (a === null || t === null) return null;
   if (t <= 0) return null;
-  return Math.round((a / t) * 1000) / 10; // 1 decimal
+  return Math.round((a / t) * 1000) / 10;
 }
 
-function normalizePermCode(v: any) {
-  return String(v ?? "").trim();
-}
+function getServiceSupabase() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function getEffectivePerms(supaService: any, actorId: string) {
-  const { data, error } = await supaService.rpc("effective_permissions", {
-    p_actor_id: actorId,
-  });
-
-  if (error) {
-    throw new Error(`effective_permissions failed: ${error.message}`);
+  if (!url || !key) {
+    throw new Error("Missing SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
 
-  const rows = (data ?? []) as RpcPermRow[];
-  const codes = rows
-    .map((r) => normalizePermCode(r?.perm_code))
-    .filter((x) => x.length > 0);
-
-  const isSuperAdmin = codes.includes("*");
-  const perms = new Set<string>(codes);
-
-  return {
-    isSuperAdmin,
-    has: (perm: string) => (isSuperAdmin ? true : perms.has(perm)),
-    list: codes,
-  };
-}
-
-async function audit(supaService: any, payload: any) {
-  try {
-    await supaService.from("audit_log").insert({
-      user_id: payload.user_id ?? null,
-      actor_id: payload.actor_id ?? null,
-      action: payload.action,
-      entity: payload.entity,
-      entity_id: payload.entity_id ?? null,
-      status: payload.status ?? "ok",
-      meta: payload.meta ?? {},
-    });
-  } catch {
-    // no bloqueante en MVP
-  }
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
 export async function POST(req: Request) {
   let stage = "init";
 
   try {
-    // 1) Actor + supa clients
     stage = "actor_from_request";
     const ar: any = await getActorFromRequest(req);
+
     if (!ar?.ok) {
       return json(ar?.status ?? 401, {
         ok: false,
@@ -113,38 +78,20 @@ export async function POST(req: Request) {
       });
     }
 
-    const { actor, supaService, supaRls, authUserId } = ar as {
-      actor: any;
-      supaService: any;
-      supaRls: any;
-      authUserId: string | null;
-    };
+    const { actor, supaRls } = ar as { actor: any; supaRls: any };
 
-    // 2) Permisos efectivos (RBAC + overrides)
     stage = "effective_permissions";
-    const perms = await getEffectivePerms(supaService, String(actor.id));
+    const eff = await getEffectivePermissionsByActorId(String(actor.id));
 
-    // Biblia: permiso canónico para leer objetivos
     stage = "authorize";
-    if (!perms.has("objectives.read")) {
-      await audit(supaService, {
-        user_id: authUserId,
-        actor_id: actor.id,
-        action: "OBJECTIVES_READ",
-        entity: "objectives",
-        status: "denied",
-        meta: { stage, missing: "objectives.read" },
-      });
-      return json(403, {
-        ok: false,
-        stage,
-        error: "No autorizado (objectives.read)",
-      });
+    const allowed = eff.isSuperAdmin || eff.has("objectives.read");
+    if (!allowed) {
+      return json(403, { ok: false, stage, error: "No autorizado (objectives.read)" });
     }
 
-    // 3) Body
     stage = "parse_body";
     const { month } = (await req.json().catch(() => ({}))) as { month?: string };
+
     if (!month || !isMonth01(month)) {
       return json(400, {
         ok: false,
@@ -153,9 +100,8 @@ export async function POST(req: Request) {
       });
     }
 
-    const year = Number(month.slice(0, 4));
+    const year = Number(String(month).slice(0, 4));
 
-    // 4) targets del mes (RLS)
     stage = "targets_monthly";
     const { data: tMonth, error: tMonthErr } = await supaRls
       .from("targets_monthly")
@@ -167,18 +113,34 @@ export async function POST(req: Request) {
       return json(500, { ok: false, stage, error: tMonthErr.message });
     }
 
-    // 5) actual del mes (RPC) (RLS)
+    // SERVICE ROLE
+    const supaService = getServiceSupabase();
+
+    // DIAGNÓSTICO: quién es el usuario/rol en Postgres para este cliente
+    stage = "diag:whoami";
+    const { data: whoArr, error: whoErr } = await supaService.rpc("sql", {
+      // OJO: esta RPC "sql" NO existe normalmente. Si no existe, lo manejamos abajo.
+      // La dejamos para detectar si tienes una función utilitaria interna.
+      q: "select current_user::text as current_user, session_user::text as session_user",
+    } as any);
+
+    const diag =
+      whoErr
+        ? { note: "No diag RPC 'sql' available", error: whoErr.message }
+        : { who: whoArr };
+
     stage = "rpc:kpi_month_summary_v1";
-    const { data: aMonthArr, error: aMonthErr } = await supaRls.rpc(
+    const { data: aMonthArr, error: aMonthErr } = await supaService.rpc(
       "kpi_month_summary_v1",
       { p_month: month }
     );
+
     if (aMonthErr) {
-      return json(500, { ok: false, stage, error: aMonthErr.message });
+      return json(500, { ok: false, stage, error: aMonthErr.message, diag });
     }
+
     const aMonth: any = Array.isArray(aMonthArr) ? aMonthArr[0] : aMonthArr;
 
-    // 6) targets canal anual (RLS)
     stage = "targets_channel_annual";
     const { data: tCh, error: tChErr } = await supaRls
       .from("targets_channel_annual")
@@ -187,19 +149,18 @@ export async function POST(req: Request) {
       .eq("active", true);
 
     if (tChErr) {
-      return json(500, { ok: false, stage, error: tChErr.message });
+      return json(500, { ok: false, stage, error: tChErr.message, diag });
     }
 
-    // 7) actual canal YTD (RPC) (RLS)
     stage = "rpc:kpi_channel_ytd_v1";
-    const { data: aCh, error: aChErr } = await supaRls.rpc("kpi_channel_ytd_v1", {
+    const { data: aCh, error: aChErr } = await supaService.rpc("kpi_channel_ytd_v1", {
       p_month: month,
     });
+
     if (aChErr) {
-      return json(500, { ok: false, stage, error: aChErr.message });
+      return json(500, { ok: false, stage, error: aChErr.message, diag });
     }
 
-    // 8) mapas
     stage = "maps";
     const targetMap = new Map<string, { label: string; target: number }>();
     for (const r of tCh ?? []) {
@@ -236,7 +197,6 @@ export async function POST(req: Request) {
 
     channels_ytd.sort((a, b) => (b.target_units || 0) - (a.target_units || 0));
 
-    // Mes: todo convertido a number ANTES de operar
     const tgtUnitsMonth: number = toNum(tMonth?.target_units_total, 0);
     const tgtDelegatesMonth: number | null =
       tMonth?.target_delegates_active == null
@@ -253,19 +213,11 @@ export async function POST(req: Request) {
         ? null
         : tgtDelegatesMonth - actDelegatesMonth;
 
-    await audit(supaService, {
-      user_id: authUserId,
-      actor_id: actor.id,
-      action: "OBJECTIVES_READ",
-      entity: "objectives",
-      status: "ok",
-      meta: { month },
-    });
-
     return json(200, {
       ok: true,
       month,
       year,
+      diag,
       actor: {
         id: String(actor.id),
         role: actor.role ?? null,
@@ -296,9 +248,9 @@ export async function PUT(req: Request) {
   let stage = "init";
 
   try {
-    // 1) Actor + supa clients
     stage = "actor_from_request";
     const ar: any = await getActorFromRequest(req);
+
     if (!ar?.ok) {
       return json(ar?.status ?? 401, {
         ok: false,
@@ -307,37 +259,17 @@ export async function PUT(req: Request) {
       });
     }
 
-    const { actor, supaService, supaRls, authUserId } = ar as {
-      actor: any;
-      supaService: any;
-      supaRls: any;
-      authUserId: string | null;
-    };
+    const { actor, supaRls } = ar as { actor: any; supaRls: any };
 
-    // 2) Permisos efectivos
     stage = "effective_permissions";
-    const perms = await getEffectivePerms(supaService, String(actor.id));
+    const eff = await getEffectivePermissionsByActorId(String(actor.id));
 
-    // Biblia: permiso canónico para editar objetivos
     stage = "authorize";
-    if (!perms.has("objectives.manage")) {
-      await audit(supaService, {
-        user_id: authUserId,
-        actor_id: actor.id,
-        action: "OBJECTIVES_WRITE",
-        entity: "objectives",
-        status: "denied",
-        meta: { stage, missing: "objectives.manage" },
-      });
-
-      return json(403, {
-        ok: false,
-        stage,
-        error: "No autorizado (objectives.manage)",
-      });
+    const allowed = eff.isSuperAdmin || eff.has("objectives.manage");
+    if (!allowed) {
+      return json(403, { ok: false, stage, error: "No autorizado (objectives.manage)" });
     }
 
-    // 3) Body
     stage = "parse_body";
     const body = (await req.json().catch(() => ({}))) as any;
 
@@ -352,15 +284,15 @@ export async function PUT(req: Request) {
 
     const year = Number(month.slice(0, 4));
 
-    // 4) Update targets_monthly
     stage = "update:targets_monthly";
     const target_units_total = asNonNegInt(body?.target_units_total);
     const target_delegates_active = asNonNegInt(body?.target_delegates_active);
+
     const notes =
       body?.notes === null || body?.notes === undefined ? undefined : String(body.notes);
 
-    // Construimos patch sólo con lo que venga en el body
     const patchMonth: any = {};
+
     if (target_units_total !== null) patchMonth.target_units_total = target_units_total;
     if (body?.target_units_total === null) patchMonth.target_units_total = null;
 
@@ -381,8 +313,6 @@ export async function PUT(req: Request) {
       }
     }
 
-    // 5) Optional: update targets_channel_annual (array)
-    // body.channels: [{ profile_type, target_units, active? }]
     stage = "update:targets_channel_annual";
     const channels = Array.isArray(body?.channels) ? body.channels : null;
 
@@ -390,13 +320,11 @@ export async function PUT(req: Request) {
       for (const ch of channels) {
         const profile_type = String(ch?.profile_type ?? "").trim();
         const target_units = asNonNegInt(ch?.target_units);
-        const active =
-          typeof ch?.active === "boolean" ? ch.active : true;
+        const active = typeof ch?.active === "boolean" ? ch.active : true;
 
         if (!profile_type) continue;
         if (target_units === null) continue;
 
-        // upsert por (year, profile_type)
         const { error: upChErr } = await supaRls
           .from("targets_channel_annual")
           .upsert(
@@ -414,15 +342,6 @@ export async function PUT(req: Request) {
         }
       }
     }
-
-    await audit(supaService, {
-      user_id: authUserId,
-      actor_id: actor.id,
-      action: "OBJECTIVES_WRITE",
-      entity: "objectives",
-      status: "ok",
-      meta: { month, updated_month: Object.keys(patchMonth).length > 0, updated_channels: !!channels },
-    });
 
     return json(200, { ok: true, month });
   } catch (e: any) {

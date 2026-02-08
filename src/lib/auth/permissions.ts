@@ -1,6 +1,6 @@
 // src/lib/auth/permissions.ts
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 
 type RpcPermRow = { perm_code: string | null };
 
@@ -11,16 +11,31 @@ export type EffectivePermissions = {
 };
 
 /**
- * Permisos efectivos (RBAC + overrides) desde la función SQL:
+ * Permisos efectius (RBAC + overrides) des de la funció SQL:
  * public.effective_permissions(actor_id)
  *
- * - Si devuelve '*', es SUPER_ADMIN => acceso total.
- * - Esto escala a miles de usuarios: pocos permisos por rol + pocos overrides por actor.
+ * IMPORTANT:
+ * - Aquesta RPC S'EXECUTA AMB SERVICE ROLE
+ * - Mai amb el client de sessió (authenticated)
+ * - Evita recursió RLS → stack depth exceeded
  */
 export async function getEffectivePermissionsByActorId(
   actorId: string
 ): Promise<EffectivePermissions> {
-  const supabase = await createClient();
+  const url =
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceKey) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  }
+
+  const supabase = createClient(url, serviceKey, {
+    auth: { persistSession: false },
+  });
 
   const { data, error } = await supabase.rpc("effective_permissions", {
     p_actor_id: actorId,
@@ -31,7 +46,8 @@ export async function getEffectivePermissionsByActorId(
   }
 
   const rows = (data ?? []) as RpcPermRow[];
-  const codes: string[] = rows
+
+  const codes = rows
     .map((r) => String(r?.perm_code ?? "").trim())
     .filter((x) => x.length > 0);
 

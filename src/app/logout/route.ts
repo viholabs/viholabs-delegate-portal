@@ -1,40 +1,43 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import type { CookieOptions } from "@supabase/ssr";
+// src/app/logout/route.ts
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
-type CookieToSet = { name: string; value: string; options: CookieOptions };
+export const runtime = "nodejs";
 
-function getBaseUrl(req: NextRequest) {
-  const env = process.env.NEXT_PUBLIC_SITE_URL;
-  if (env) return env.replace(/\/$/, "");
+function getPublicOrigin(req: Request) {
+  const h = req.headers;
 
-  const forwardedHost = req.headers.get("x-forwarded-host");
-  const forwardedProto = req.headers.get("x-forwarded-proto") ?? "https";
-  if (forwardedHost) return `${forwardedProto}://${forwardedHost}`;
+  const proto =
+    h.get("x-forwarded-proto") ||
+    (h.get("host")?.startsWith("localhost") ? "http" : "https") ||
+    "https";
 
-  return req.nextUrl.origin;
+  const host =
+    h.get("x-forwarded-host") ||
+    h.get("host") ||
+    "";
+
+  if (!host) {
+    // Fallback extremo: usar req.url aunque venga raro
+    return new URL(req.url).origin;
+  }
+
+  return `${proto}://${host}`;
 }
 
-export async function POST(req: NextRequest) {
-  const baseUrl = getBaseUrl(req);
+export async function GET(req: Request) {
+  // 1) Cerrar sesión (cookies SSR)
+  try {
+    const supabase = await createClient();
+    await supabase.auth.signOut();
+  } catch {
+    // aunque falle, redirigimos igual
+  }
 
-  const res = NextResponse.redirect(new URL("/login", baseUrl), { status: 303 });
+  // 2) Redirect robusto (Codespaces / proxy / prod)
+  const origin = getPublicOrigin(req);
+  const loginUrl = new URL("/login", origin);
+  loginUrl.searchParams.set("logged_out", "true");
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => req.cookies.getAll(),
-        setAll: (cookiesToSet: CookieToSet[]) => {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            res.cookies.set(name, value, options);
-          });
-        },
-      },
-    }
-  );
-
-  await supabase.auth.signOut();
-  return res;
+  return NextResponse.redirect(loginUrl);
 }

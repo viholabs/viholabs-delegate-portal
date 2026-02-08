@@ -212,7 +212,7 @@ function Gauge({
   progress01: number;
 }) {
   const p = Math.round(clamp01(progress01) * 100);
-  const bg = `conic-gradient(#f28444 ${p}%, rgba(89,49,60,0.10) ${p}% 100%)`;
+  const bg = "var(--viho-surface-2)";
 
   return (
     <div className="flex items-center gap-4">
@@ -245,14 +245,14 @@ function Gauge({
         </div>
         <div
           className="text-lg font-semibold leading-tight"
-          style={{ color: "#111827" }}
+          style={{ color: "var(--viho-text)" }}
         >
           {valueText}
         </div>
         {subText ? (
           <div
             className="text-xs mt-0.5"
-            style={{ color: "rgba(17,24,39,0.65)" }}
+            style={{ color: "var(--viho-muted)" }}
           >
             {subText}
           </div>
@@ -535,9 +535,9 @@ export default function DashboardClient() {
 
           <div
             className="mt-2 flex flex-wrap items-center gap-2 text-sm"
-            style={{ color: "rgba(17,24,39,0.7)" }}
+            style={{ color: "var(--viho-muted)" }}
           >
-            <span className="font-semibold" style={{ color: "#111827" }}>
+            <span className="font-semibold" style={{ color: "var(--viho-text)" }}>
               {delegateName}
             </span>
             <span>·</span>
@@ -576,7 +576,7 @@ export default function DashboardClient() {
                 router.push(`/delegate/dashboard?${q.toString()}`);
               }}
               className="mt-1 w-[150px] bg-transparent text-sm outline-none"
-              style={{ color: "#111827" }}
+              style={{ color: "var(--viho-text)" }}
             />
           </div>
 
@@ -603,7 +603,7 @@ export default function DashboardClient() {
               {data?.stage ? (
                 <div
                   className="mt-1 text-xs"
-                  style={{ color: "rgba(17,24,39,0.6)" }}
+                  style={{ color: "var(--viho-muted)" }}
                 >
                   Stage: <span className="font-mono">{data.stage}</span>
                 </div>
@@ -640,7 +640,7 @@ export default function DashboardClient() {
 
               <div
                 className="mt-2 text-sm"
-                style={{ color: "rgba(17,24,39,0.65)" }}
+                style={{ color: "var(--viho-muted)" }}
               >
                 {c.sub}
               </div>
@@ -688,7 +688,7 @@ export default function DashboardClient() {
                     <div className="mt-2">
                       <div
                         className="flex items-center justify-between text-xs"
-                        style={{ color: "rgba(17,24,39,0.65)" }}
+                        style={{ color: "var(--viho-muted)" }}
                       >
                         <span>Progreso a siguiente tramo</span>
                         <span>
@@ -712,7 +712,7 @@ export default function DashboardClient() {
 
                       <div
                         className="mt-2 text-xs"
-                        style={{ color: "rgba(17,24,39,0.62)" }}
+                        style={{ color: "var(--viho-muted)" }}
                       >
                         Ahora:{" "}
                         <b>
@@ -731,7 +731,7 @@ export default function DashboardClient() {
                           <>
                             {" "}
                             ·{" "}
-                            <span style={{ color: "rgba(17,24,39,0.55)" }}>
+                            <span style={{ color: "var(--viho-muted)" }}>
                               (Define tramos para mostrar salto real)
                             </span>
                           </>
@@ -761,10 +761,10 @@ export default function DashboardClient() {
                             <div className="min-w-0">
                               <div
                                 className="text-sm font-medium"
-                                style={{ color: "#111827" }}
+                                style={{ color: "var(--viho-text)" }}
                               >
                                 {d.recommender_name}{" "}
-                                <span style={{ color: "rgba(17,24,39,0.55)" }}>
+                                <span style={{ color: "var(--viho-muted)" }}>
                                   →
                                 </span>{" "}
                                 <span className="font-normal">
@@ -773,7 +773,7 @@ export default function DashboardClient() {
                               </div>
                               <div
                                 className="text-xs"
-                                style={{ color: "rgba(17,24,39,0.65)" }}
+                                style={{ color: "var(--viho-muted)" }}
                               >
                                 {formatInt(d.units_sale_paid)} uds cobradas ·{" "}
                                 {d.percentage}% · Base{" "}
@@ -832,7 +832,7 @@ export default function DashboardClient() {
                     {bonus ? (
                       <div
                         className="mt-2 text-xs"
-                        style={{ color: "rgba(17,24,39,0.62)" }}
+                        style={{ color: "var(--viho-muted)" }}
                       >
                         Ventana:{" "}
                         <span className="font-mono">{bonus.quarter_start}</span>{" "}
@@ -841,7 +841,7 @@ export default function DashboardClient() {
                         Bonus: <b>{formatMoneyEUR(bonus.quarterly_bonus)}</b> ·
                         Te faltan <b>{formatInt(bonus.remaining_units)}</b> uds
                         <br />
-                        <span style={{ color: "rgba(17,24,39,0.55)" }}>
+                        <span style={{ color: "var(--viho-muted)" }}>
                           (Cuenta SOLO venta cobrada · FOC/promo fuera del
                           objetivo)
                         </span>
@@ -849,7 +849,7 @@ export default function DashboardClient() {
                     ) : (
                       <div
                         className="mt-2 text-xs"
-                        style={{ color: "rgba(17,24,39,0.55)" }}
+                        style={{ color: "var(--viho-muted)" }}
                       >
                         Objetivos no disponibles (MVP).
                       </div>
@@ -869,7 +869,7 @@ export default function DashboardClient() {
               {c.title === "Comisión del mes" ? (
                 <div
                   className="mt-2 text-xs"
-                  style={{ color: "rgba(17,24,39,0.6)" }}
+                  style={{ color: "var(--viho-muted)" }}
                 >
                   Precio ref:{" "}
                   <span className="font-mono">
@@ -890,7 +890,7 @@ export default function DashboardClient() {
             <CardTitle>Avisos</CardTitle>
             <div
               className="mt-1 text-sm"
-              style={{ color: "rgba(17,24,39,0.65)" }}
+              style={{ color: "var(--viho-muted)" }}
             >
               Pendientes de cobro (preparado para vencimiento)
             </div>
@@ -903,16 +903,16 @@ export default function DashboardClient() {
         </CardHeader>
         <CardContent>
           {invoicesUnpaid > 0 ? (
-            <div className="text-sm" style={{ color: "#111827" }}>
+            <div className="text-sm" style={{ color: "var(--viho-text)" }}>
               Hay <b>{formatInt(invoicesUnpaid)}</b> facturas pendientes de
               cobro. La comisión de esas ventas queda en espera.
             </div>
           ) : (
-            <div className="text-sm" style={{ color: "#111827" }}>
+            <div className="text-sm" style={{ color: "var(--viho-text)" }}>
               No hay facturas pendientes de cobro en este periodo.
             </div>
           )}
-          <div className="mt-2 text-xs" style={{ color: "rgba(17,24,39,0.6)" }}>
+          <div className="mt-2 text-xs" style={{ color: "var(--viho-muted)" }}>
             Nota: los bonus (FOC) no se consideran pendientes y no generan
             comisión.
           </div>
@@ -925,7 +925,7 @@ export default function DashboardClient() {
           <CardTitle>Facturas del mes</CardTitle>
           <div
             className="mt-1 text-sm"
-            style={{ color: "rgba(17,24,39,0.65)" }}
+            style={{ color: "var(--viho-muted)" }}
           >
             Vista por factura · separando venta vs bonus (FOC)
           </div>
@@ -951,7 +951,7 @@ export default function DashboardClient() {
                   <TableCell
                     colSpan={7}
                     className="text-sm"
-                    style={{ color: "rgba(17,24,39,0.65)" }}
+                    style={{ color: "var(--viho-muted)" }}
                   >
                     {loading ? "Cargando…" : "— Sin facturas en este periodo —"}
                   </TableCell>
@@ -983,7 +983,7 @@ export default function DashboardClient() {
                         </Badge>
                         <div
                           className="mt-1 text-[11px]"
-                          style={{ color: "rgba(17,24,39,0.6)" }}
+                          style={{ color: "var(--viho-muted)" }}
                         >
                           Neto:{" "}
                           {r.total_net != null
@@ -1002,7 +1002,7 @@ export default function DashboardClient() {
             </TableBody>
           </Table>
 
-          <div className="mt-3 text-xs" style={{ color: "rgba(17,24,39,0.6)" }}>
+          <div className="mt-3 text-xs" style={{ color: "var(--viho-muted)" }}>
             Preparado para fase 2: vencimiento (due_date) + alertas automáticas
             por retraso.
           </div>
@@ -1018,7 +1018,7 @@ export default function DashboardClient() {
             <CardTitle>Acción comercial</CardTitle>
             <div
               className="mt-1 text-sm"
-              style={{ color: "rgba(17,24,39,0.65)" }}
+              style={{ color: "var(--viho-muted)" }}
             >
               Top 5 clientes · Recomendadores · Clientes dormidos
             </div>
@@ -1034,13 +1034,13 @@ export default function DashboardClient() {
 
         <CardContent>
           {commercialLoading ? (
-            <div className="text-sm" style={{ color: "rgba(17,24,39,0.65)" }}>
+            <div className="text-sm" style={{ color: "var(--viho-muted)" }}>
               Cargando información comercial…
             </div>
           ) : commercialError ? (
             <div className="text-sm text-red-600">
               {commercialError}
-              <div className="mt-2 text-xs" style={{ color: "rgba(17,24,39,0.6)" }}>
+              <div className="mt-2 text-xs" style={{ color: "var(--viho-muted)" }}>
                 Si aún no tienes el endpoint /api/delegate/commercial, créalo y este bloque se llenará solo.
               </div>
             </div>
@@ -1056,21 +1056,21 @@ export default function DashboardClient() {
                 </div>
                 <div className="mt-3 space-y-2">
                   {(commercial?.top_clients ?? []).length === 0 ? (
-                    <div className="text-sm" style={{ color: "rgba(17,24,39,0.65)" }}>
+                    <div className="text-sm" style={{ color: "var(--viho-muted)" }}>
                       — Sin datos —
                     </div>
                   ) : (
                     (commercial?.top_clients ?? []).map((c, idx) => (
                       <div key={c.id} className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-medium" style={{ color: "#111827" }}>
+                          <div className="text-sm font-medium" style={{ color: "var(--viho-text)" }}>
                             {idx + 1}. {c.name}
                           </div>
-                          <div className="text-xs" style={{ color: "rgba(17,24,39,0.65)" }}>
+                          <div className="text-xs" style={{ color: "var(--viho-muted)" }}>
                             {formatInt(c.units_sale_paid)} uds · {formatMoneyEUR(c.base_paid)} · {c.invoices_paid} fact.
                           </div>
                         </div>
-                        <div className="text-xs font-mono" style={{ color: "rgba(17,24,39,0.65)" }}>
+                        <div className="text-xs font-mono" style={{ color: "var(--viho-muted)" }}>
                           {c.last_invoice_date ? fmtDate(c.last_invoice_date) : "—"}
                         </div>
                       </div>
@@ -1089,26 +1089,26 @@ export default function DashboardClient() {
                 </div>
                 <div className="mt-3 space-y-2">
                   {(commercial?.recommender_tree ?? []).length === 0 ? (
-                    <div className="text-sm" style={{ color: "rgba(17,24,39,0.65)" }}>
+                    <div className="text-sm" style={{ color: "var(--viho-muted)" }}>
                       — Sin relaciones —
                     </div>
                   ) : (
                     (commercial?.recommender_tree ?? []).slice(0, 6).map((r) => (
                       <div key={r.id} className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-medium" style={{ color: "#111827" }}>
+                          <div className="text-sm font-medium" style={{ color: "var(--viho-text)" }}>
                             {r.recommender.name}{" "}
-                            <span style={{ color: "rgba(17,24,39,0.55)" }}>→</span>{" "}
+                            <span style={{ color: "var(--viho-muted)" }}>→</span>{" "}
                             {r.referred.name}
                           </div>
-                          <div className="text-xs" style={{ color: "rgba(17,24,39,0.65)" }}>
+                          <div className="text-xs" style={{ color: "var(--viho-muted)" }}>
                             {formatInt(r.month_sales.units_sale_paid)} uds · {r.percentage}% · Base{" "}
                             {formatMoneyEUR(r.month_sales.base_paid)}
                           </div>
                         </div>
                         <div
                           className="text-sm font-semibold"
-                          style={{ color: r.mode === "deduct" ? "#59313c" : "#111827" }}
+                          style={{ color: r.mode === "deduct" ? "#59313c" : "var(--viho-text)" }}
                         >
                           {r.mode === "deduct" ? "-" : "+"}
                           {formatMoneyEUR(r.month_sales.impact_amount)}
@@ -1117,7 +1117,7 @@ export default function DashboardClient() {
                     ))
                   )}
                   {(commercial?.recommender_tree ?? []).length > 6 ? (
-                    <div className="text-xs mt-2" style={{ color: "rgba(17,24,39,0.6)" }}>
+                    <div className="text-xs mt-2" style={{ color: "var(--viho-muted)" }}>
                       Mostrando 6 · (fase 2: ver todos + drilldown)
                     </div>
                   ) : null}
@@ -1135,17 +1135,17 @@ export default function DashboardClient() {
 
                 <div className="mt-3 space-y-2">
                   {(commercial?.sleeping_clients ?? []).length === 0 ? (
-                    <div className="text-sm" style={{ color: "rgba(17,24,39,0.65)" }}>
+                    <div className="text-sm" style={{ color: "var(--viho-muted)" }}>
                       — Ninguno —
                     </div>
                   ) : (
                     (commercial?.sleeping_clients ?? []).slice(0, 6).map((s) => (
                       <div key={s.client.id} className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-medium" style={{ color: "#111827" }}>
+                          <div className="text-sm font-medium" style={{ color: "var(--viho-text)" }}>
                             {s.client.name}
                           </div>
-                          <div className="text-xs" style={{ color: "rgba(17,24,39,0.65)" }}>
+                          <div className="text-xs" style={{ color: "var(--viho-muted)" }}>
                             {formatInt(s.days_since_last)} días sin pedido
                             {s.client.contact_email ? ` · ${s.client.contact_email}` : ""}
                           </div>
@@ -1165,7 +1165,7 @@ export default function DashboardClient() {
                     ))
                   )}
                   {(commercial?.sleeping_clients ?? []).length > 6 ? (
-                    <div className="text-xs mt-2" style={{ color: "rgba(17,24,39,0.6)" }}>
+                    <div className="text-xs mt-2" style={{ color: "var(--viho-muted)" }}>
                       Mostrando 6 · (fase 2: lista completa + acciones)
                     </div>
                   ) : null}

@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -44,7 +45,8 @@ export function getServiceClient() {
 
 /**
  * Cliente RLS: usa ANON + JWT del usuario para que apliquen policies RLS.
- * Este es el cliente que deben usar los endpoints /api/delegate/* para leer datos.
+ * Este es el cliente que deben usar los endpoints /api/delegate/* para leer datos
+ * cuando vienen por Bearer token.
  */
 export function getRlsClientFromToken(token: string) {
   const { url, anon } = getEnvOrThrow();
@@ -59,29 +61,84 @@ export function getRlsClientFromToken(token: string) {
 }
 
 /**
- * Resuelve el actor a partir del JWT.
- * - Valida token con ANON (auth.getUser)
- * - Busca actor con SERVICE ROLE por auth_user_id (no por email)
- * - Devuelve supaRls para el acceso a datos (RLS ON)
+ * ✅ CANÓNICO (FUTURO-SOLIDO):
+ * Resuelve el actor con DOS vías, en este orden:
+ *  1) Cookies SSR (Next 15 + @supabase/ssr)  ← permite abrir endpoints en navegador
+ *  2) Bearer token (compatibilidad con frontend actual y integraciones)
+ *
+ * Devuelve:
+ *  - supaRls: cliente con RLS ON (cookies o token)
+ *  - supaService: service role para escrituras internas
+ *  - actor: actor de negocio resuelto por auth_user_id
  */
 export async function getActorFromRequest(req: Request) {
+  let stage = "init";
+
   try {
+    const supaService = getServiceClient();
+
+    // -------------------------
+    // 1) Intento por COOKIES SSR
+    // -------------------------
+    stage = "cookies_auth";
+    try {
+      const supaRlsCookies = await createServerSupabaseClient();
+      const { data: uData, error: uErr } = await supaRlsCookies.auth.getUser();
+      const user = uData?.user;
+
+      if (!uErr && user?.id) {
+        const authUserId = user.id;
+
+        stage = "cookies_lookup_actor";
+        const { data: actor, error: aErr } = await supaService
+          .from("actors")
+          .select("id, role, status, name, email, auth_user_id")
+          .eq("auth_user_id", authUserId)
+          .maybeSingle();
+
+        if (aErr) return { ok: false as const, status: 500, error: aErr.message };
+        if (!actor) return { ok: false as const, status: 403, error: "Actor not found" };
+
+        if (String(actor.status ?? "").toLowerCase() !== "active") {
+          return { ok: false as const, status: 403, error: "Actor inactive" };
+        }
+
+        return {
+          ok: true as const,
+          supaService,
+          supaRls: supaRlsCookies,
+          actor,
+          authUserId,
+          authMode: "cookies" as const,
+        };
+      }
+    } catch {
+      // Si cookies no están disponibles en este contexto, seguimos al Bearer token
+    }
+
+    // -------------------------
+    // 2) Fallback por BEARER token
+    // -------------------------
+    stage = "bearer_token";
     const token = getBearerToken(req);
-    if (!token) return { ok: false as const, status: 401, error: "Missing Bearer token" };
+    if (!token) {
+      return { ok: false as const, status: 401, error: "Missing Bearer token" };
+    }
 
     const { url, anon } = getEnvOrThrow();
 
-    // 1) Validar JWT con ANON
+    stage = "bearer_validate";
     const supaAnon = createClient(url, anon, { auth: { persistSession: false } });
     const { data: uData, error: uErr } = await supaAnon.auth.getUser(token);
     const user = uData?.user;
 
-    if (uErr || !user?.id) return { ok: false as const, status: 401, error: "Invalid token" };
+    if (uErr || !user?.id) {
+      return { ok: false as const, status: 401, error: "Invalid token" };
+    }
 
     const authUserId = user.id;
 
-    // 2) Lookup actor SOLO por auth_user_id (service role)
-    const supaService = getServiceClient();
+    stage = "bearer_lookup_actor";
     const { data: actor, error: aErr } = await supaService
       .from("actors")
       .select("id, role, status, name, email, auth_user_id")
@@ -95,13 +152,20 @@ export async function getActorFromRequest(req: Request) {
       return { ok: false as const, status: 403, error: "Actor inactive" };
     }
 
-    // 3) Cliente RLS para queries de negocio
+    stage = "bearer_rls_client";
     const supaRls = getRlsClientFromToken(token);
 
-    return { ok: true as const, supaService, supaRls, actor, authUserId };
+    return {
+      ok: true as const,
+      supaService,
+      supaRls,
+      actor,
+      authUserId,
+      authMode: "bearer" as const,
+    };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Server error";
-    return { ok: false as const, status: 500, error: msg };
+    return { ok: false as const, status: 500, error: msg, stage };
   }
 }
 
@@ -121,10 +185,6 @@ type ResolveDelegateArgs = {
  * Resolver delegate_id:
  * - Self: delegates.actor_id = actor.id
  * - Supervision/impersonation: solo si viene delegateIdFromQuery y el actor tiene permisos efectivos de supervisión
- *
- * IMPORTANTE:
- * - Para queries de negocio usar supaRls (RLS ON).
- * - Para tareas internas usar supaService.
  */
 export async function resolveDelegateIdOrThrow(args: ResolveDelegateArgs) {
   const { supaRls, actor, delegateIdFromQuery, effectivePerms } = args;
@@ -133,7 +193,7 @@ export async function resolveDelegateIdOrThrow(args: ResolveDelegateArgs) {
   if (delegateIdFromQuery && effectivePerms) {
     const canImpersonate =
       effectivePerms.isSuperAdmin ||
-      effectivePerms.has("delegates.read") ||
+      effectivePerms.has("actors.read") ||
       effectivePerms.has("control_room.delegates.read") ||
       effectivePerms.has("assignments.read");
 

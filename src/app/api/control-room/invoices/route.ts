@@ -63,6 +63,10 @@ async function getPermsOrThrow(supaService: any, actorId: string) {
   };
 }
 
+function parseBool01(v: string | null): boolean {
+  return v === "1" || (v ?? "").toLowerCase() === "true";
+}
+
 export async function GET(req: Request) {
   let stage = "init";
 
@@ -80,8 +84,8 @@ export async function GET(req: Request) {
 
     const { actor, supaService, supaRls } = ar as {
       actor: { id: string };
-      supaService: any;
-      supaRls: any;
+      supaService: any; // service role
+      supaRls: any; // RLS client
     };
 
     // 2) Permisos efectivos + autorización
@@ -99,6 +103,10 @@ export async function GET(req: Request) {
     const monthParam = url.searchParams.get("month") || "";
     const q = (url.searchParams.get("q") || "").trim();
 
+    // Sidebar badge usa esto:
+    const countOnly = parseBool01(url.searchParams.get("count_only"));
+    const needsReview = parseBool01(url.searchParams.get("needs_review"));
+
     const month = toMonthStringFromDateYYYYMM01(monthParam);
     if (!month) {
       return json(400, {
@@ -109,9 +117,38 @@ export async function GET(req: Request) {
       });
     }
 
-    // 4) Query (con RLS)
+    // ✅ CLIENT A USAR:
+    // - SUPER_ADMIN -> service (bypass RLS) para evitar recursividad (stack depth)
+    // - Otros -> RLS normal
+    const db = perms.isSuperAdmin ? supaService : supaRls;
+
+    // 4) COUNT ONLY (para Sidebar / badges) -> query mínima SIN joins
+    if (countOnly) {
+      stage = "select_invoices_count";
+
+      let cq = db
+        .from("invoices")
+        .select("id", { count: "exact", head: true })
+        .eq("source_month", month);
+
+      if (needsReview) cq = cq.eq("needs_review", true);
+
+      const { count, error } = await cq;
+      if (error) return json(500, { ok: false, stage, error: error.message });
+
+      return json(200, {
+        ok: true,
+        month,
+        q: "",
+        count_only: true,
+        needs_review: needsReview,
+        count: Number(count ?? 0),
+      });
+    }
+
+    // 5) LISTA (pantalla / tabla) -> mantiene tu select original
     stage = "select_invoices";
-    let query = supaRls
+    let query = db
       .from("invoices")
       .select(
         `
@@ -142,6 +179,10 @@ export async function GET(req: Request) {
       .eq("source_month", month)
       .order("invoice_date", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false });
+
+    if (needsReview) {
+      query = query.eq("needs_review", true);
+    }
 
     if (q) {
       const like = `%${q}%`;
