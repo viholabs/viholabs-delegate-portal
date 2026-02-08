@@ -1,0 +1,10 @@
+ESTAT DEL PROJECTE:
+- UI canònica aplicada i validada
+- Sense colors slate (#111827)
+- Sense gradients prohibits
+- Checker ui-canon-check.sh OK
+- Últim commit: chore(ui-canon)
+
+PROPER PAS:
+- Revisar altres pantalles amb el checker
+- Consolidar ús exclusiu de CANON_COLORS / CANON_TINTS
