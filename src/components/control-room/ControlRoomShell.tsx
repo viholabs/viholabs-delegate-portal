@@ -5,11 +5,10 @@
  * Contracte canònic:
  * - ControlRoomShell NO és una pell pròpia.
  * - La pell única del portal és PortalShell.
- * - Només tokens (cap hex/rgba inline).
+ * - Només aporta configuració: sidebar + header (sense containers estructurals globals).
  */
 
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import PortalShell from "@/components/portal/PortalShell";
@@ -30,30 +29,47 @@ function titleForPath(pathname: string) {
 
 export default function ControlRoomShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "";
-  const pageTitle = titleForPath(pathname);
+  const title = titleForPath(pathname);
 
   return (
     <PortalShell
-      sidebar={<SidebarNav />}
+      sidebar={
+        <div className="px-3 py-3">
+          {/* Identidad */}
+          <div className="mb-3 px-2">
+            <div
+              className="text-xs font-semibold tracking-wide"
+              style={{ color: "var(--viho-primary)" }}
+            >
+              VIHOLABS · CONTROL ROOM
+            </div>
+            <div className="text-sm" style={{ color: "var(--viho-muted)" }}>
+              Operativa y administración
+            </div>
+          </div>
+
+          {/* Nav */}
+          <SidebarNav />
+
+          {/* Acción única (logout) — dentro del sidebar para no romper PortalShell */}
+          <div className="mt-4 px-2">
+            <a
+              href="/logout"
+              className="block rounded-xl border px-3 py-2 text-sm font-medium hover:bg-[color:var(--viho-surface-2)]"
+              style={{ borderColor: "var(--viho-border)", color: "var(--viho-primary)" }}
+            >
+              Salir
+            </a>
+          </div>
+        </div>
+      }
       header={{
         kicker: "VIHOLABS · CONTROL ROOM",
-        title: "Portal Super Administrador",
+        title: title === "Control Room" ? "Portal Super Administrador" : title,
         subtitle: "Operativa, KPIs y administración (MVP).",
-        badgeText: pageTitle,
+        badgeText: title && title !== "Control Room" ? `Control Room / ${title}` : "Control Room",
       }}
-      className="min-h-screen"
     >
-      {/* Acció superior institucional (logout) */}
-      <div className="mb-4 flex justify-end">
-        <Link
-          href="/logout"
-          className="rounded-xl border px-3 py-2 text-sm font-medium hover:bg-white/40"
-          style={{ borderColor: "var(--viho-border)" }}
-        >
-          Salir
-        </Link>
-      </div>
-
       {children}
     </PortalShell>
   );
