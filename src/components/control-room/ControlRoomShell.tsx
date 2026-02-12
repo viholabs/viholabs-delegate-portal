@@ -1,8 +1,18 @@
 "use client";
 
+/**
+ * VIHOLABS — ControlRoomShell (CONFIG WRAPPER over PortalShell)
+ * Contracte canònic:
+ * - ControlRoomShell NO és una pell pròpia.
+ * - La pell única del portal és PortalShell.
+ * - Només tokens (cap hex/rgba inline).
+ */
+
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+
+import PortalShell from "@/components/portal/PortalShell";
 import SidebarNav from "@/components/control-room/SidebarNav";
 
 function titleForPath(pathname: string) {
@@ -20,74 +30,31 @@ function titleForPath(pathname: string) {
 
 export default function ControlRoomShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "";
-  const title = titleForPath(pathname);
+  const pageTitle = titleForPath(pathname);
 
   return (
-    <div
-      className="min-h-screen"
-      style={{
-        background: "var(--background)",
-        color: "var(--foreground)",
+    <PortalShell
+      sidebar={<SidebarNav />}
+      header={{
+        kicker: "VIHOLABS · CONTROL ROOM",
+        title: "Portal Super Administrador",
+        subtitle: "Operativa, KPIs y administración (MVP).",
+        badgeText: pageTitle,
       }}
+      className="min-h-screen"
     >
-      <div className="mx-auto max-w-7xl px-6 py-6">
-        {/* Header */}
-        <header className="mb-6">
-          <div
-            className="text-xs uppercase tracking-widest"
-            style={{ color: "rgba(89,49,60,0.7)" }}
-          >
-            VIHOLABS · CONTROL ROOM
-          </div>
-          <div className="mt-2 flex items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold" style={{ color: "#59313c" }}>
-                Portal Super Administrador
-              </h1>
-              <p className="text-sm" style={{ color: "rgba(42,29,32,0.65)" }}>
-                Operativa, KPIs y administración (MVP).
-              </p>
-            </div>
-
-            <Link
-              href="/logout"
-              className="rounded-xl border px-3 py-2 text-sm font-medium hover:bg-white/40"
-              style={{ borderColor: "rgba(89,49,60,0.15)" }}
-            >
-              Salir
-            </Link>
-          </div>
-        </header>
-
-        {/* Layout */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
-          <aside>
-            <SidebarNav />
-          </aside>
-
-          <main className="min-w-0">
-            {/* Breadcrumb + título contextual */}
-            <div className="mb-4">
-              <div
-                className="text-xs uppercase tracking-wider"
-                style={{ color: "rgba(89,49,60,0.6)" }}
-              >
-                Control Room
-                {title && title !== "Control Room" ? ` / ${title}` : ""}
-              </div>
-
-              <h2
-                className="mt-1 text-xl font-semibold"
-                style={{ color: "#59313c" }}
-              >
-                {title}
-              </h2>
-            </div>
-
-            {children}
-          </main>
-        </div>
+      {/* Acció superior institucional (logout) */}
+      <div className="mb-4 flex justify-end">
+        <Link
+          href="/logout"
+          className="rounded-xl border px-3 py-2 text-sm font-medium hover:bg-white/40"
+          style={{ borderColor: "var(--viho-border)" }}
+        >
+          Salir
+        </Link>
       </div>
-    </div>
+
+      {children}
+    </PortalShell>
   );
 }
