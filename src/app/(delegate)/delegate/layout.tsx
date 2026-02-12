@@ -3,6 +3,8 @@ import { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { requireCurrentActor } from "@/lib/auth/current-actor";
 
+import DelegateShell from "@/components/Delegate/DelegateShell";
+
 export default async function DelegateLayout({
   children,
 }: {
@@ -21,9 +23,8 @@ export default async function DelegateLayout({
   ];
 
   if (!allowed.includes(role)) {
-    // 🔒 Corte duro: no es delegate ni supervisor
     redirect("/dashboard?error=forbidden");
   }
 
-  return <>{children}</>;
+  return <DelegateShell>{children}</DelegateShell>;
 }
