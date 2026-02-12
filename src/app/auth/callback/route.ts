@@ -1,8 +1,9 @@
 // src/app/auth/callback/route.ts
 import { NextResponse } from "next/server";
 import { createClient as createSsrClient } from "@/lib/supabase/server";
-import { entryForActor } from "@/lib/auth/roles";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+
+const CANONICAL_ENTRY = "/control-room/dashboard";
 
 function safeNext(nextRaw: string | null) {
   if (!nextRaw) return null;
@@ -75,16 +76,13 @@ export async function GET(req: Request) {
   const user = data?.user;
 
   if (!user) {
-    // Si no hi ha user, vol dir que no hi ha sessió (o ha caducat).
-    // No és "missing_code": és "auth_required".
     const loginUrl = new URL("/login", origin);
     loginUrl.searchParams.set("error", "auth_required");
     return NextResponse.redirect(loginUrl);
   }
 
   // 3) Resolver actor amb SERVICE ROLE (NO RLS)
-  //    Això evita falsos "no_actor" per policies i és estable a escala.
-  let actor: any = null;
+  //    (No canvia el destí final; només valida que existeix i és actiu)
   try {
     const admin = getAdminSupabase();
     const { data: a, error: aErr } = await admin
@@ -99,27 +97,22 @@ export async function GET(req: Request) {
       return NextResponse.redirect(loginUrl);
     }
 
-    actor = a;
+    if (!a || a.status !== "active") {
+      const loginUrl = new URL("/login", origin);
+      loginUrl.searchParams.set("error", "no_actor");
+      return NextResponse.redirect(loginUrl);
+    }
   } catch {
     const loginUrl = new URL("/login", origin);
     loginUrl.searchParams.set("error", "server_misconfigured");
     return NextResponse.redirect(loginUrl);
   }
 
-  if (!actor || actor.status !== "active") {
-    const loginUrl = new URL("/login", origin);
-    loginUrl.searchParams.set("error", "no_actor");
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // 4) Destí final per rol
-  const destination = entryForActor({
-    role: actor.role,
-    commission_level: actor.commission_level,
-  });
-
+  // 4) 🔒 DESTÍ FINAL CANÒNIC ÚNIC
+  // Si ve un "next" vàlid, el respectem (per deep-links),
+  // però el destí per defecte és sempre el mateix per tothom.
   const next = safeNext(url.searchParams.get("next"));
-  const finalUrl = next ? next : destination;
+  const finalPath = next ? next : CANONICAL_ENTRY;
 
-  return NextResponse.redirect(new URL(finalUrl, origin));
+  return NextResponse.redirect(new URL(finalPath, origin));
 }

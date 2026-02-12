@@ -33,35 +33,36 @@ function isOk(ar: any): ar is ActorFromRequestOk {
 }
 
 /**
- * Auditoria mínima (no rompe):
- * - Intenta escribir en una tabla llamada "audit_log".
- * - Si la tabla no existe o falla, NO rompe el endpoint (warning silencioso).
+ * Auditoria mínima (NO rompe), adaptada a l'esquema real de public.audit_log:
+ * columns: id, created_at, user_id, actor_id, action, entity, entity_id, status, meta, state_code
  *
- * Esquema esperado (flexible):
- * - action: text
- * - actor_id: uuid/text
- * - status: text ("ok"|"error")
- * - meta: jsonb (month, channel, duration_ms, etc.)
- * - error_message: text nullable
- * - created_at: default now()
+ * Guardem errors dins meta.error (NO existeix columna error_message).
  */
 async function tryAuditLog(
   supaService: any,
   payload: {
     action: string;
-    actor_id: string;
+    actor_id: string | null;
     status: "ok" | "error";
     meta: any;
     error_message?: string | null;
   }
 ): Promise<{ ok: boolean; warning?: string }> {
   try {
+    const meta = {
+      ...(payload.meta ?? {}),
+      ...(payload.error_message ? { error: payload.error_message } : {}),
+    };
+
     const { error } = await supaService.from("audit_log").insert({
       action: payload.action,
       actor_id: payload.actor_id,
       status: payload.status,
-      meta: payload.meta,
-      error_message: payload.error_message ?? null,
+      meta,
+      entity: "commissions_recalc",
+      entity_id: null,
+      state_code: "OPEN",
+      user_id: null,
     });
 
     if (error) return { ok: false, warning: `audit_log insert failed: ${error.message}` };
@@ -76,12 +77,20 @@ export async function POST(req: Request) {
   let stage = "init";
 
   const startedAt = Date.now();
+  const request_id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
   let auditWarning: string | null = null;
 
   // Variables que queremos dejar trazadas
   let auditActorId: string | null = null;
   let auditMonth: string | null = null;
   let auditChannel: string | null = null;
+
+  // 🔒 AUDIT START (obligatori, NO trenca mai)
+  // Encara no tenim actor; ho deixem a null i actualitzarem després.
+  // IMPORTANT: no pot bloquejar el flux; si falla, el warning queda silenciós.
+  // Aquí no tenim supaService encara; el tindrem després de getActorFromRequest.
+  // Per tant, fem AUDIT START tan aviat com tinguem ar.supaService.
 
   try {
     // 1) Auth + actor + clients (canónico del repo)
@@ -101,11 +110,45 @@ export async function POST(req: Request) {
 
     auditActorId = String(actor.id);
 
+    // ✅ AUDIT START (ara sí: ja tenim supaService)
+    {
+      const a = await tryAuditLog(supaService, {
+        action: "commissions.recalc",
+        actor_id: auditActorId,
+        status: "ok",
+        meta: {
+          phase: "start",
+          request_id,
+          stage: "actor_from_request",
+          duration_ms: 0,
+        },
+        error_message: null,
+      });
+      if (!a.ok) auditWarning = a.warning ?? null;
+    }
+
     if (actor?.status === "inactive") {
+      // audit end (error)
+      const durationMs = Date.now() - startedAt;
+      const a = await tryAuditLog(supaService, {
+        action: "commissions.recalc",
+        actor_id: auditActorId,
+        status: "error",
+        meta: {
+          phase: "end",
+          request_id,
+          stage: "actor",
+          duration_ms: durationMs,
+        },
+        error_message: "Actor inactivo",
+      });
+      if (!a.ok) auditWarning = a.warning ?? null;
+
       return json(403, {
         ok: false,
         stage: `${stageBase}:actor`,
         error: "Actor inactivo",
+        ...(auditWarning ? { audit_warning: auditWarning } : {}),
       });
     }
 
@@ -119,10 +162,28 @@ export async function POST(req: Request) {
     auditChannel = channel;
 
     if (!isValidMonthYYYYMM01(month)) {
+      const durationMs = Date.now() - startedAt;
+      const a = await tryAuditLog(supaService, {
+        action: "commissions.recalc",
+        actor_id: auditActorId,
+        status: "error",
+        meta: {
+          phase: "end",
+          request_id,
+          month,
+          channel,
+          duration_ms: durationMs,
+          stage: "input",
+        },
+        error_message: "month inválido (YYYY-MM-01)",
+      });
+      if (!a.ok) auditWarning = a.warning ?? null;
+
       return json(422, {
         ok: false,
         stage: `${stageBase}:${stage}`,
         error: "month inválido (YYYY-MM-01)",
+        ...(auditWarning ? { audit_warning: auditWarning } : {}),
       });
     }
 
@@ -135,13 +196,14 @@ export async function POST(req: Request) {
       eff.isSuperAdmin || eff.has("commissions.recalc") || eff.has("commissions.manage");
 
     if (!allowed) {
-      // Intento auditar denegación (sin romper)
       const durationMs = Date.now() - startedAt;
       const a = await tryAuditLog(supaService, {
         action: "commissions.recalc",
-        actor_id: String(actor.id),
+        actor_id: auditActorId,
         status: "error",
         meta: {
+          phase: "end",
+          request_id,
           month,
           channel,
           duration_ms: durationMs,
@@ -157,7 +219,7 @@ export async function POST(req: Request) {
         stage: `${stageBase}:${stage}`,
         error: "Rol no autorizado",
         role: actor.role,
-        ...(auditWarning ? { warning: auditWarning } : {}),
+        ...(auditWarning ? { audit_warning: auditWarning } : {}),
       });
     }
 
@@ -169,13 +231,14 @@ export async function POST(req: Request) {
     });
 
     if (rpcErr) {
-      // Auditar error RPC (sin romper)
       const durationMs = Date.now() - startedAt;
       const a = await tryAuditLog(supaService, {
         action: "commissions.recalc",
-        actor_id: String(actor.id),
+        actor_id: auditActorId,
         status: "error",
         meta: {
+          phase: "end",
+          request_id,
           month,
           channel,
           duration_ms: durationMs,
@@ -189,7 +252,7 @@ export async function POST(req: Request) {
         ok: false,
         stage: `${stageBase}:${stage}`,
         error: rpcErr.message,
-        ...(auditWarning ? { warning: auditWarning } : {}),
+        ...(auditWarning ? { audit_warning: auditWarning } : {}),
       });
     }
 
@@ -200,13 +263,15 @@ export async function POST(req: Request) {
       p_anchor: month,
     });
 
-    // Auditar OK (aunque el KPI falle, el recalculo ya fue OK)
+    // AUDIT END (OK, encara que KPI falli)
     const durationMs = Date.now() - startedAt;
     const a = await tryAuditLog(supaService, {
       action: "commissions.recalc",
-      actor_id: String(actor.id),
+      actor_id: auditActorId,
       status: "ok",
       meta: {
+        phase: "end",
+        request_id,
         month,
         channel,
         duration_ms: durationMs,
@@ -238,13 +303,12 @@ export async function POST(req: Request) {
       ...(auditWarning ? { audit_warning: auditWarning } : {}),
     });
   } catch (e: any) {
-    // Intento auditar excepción (si tenemos supaService via getActorFromRequest, no lo tenemos aquí)
-    // No rompemos nada por auditoría.
     return json(500, {
       ok: false,
       stage: `${stageBase}:unhandled:${stage}`,
       error: e?.message ?? "Unknown error",
       meta: {
+        request_id,
         actor_id: auditActorId,
         month: auditMonth,
         channel: auditChannel,

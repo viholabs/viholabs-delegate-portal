@@ -61,6 +61,77 @@ function getServiceSupabase() {
   return createAdminClient(url, key, { auth: { persistSession: false } });
 }
 
+type MonthStateCode = "OPEN" | "LOCKED" | "UNKNOWN";
+
+/**
+ * Determinista:
+ * - Intenta llegir el lock/state real des de backend (commission_month_locks) amb diferents claus.
+ * - Si no hi ha dades (o la taula no existeix encara), aplica default contractual: OPEN.
+ * - No trenca mai la UI.
+ */
+async function getMonthStateCode(admin: any, month01: string): Promise<{
+  state_code: MonthStateCode;
+  source: "commission_month_locks.period_month" | "commission_month_locks.month" | "default_open";
+  lock_row: any | null;
+  warning_fallback: boolean;
+}> {
+  const monthKey = month01.slice(0, 7); // YYYY-MM
+
+  // 1) Prova: commission_month_locks.period_month = YYYY-MM-01
+  {
+    const { data, error } = await admin
+      .from("commission_month_locks")
+      .select("*")
+      .eq("period_month", month01)
+      .limit(1);
+
+    if (!error && Array.isArray(data) && data[0]) {
+      const row = data[0];
+      const sc = String(row.state_code ?? "").toUpperCase();
+      const state_code: MonthStateCode =
+        sc === "LOCKED" ? "LOCKED" : sc === "OPEN" ? "OPEN" : row.is_locked === true ? "LOCKED" : "OPEN";
+
+      return {
+        state_code,
+        source: "commission_month_locks.period_month",
+        lock_row: row,
+        warning_fallback: false,
+      };
+    }
+  }
+
+  // 2) Prova: commission_month_locks.month = YYYY-MM
+  {
+    const { data, error } = await admin
+      .from("commission_month_locks")
+      .select("*")
+      .eq("month", monthKey)
+      .limit(1);
+
+    if (!error && Array.isArray(data) && data[0]) {
+      const row = data[0];
+      const sc = String(row.state_code ?? "").toUpperCase();
+      const state_code: MonthStateCode =
+        sc === "LOCKED" ? "LOCKED" : sc === "OPEN" ? "OPEN" : row.is_locked === true ? "LOCKED" : "OPEN";
+
+      return {
+        state_code,
+        source: "commission_month_locks.month",
+        lock_row: row,
+        warning_fallback: false,
+      };
+    }
+  }
+
+  // 3) Default contractual: OPEN (si no hi ha lock registrat, el mes és obert)
+  return {
+    state_code: "OPEN",
+    source: "default_open",
+    lock_row: null,
+    warning_fallback: true,
+  };
+}
+
 async function handle(req: Request) {
   let stage = "init";
 
@@ -118,6 +189,10 @@ async function handle(req: Request) {
 
     // SERVICE ROLE client per tot el bloc "executive view"
     const admin = getServiceSupabase();
+
+    // 3.1) Month state_code contractual (REAL -> fallback OPEN)
+    stage = "month_state_code";
+    const monthState = await getMonthStateCode(admin, month);
 
     // 4) KPI Month Summary (SERVICE ROLE + función estable v1)
     stage = "kpi_month_summary";
@@ -258,10 +333,18 @@ async function handle(req: Request) {
 
     if (!ingestaErr && Array.isArray(ingestaData)) recentImports = ingestaData;
 
-    // 8) Respuesta
+    // 8) Respuesta (contractual: state_code sempre present)
     return json(200, {
       ok: true,
       month,
+      state_code: monthState.state_code,
+      month_state: {
+        state_code: monthState.state_code,
+        source: monthState.source,
+        warning_fallback: monthState.warning_fallback,
+        // Row només per diagnòstic; si no existeix, és null (no trenca UI)
+        lock_row: monthState.lock_row ?? null,
+      },
       actor: {
         id: String(actor.id),
         role: actor.role ?? "unknown",

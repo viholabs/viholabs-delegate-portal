@@ -1,0 +1,51 @@
+import { NextRequest, NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+
+type Timeframe = "LIVE" | "WTD" | "MTD";
+
+const TTL_MS = 240_000; // 4 minuts (canon dossier: 3–5 min)
+const CACHE = new Map<string, { expires: number; payload: any }>();
+
+function parseTimeframe(req: NextRequest): Timeframe {
+  const tf = (req.nextUrl.searchParams.get("timeframe") || "LIVE").toUpperCase();
+  if (tf === "LIVE" || tf === "WTD" || tf === "MTD") return tf;
+  return "LIVE";
+}
+
+export async function GET(req: NextRequest) {
+  const timeframe = parseTimeframe(req);
+  const key = timeframe;
+
+  const cached = CACHE.get(key);
+  if (cached && cached.expires > Date.now()) {
+    return NextResponse.json({
+      ...cached.payload,
+      cache: { hit: true }
+    });
+  }
+
+  const payload = {
+    ok: true,
+    timeframe,
+    generated_at: new Date().toISOString(),
+    cache: { hit: false },
+    data: {
+      ops: {
+        orders_live_count: null,
+        orders_pending_activation_count: null
+      },
+      marketing: {
+        sessions: null,
+        conversion_rate: null
+      },
+      origin: {
+        attributed_orders_count: null
+      }
+    }
+  };
+
+  CACHE.set(key, { expires: Date.now() + TTL_MS, payload });
+
+  return NextResponse.json(payload);
+}

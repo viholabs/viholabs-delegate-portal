@@ -220,7 +220,7 @@ function statusBadgeVariant(
   return "default";
 }
 
-// ✅ NEW (A.4): map severity -> Badge variant (tolerant)
+// ✅ map severity -> Badge variant (tolerant)
 function badgeVariantFromSeverity(
   sev?: string | null
 ): "default" | "success" | "warning" | "danger" {
@@ -289,11 +289,10 @@ function pickContent(
   return row;
 }
 
-// ✅ NEW (A.6): lectura tolerant de month.state_code (sense inventar-lo)
+// ✅ lectura tolerant de month.state_code (sense inventar-lo)
 function monthStateCodeFromData(data: MonthSummary | null): string | null {
   if (!data) return null;
 
-  // Backend pot enviar-ho sense estar tipat al frontend (MVP).
   const raw =
     (data as any)?.state_code ??
     (data as any)?.stateCode ??
@@ -305,7 +304,6 @@ function monthStateCodeFromData(data: MonthSummary | null): string | null {
   const v = raw.trim();
   if (!v) return null;
 
-  // Normalitzem a uppercase per casar amb "OPEN/LOCKED" habituals
   return v.toUpperCase();
 }
 
@@ -343,9 +341,7 @@ export default function DashboardClient() {
     const token = data.session?.access_token ?? null;
 
     if (!token) {
-      router.replace(
-        `/login?next=${encodeURIComponent("/control-room/dashboard")}`
-      );
+      router.replace(`/login?next=${encodeURIComponent("/control-room/dashboard")}`);
       return null;
     }
     return token;
@@ -367,14 +363,10 @@ export default function DashboardClient() {
         body: JSON.stringify({ locale }),
       });
 
-      const json = (await res.json().catch(() => null)) as
-        | UiContractResponse
-        | null;
+      const json = (await res.json().catch(() => null)) as UiContractResponse | null;
 
       if (!json || !res.ok || (json as any).ok !== true) {
-        const msg =
-          (json as any)?.error ??
-          `Error cargando contrato UI (${res.status}).`;
+        const msg = (json as any)?.error ?? `Error cargando contrato UI (${res.status}).`;
         setUiError(msg);
         setUiContract(json ?? { ok: false, error: msg });
         return;
@@ -418,18 +410,12 @@ export default function DashboardClient() {
 
       void loadUiContract(token);
 
-      const jsonMonth = (await resMonth.json().catch(() => null)) as
-        | MonthSummary
-        | null;
-      const jsonObj = (await resObj.json().catch(() => null)) as
-        | ObjectivesPayload
-        | null;
+      const jsonMonth = (await resMonth.json().catch(() => null)) as MonthSummary | null;
+      const jsonObj = (await resObj.json().catch(() => null)) as ObjectivesPayload | null;
 
       if (!jsonMonth || !resMonth.ok || !jsonMonth.ok) {
         setData(jsonMonth);
-        setError(
-          jsonMonth?.error ?? `Error cargando datos (${resMonth.status})`
-        );
+        setError(jsonMonth?.error ?? `Error cargando datos (${resMonth.status})`);
       } else {
         setData(jsonMonth);
       }
@@ -437,8 +423,7 @@ export default function DashboardClient() {
       if (!jsonObj || !resObj.ok || !jsonObj.ok) {
         setObjectives(jsonObj);
         setObjError(
-          jsonObj?.error ??
-            `Objetivos no disponibles (${resObj.status}). ¿Rol admin?`
+          jsonObj?.error ?? `Objetivos no disponibles (${resObj.status}). ¿Rol admin?`
         );
       } else {
         setObjectives(jsonObj);
@@ -498,13 +483,10 @@ export default function DashboardClient() {
         body: JSON.stringify({ source_month: month01 }),
       });
 
-      const json = (await res.json().catch(() => null)) as
-        | HoldedSyncResult
-        | null;
+      const json = (await res.json().catch(() => null)) as HoldedSyncResult | null;
 
       if (!json || !res.ok || !json.ok) {
-        const msg =
-          json?.error ?? `Error sincronizando HOLDed (${res.status}).`;
+        const msg = json?.error ?? `Error sincronizando HOLDed (${res.status}).`;
         setSyncError(msg);
         setSyncResult(json);
         return;
@@ -539,20 +521,17 @@ export default function DashboardClient() {
 
   const updatedAt = objectives?.targets_month?.updated_at ?? null;
 
-  const tgtUnits =
-    Number(objectives?.targets_month?.target_units_total ?? 0) || 0;
+  const tgtUnits = Number(objectives?.targets_month?.target_units_total ?? 0) || 0;
   const tgtDelegates = objectives?.targets_month?.target_delegates_active ?? null;
 
-  const actUnits =
-    Number(objectives?.actual_month?.units_total ?? unitsTotal) || 0;
+  const actUnits = Number(objectives?.actual_month?.units_total ?? unitsTotal) || 0;
   const actDelegates =
     objectives?.actual_month?.delegates_count ??
     (delegatesCount == null ? null : Number(delegatesCount));
 
   const unitsPct = objectives?.progress_month?.units_pct ?? null;
   const unitsGap =
-    objectives?.progress_month?.units_delta ??
-    (tgtUnits > 0 ? tgtUnits - actUnits : 0);
+    objectives?.progress_month?.units_delta ?? (tgtUnits > 0 ? tgtUnits - actUnits : 0);
 
   const delegatesPct = objectives?.progress_month?.delegates_pct ?? null;
   const delegatesGap = objectives?.progress_month?.delegates_delta ?? null;
@@ -565,31 +544,27 @@ export default function DashboardClient() {
     return "off_track";
   })();
 
-  const topDelegates = (data?.rankingsDelegates ?? [])
-    .slice(0, 3)
-    .map((r) => {
-      const sale = Number(r.units_sale ?? 0) || 0;
-      const promo = Number(r.units_promotion ?? 0) || 0;
-      return {
-        ...r,
-        units_total: sale + promo,
-        units_sale_n: sale,
-        units_promo_n: promo,
-      };
-    });
+  const topDelegates = (data?.rankingsDelegates ?? []).slice(0, 3).map((r) => {
+    const sale = Number(r.units_sale ?? 0) || 0;
+    const promo = Number(r.units_promotion ?? 0) || 0;
+    return {
+      ...r,
+      units_total: sale + promo,
+      units_sale_n: sale,
+      units_promo_n: promo,
+    };
+  });
 
-  const topRecommenders = (data?.rankingsRecommenders ?? [])
-    .slice(0, 3)
-    .map((r) => {
-      const sale = Number(r.units_sale ?? 0) || 0;
-      const promo = Number(r.units_promotion ?? 0) || 0;
-      return {
-        ...r,
-        units_total: sale + promo,
-        units_sale_n: sale,
-        units_promo_n: promo,
-      };
-    });
+  const topRecommenders = (data?.rankingsRecommenders ?? []).slice(0, 3).map((r) => {
+    const sale = Number(r.units_sale ?? 0) || 0;
+    const promo = Number(r.units_promotion ?? 0) || 0;
+    return {
+      ...r,
+      units_total: sale + promo,
+      units_sale_n: sale,
+      units_promo_n: promo,
+    };
+  });
 
   const diagnosis = useMemo(() => {
     const total = Math.max(1, actUnits);
@@ -606,43 +581,22 @@ export default function DashboardClient() {
     }
 
     if (tgtUnits > 0 && unitsPct != null && unitsPct < 100) {
-      return `Faltan ${formatInt(
-        Math.max(0, unitsGap)
-      )} uds para objetivo. Prioriza activación comercial.`;
+      return `Faltan ${formatInt(Math.max(0, unitsGap))} uds para objetivo. Prioriza activación comercial.`;
     }
 
     return "Distribución razonable. Mantener ritmo y foco en cierre de mes.";
-  }, [
-    actUnits,
-    topDelegates,
-    data?.rankingsDelegates,
-    tgtUnits,
-    unitsPct,
-    unitsGap,
-  ]);
-
-  const [actions, setActions] = useState<Record<string, boolean>>({
-    a1: false,
-    a2: false,
-    a3: false,
-    a4: false,
-  });
+  }, [actUnits, topDelegates, data?.rankingsDelegates, tgtUnits, unitsPct, unitsGap]);
 
   const kpiCards: Array<{
     title: string;
     value: React.ReactNode;
     sub: React.ReactNode;
     badge: React.ReactNode | null;
-    kind?: "units";
   }> = [
     {
       title: "Unidades vendidas",
-      kind: "units",
       value: (
-        <div
-          className="text-3xl font-semibold tracking-tight"
-          style={{ color: "var(--viho-primary)" }}
-        >
+        <div className="text-3xl font-semibold tracking-tight" style={{ color: "var(--viho-primary)" }}>
           <span
             className="mr-2 text-sm font-semibold uppercase tracking-wider"
             style={{ color: "rgba(42,29,32,0.65)" }}
@@ -667,10 +621,7 @@ export default function DashboardClient() {
     {
       title: "Delegados activos",
       value: (
-        <div
-          className="text-3xl font-semibold tracking-tight"
-          style={{ color: "var(--viho-primary)" }}
-        >
+        <div className="text-3xl font-semibold tracking-tight" style={{ color: "var(--viho-primary)" }}>
           {actDelegates == null ? "—" : formatInt(actDelegates)}
         </div>
       ),
@@ -678,9 +629,7 @@ export default function DashboardClient() {
         <div className="mt-2 text-sm viho-muted">
           {tgtDelegates == null
             ? "Obj —"
-            : `Obj ${formatInt(tgtDelegates)} · ${
-                delegatesPct == null ? "—" : `${delegatesPct}%`
-              }`}
+            : `Obj ${formatInt(tgtDelegates)} · ${delegatesPct == null ? "—" : `${delegatesPct}%`}`}
         </div>
       ),
       badge: null,
@@ -688,10 +637,7 @@ export default function DashboardClient() {
     {
       title: "Facturado",
       value: (
-        <div
-          className="text-3xl font-semibold tracking-tight"
-          style={{ color: "var(--viho-primary)" }}
-        >
+        <div className="text-3xl font-semibold tracking-tight" style={{ color: "var(--viho-primary)" }}>
           {formatMoneyEUR(totalGross)}
         </div>
       ),
@@ -705,18 +651,11 @@ export default function DashboardClient() {
     {
       title: "Margen",
       value: (
-        <div
-          className="text-3xl font-semibold tracking-tight"
-          style={{ color: "var(--viho-primary)" }}
-        >
+        <div className="text-3xl font-semibold tracking-tight" style={{ color: "var(--viho-primary)" }}>
           —
         </div>
       ),
-      sub: (
-        <div className="mt-2 text-sm viho-muted">
-          MVP: pendiente cálculo margen
-        </div>
-      ),
+      sub: <div className="mt-2 text-sm viho-muted">MVP: pendiente cálculo margen</div>,
       badge: <Badge variant="warning">MVP</Badge>,
     },
   ];
@@ -726,9 +665,7 @@ export default function DashboardClient() {
     if (!d) return null;
     const totalDays = daysInMonth(d);
     const today = new Date();
-    const sameMonth =
-      today.getFullYear() === d.getFullYear() &&
-      today.getMonth() === d.getMonth();
+    const sameMonth = today.getFullYear() === d.getFullYear() && today.getMonth() === d.getMonth();
     const day = sameMonth ? today.getDate() : Math.min(1, totalDays);
     const pace = day > 0 ? actUnits / day : 0;
     const projected = Math.round(pace * totalDays);
@@ -738,104 +675,74 @@ export default function DashboardClient() {
 
   const screenKey = "control_room.dashboard";
 
-  // ✅ NEW (A.6): state_code real del mes (si el backend el proporciona)
   const monthStateCode = useMemo(() => monthStateCodeFromData(data), [data]);
-
-  // ✅ NEW (A.6): alerta EXEC real segons state_code (OPEN/LOCKED/...)
   const execAlert = monthStateCode ? pickAlert(uiContract, screenKey, monthStateCode) : null;
 
-  // ✅ header.title (governat) + source
-  const headerTitleRow = pickContent(uiContract, screenKey, "header.title");
-  const headerTitle = headerTitleRow?.title ?? "Situation Room (Executive View)";
-  const headerTitleSource = headerTitleRow?.source ?? "—";
-
-  // ✅ header.subtitle (governat) + source
-  const headerSubtitleRow = pickContent(uiContract, screenKey, "header.subtitle");
-  const headerSubtitle =
-    headerSubtitleRow?.title ?? "KPIs · Comisiones · Gobernanza (MVP)";
-  const headerSubtitleSource = headerSubtitleRow?.source ?? "—";
-
-  // ✅ NEW (A.4): header.badge (governat) + source + variant per severity
+  // Governança (per usar com a micro-badges, sense debug a la cara)
   const headerBadgeRow = pickContent(uiContract, screenKey, "header.badge");
   const headerBadgeText = headerBadgeRow?.title ?? null;
-  const headerBadgeSource = headerBadgeRow?.source ?? "—";
   const headerBadgeVariant = badgeVariantFromSeverity(headerBadgeRow?.severity);
 
-  // ✅ NEW (A.5): help.intro (governat) + source
   const helpIntroRow = pickContent(uiContract, screenKey, "help.intro");
   const helpIntroText = helpIntroRow?.body ?? helpIntroRow?.title ?? null;
-  const helpIntroSource = helpIntroRow?.source ?? "—";
 
   return (
     <div className="space-y-6">
+      {/* EXEC TOP BAR (sense duplicar header del PortalShell) */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-widest viho-muted">
-            VIHOLABS · CONTROL ROOM
-          </div>
-
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            {headerTitle}
-          </h1>
-
-          {/* debug discret del source (title) */}
-          <div className="mt-1 text-[11px] viho-muted">
-            header.title source:{" "}
-            <span className="font-mono">{headerTitleSource}</span>
-          </div>
-
-          {/* A.3: subtitle governat */}
-          <div className="mt-2 text-sm viho-muted">{headerSubtitle}</div>
-
-          {/* debug discret del source (subtitle) */}
-          <div className="mt-1 text-[11px] viho-muted">
-            header.subtitle source:{" "}
-            <span className="font-mono">{headerSubtitleSource}</span>
-          </div>
-
-          {/* ✅ A.4: badge source (sempre visible per traçabilitat) */}
-          <div className="mt-1 text-[11px] viho-muted">
-            header.badge source:{" "}
-            <span className="font-mono">{headerBadgeSource}</span>
-          </div>
-
-          {/* ✅ A.5: help.intro source (sempre visible per traçabilitat) */}
-          <div className="mt-1 text-[11px] viho-muted">
-            help.intro source:{" "}
-            <span className="font-mono">{helpIntroSource}</span>
-          </div>
-
-          {/* ✅ A.5: help.intro text (si existeix) */}
-          {helpIntroText ? (
-            <div className="mt-2 text-sm viho-muted">
-              {helpIntroText}
-            </div>
-          ) : null}
-
-          {/* ✅ A.6: month.state_code debug (sempre visible) */}
-          <div className="mt-1 text-[11px] viho-muted">
-            month.state_code:{" "}
-            <span className="font-mono">{monthStateCode ?? "—"}</span>
-          </div>
-
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm viho-muted">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-sm viho-muted">
             <span>Periodo:</span>
             <span className="font-mono">{month01}</span>
 
-            {/* ✅ A.4: badge governat (si existeix) */}
             {headerBadgeText ? (
               <Badge variant={headerBadgeVariant}>{headerBadgeText}</Badge>
             ) : null}
 
             <Badge title="Regla del sistema">Solo facturas cobradas</Badge>
             <Badge title="Referencia">PDV: 31€</Badge>
-            <Badge title="Última actualización objetivos">
-              Últ. update: {fmtDateTimeISO(updatedAt)}
-            </Badge>
-            {data?.warning_actor_missing ? (
-              <Badge variant="warning">Actor pendiente de alta</Badge>
-            ) : null}
+            <Badge title="Última actualización objetivos">Últ. update: {fmtDateTimeISO(updatedAt)}</Badge>
+            {data?.warning_actor_missing ? <Badge variant="warning">Actor pendiente de alta</Badge> : null}
           </div>
+
+          {helpIntroText ? (
+            <div className="mt-2 text-sm viho-muted">{helpIntroText}</div>
+          ) : null}
+
+          {error ? (
+            <div className="mt-2 text-sm">
+              <Badge variant="danger" className="mr-2">
+                ERROR
+              </Badge>
+              <span>{error}</span>
+            </div>
+          ) : null}
+
+          {objError ? (
+            <div className="mt-2 text-sm">
+              <Badge variant="warning" className="mr-2">
+                OBJ
+              </Badge>
+              <span>{objError}</span>
+            </div>
+          ) : null}
+
+          {syncError ? (
+            <div className="mt-2 text-sm">
+              <Badge variant="warning" className="mr-2">
+                HOLDed
+              </Badge>
+              <span>{syncError}</span>
+            </div>
+          ) : null}
+
+          {syncResult?.ok ? (
+            <div className="mt-2 text-sm viho-muted">
+              HOLDed OK · inserted{" "}
+              <span className="font-mono">{formatInt(syncResult.result?.inserted ?? 0)}</span> · updated{" "}
+              <span className="font-mono">{formatInt(syncResult.result?.updated ?? 0)}</span>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -846,17 +753,13 @@ export default function DashboardClient() {
               background: "rgba(255,255,255,0.9)",
             }}
           >
-            <div className="text-[11px] font-semibold uppercase tracking-wider viho-muted">
-              Mes
-            </div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider viho-muted">Mes</div>
             <input
               type="month"
               value={yyyymm}
               onChange={(e) => {
                 const next = month01FromYYYYMM(e.target.value);
-                router.push(
-                  `/control-room/dashboard?month=${encodeURIComponent(next)}`
-                );
+                router.push(`/control-room/dashboard?month=${encodeURIComponent(next)}`);
               }}
               className="mt-1 w-[150px] bg-transparent text-sm outline-none"
               style={{ color: "var(--viho-text)" }}
@@ -870,98 +773,14 @@ export default function DashboardClient() {
           <Button onClick={recalc} disabled={recalcLoading || loading}>
             {recalcLoading ? "Recalculando…" : "Recalcular"}
           </Button>
+
+          <Button variant="outline" onClick={syncHolded} disabled={syncLoading || loading}>
+            {syncLoading ? "Sincronizando…" : "Sync HOLDed"}
+          </Button>
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-3">
-          <div>
-            <CardTitle>Contrato UI (backend)</CardTitle>
-            <div className="mt-1 text-sm viho-muted">
-              Se carga automáticamente al entrar · locale es-ES · screen_key{" "}
-              <span className="font-mono">{screenKey}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="default">MVP</Badge>
-            <Button
-              variant="outline"
-              onClick={async () => {
-                const token = await getTokenOrRedirect();
-                if (!token) return;
-                await loadUiContract(token);
-              }}
-              disabled={uiLoading || loading}
-            >
-              {uiLoading ? "Cargando…" : "Recargar UI"}
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-2">
-          {uiError ? (
-            <div className="text-sm">
-              <Badge variant="danger" className="mr-2">
-                ERROR
-              </Badge>
-              <span>{uiError}</span>
-            </div>
-          ) : null}
-
-          {!uiError && isUiOk(uiContract) ? (
-            <div className="text-sm viho-muted">
-              OK · state_ui{" "}
-              <span className="font-mono">{uiContract.state_ui.length}</span> ·
-              screen_content{" "}
-              <span className="font-mono">
-                {uiContract.screen_content.length}
-              </span>
-            </div>
-          ) : null}
-
-          {/* ✅ A.6: alerta EXEC real segons month.state_code (si existeix) */}
-          {monthStateCode ? (
-            execAlert ? (
-              <div className="rounded-md border p-3">
-                <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
-                  Alerta ejecutiva (state_code {monthStateCode})
-                </div>
-                <div className="mt-1 font-medium">
-                  {execAlert.alert_title ?? "—"}
-                </div>
-                <div className="mt-1 text-sm viho-muted">
-                  {execAlert.alert_body ?? "—"}
-                </div>
-                <div className="mt-1 text-xs viho-muted">
-                  source{" "}
-                  <span className="font-mono">
-                    {execAlert.alert_source ?? "—"}
-                  </span>{" "}
-                  · severity{" "}
-                  <span className="font-mono">
-                    {execAlert.alert_severity ?? "—"}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs viho-muted">
-                No hay alerta definida para state_code{" "}
-                <span className="font-mono">{monthStateCode}</span>.
-              </div>
-            )
-          ) : (
-            <div className="text-xs viho-muted">
-              state_code del mes no disponible en /api/control-room/month (no se muestra alerta EXEC).
-            </div>
-          )}
-
-          {!uiError && !uiContract ? (
-            <div className="text-xs viho-muted">—</div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {/* Resta del dashboard: unchanged */}
+      {/* KPI ROW */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {kpiCards.map((c) => (
           <Card key={c.title}>
@@ -977,70 +796,140 @@ export default function DashboardClient() {
         ))}
       </div>
 
+      {/* ESTADO GENERAL */}
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div>
             <CardTitle>Estado general del mes</CardTitle>
-            <div className="mt-1 text-sm viho-muted">
-              Estado · Gap · Tendencia · Responsables
-            </div>
+            <div className="mt-1 text-sm viho-muted">Estado · Gap · Tendencia · Lectura</div>
           </div>
 
-          <Badge variant={statusBadgeVariant(execStatus)}>
-            {statusLabel(execStatus)}
-          </Badge>
+          <Badge variant={statusBadgeVariant(execStatus)}>{statusLabel(execStatus)}</Badge>
         </CardHeader>
 
         <CardContent className="grid grid-cols-1 gap-6 md:grid-cols-3">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
-              Progreso
-            </div>
-            <div
-              className="mt-1 text-4xl font-semibold"
-              style={{ color: "var(--viho-primary)" }}
-            >
+            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">Progreso</div>
+            <div className="mt-1 text-4xl font-semibold" style={{ color: "var(--viho-primary)" }}>
               {unitsPct == null ? "—" : `${clampPct(unitsPct)}%`}
             </div>
-            <div className="text-xs viho-muted">
-              {projection ? `Ritmo mes: ${projection.pacePct}%` : "—"}
-            </div>
+            <div className="text-xs viho-muted">{projection ? `Ritmo mes: ${projection.pacePct}%` : "—"}</div>
           </div>
 
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
-              Objetivo vs Real
-            </div>
+            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">Objetivo vs Real</div>
             <div className="mt-1 text-sm" style={{ color: "var(--viho-text)" }}>
               Objetivo: <b>{tgtUnits > 0 ? formatInt(tgtUnits) : "—"}</b> uds
               <br />
               Actual: <b>{formatInt(actUnits)}</b> uds
               <br />
-              Gap:{" "}
-              <b>{tgtUnits > 0 ? formatInt(Math.max(0, unitsGap)) : "—"}</b> uds
+              Gap: <b>{tgtUnits > 0 ? formatInt(Math.max(0, unitsGap)) : "—"}</b> uds
             </div>
           </div>
 
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
-              Tendencia (MVP)
-            </div>
+            <div className="text-xs font-semibold uppercase tracking-wider viho-muted">Tendencia (MVP)</div>
             <div className="mt-1 text-sm" style={{ color: "var(--viho-text)" }}>
-              Proyección cierre:{" "}
-              <b>{projection ? formatInt(projection.projected) : "—"}</b> uds
-              <div className="mt-2 text-xs viho-muted">
-                Lectura rápida: {diagnosis}
-              </div>
+              Proyección cierre: <b>{projection ? formatInt(projection.projected) : "—"}</b> uds
+              <div className="mt-2 text-xs viho-muted">Lectura rápida: {diagnosis}</div>
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {/* AUDITORÍA UI (plegada per defecte) */}
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>Auditoría UI (MVP)</CardTitle>
+            <div className="mt-1 text-sm viho-muted">
+              Contrato UI · state_code · alerta ejecutiva (plegado por defecto)
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {uiError ? <Badge variant="danger">UI ERROR</Badge> : null}
+            {uiLoading ? <Badge variant="default">Cargando…</Badge> : <Badge variant="default">—</Badge>}
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          <details>
+            <summary className="cursor-pointer text-sm viho-muted">
+              Ver detalle (screen_key <span className="font-mono">{screenKey}</span>)
+            </summary>
+
+            <div className="mt-3 space-y-3">
+              <div className="text-xs viho-muted">
+                month.state_code: <span className="font-mono">{monthStateCode ?? "—"}</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    const token = await getTokenOrRedirect();
+                    if (!token) return;
+                    await loadUiContract(token);
+                  }}
+                  disabled={uiLoading || loading}
+                >
+                  {uiLoading ? "Cargando…" : "Recargar UI"}
+                </Button>
+
+                {!uiError && isUiOk(uiContract) ? (
+                  <div className="text-xs viho-muted">
+                    OK · state_ui <span className="font-mono">{uiContract.state_ui.length}</span> · screen_content{" "}
+                    <span className="font-mono">{uiContract.screen_content.length}</span>
+                  </div>
+                ) : null}
+              </div>
+
+              {uiError ? (
+                <div className="text-sm">
+                  <Badge variant="danger" className="mr-2">
+                    ERROR
+                  </Badge>
+                  <span>{uiError}</span>
+                </div>
+              ) : null}
+
+              {monthStateCode ? (
+                execAlert ? (
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider viho-muted">
+                      Alerta ejecutiva (state_code {monthStateCode})
+                    </div>
+                    <div className="mt-1 font-medium">{execAlert.alert_title ?? "—"}</div>
+                    <div className="mt-1 text-sm viho-muted">{execAlert.alert_body ?? "—"}</div>
+                    <div className="mt-1 text-xs viho-muted">
+                      source <span className="font-mono">{execAlert.alert_source ?? "—"}</span> · severity{" "}
+                      <span className="font-mono">{execAlert.alert_severity ?? "—"}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs viho-muted">
+                    No hay alerta definida para state_code <span className="font-mono">{monthStateCode}</span>.
+                  </div>
+                )
+              ) : (
+                <div className="text-xs viho-muted">
+                  state_code del mes no disponible en /api/control-room/month (no se muestra alerta EXEC).
+                </div>
+              )}
+            </div>
+          </details>
+        </CardContent>
+      </Card>
+
+      {/* FOOTER DISCRET */}
       <div className="text-xs viho-muted">
         {loading ? "Cargando…" : "—"} · Actor:{" "}
         <span className="font-mono">
           {data?.actor?.role ?? "—"} · {data?.actor?.name ?? "—"}
-        </span>
+        </span>{" "}
+        · Facturas pagadas: <span className="font-mono">{invoicesPaidCount ?? "—"}</span> · Clientes:{" "}
+        <span className="font-mono">{clientsCount ?? "—"}</span> · Delegados:{" "}
+        <span className="font-mono">{delegatesCount ?? "—"}</span>
       </div>
     </div>
   );
