@@ -45,3 +45,7 @@ REPO_DUMP*.txt
 REPO_DUMP_SAFE*.txt
 REPO_DUMP_SAFE_REPORT.json
 *.BAK.*
+
+# local backups
+*.bak.*
+docs/_local_backups/
