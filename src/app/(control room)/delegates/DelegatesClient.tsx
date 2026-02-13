@@ -102,7 +102,7 @@ export default function DelegatesClient() {
   const selected = delegates.find((d) => d.id === selectedId) ?? null;
 
   function openDelegateDashboard(id: string) {
-    router.push(`/delegate/dashboard?delegateId=${encodeURIComponent(id)}`);
+    router.push(`/control-room/dashboard?delegateId=${encodeURIComponent(id)}`);
   }
 
   return (
