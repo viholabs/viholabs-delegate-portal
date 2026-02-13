@@ -1,5 +1,10 @@
 // src/lib/auth/roles.ts
-
+/**
+ * AUDIT TRACE
+ * Date: 2026-02-13
+ * Reason: Canonical entry — roles must NOT emit role portals dashboards
+ * Scope: entryForRole/entryForActor routing output only.
+ */
 export type RoleCode =
   | "SUPER_ADMIN"
   | "COORDINATOR_COMMERCIAL"
@@ -28,30 +33,20 @@ export function normalizeCommissionLevel(v: unknown): CommissionLevel | null {
 }
 
 /**
- * ✅ Entrada canónica por rol
- * (ajustada a los nuevos dashboards separados)
+ * ✅ Canonical entry by role
+ * Canon: role never changes the portal/shell path.
+ * (Commission agent stays on its own dashboard.)
  */
 export function entryForRole(role: unknown) {
   const r = normalizeRole(role);
 
-  if (r === "SUPER_ADMIN") return "/control-room/dashboard";
-  if (r === "ADMINISTRATIVE") return "/control-room/dashboard";
-  if (r === "COORDINATOR_CECT") return "/control-room/dashboard";
-
-  if (r === "COORDINATOR_COMMERCIAL") return "/commercial/dashboard";
-  if (r === "KOL") return "/kol/dashboard";
-
-  if (r === "DELEGATE") return "/delegate/dashboard";
-  if (r === "CLIENT") return "/client/dashboard";
-
   if (r === "COMMISSION_AGENT") return "/commissions/dashboard";
-  if (r === "DISTRIBUTOR") return "/delegate/dashboard";
 
-  return "/delegate/dashboard";
+  return "/control-room/dashboard";
 }
 
 /**
- * ✅ Entrada por actor (compatibilidad total)
+ * ✅ Entry by actor (compatibility)
  */
 export function entryForActor(input: { role: unknown; commission_level?: unknown }) {
   const role = normalizeRole(input.role);
@@ -60,9 +55,7 @@ export function entryForActor(input: { role: unknown; commission_level?: unknown
     return entryForRole(role);
   }
 
-  const lvl = normalizeCommissionLevel(input.commission_level);
+  const _lvl = normalizeCommissionLevel(input.commission_level);
 
-  // HOY: 1 dashboard para todos
-  if (!lvl) return "/commissions/dashboard";
   return "/commissions/dashboard";
 }

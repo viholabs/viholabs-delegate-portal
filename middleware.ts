@@ -1,4 +1,10 @@
-// src/middleware.ts
+// middleware.ts
+/**
+ * AUDIT TRACE
+ * Date: 2026-02-13
+ * Reason: Canonical routing guard — forbid role portals (/delegate, /client, /kol, /commercial)
+ * Scope: Routing only. No backend/data changes.
+ */
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
@@ -26,8 +32,27 @@ type CookieToSet = {
   options?: CookieOptions;
 };
 
+function isForbiddenRolePortal(pathname: string) {
+  // Canon: no portals/layouts by role.
+  return (
+    pathname === "/delegate" ||
+    pathname.startsWith("/delegate/") ||
+    pathname === "/client" ||
+    pathname.startsWith("/client/") ||
+    pathname === "/kol" ||
+    pathname.startsWith("/kol/") ||
+    pathname === "/commercial" ||
+    pathname.startsWith("/commercial/")
+  );
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // 0) Canon guard: hard 404 on forbidden role portals
+  if (isForbiddenRolePortal(pathname)) {
+    return new NextResponse("Not Found", { status: 404 });
+  }
 
   // 1) Públicos → pasar
   if (isPublicPath(pathname)) {
@@ -38,7 +63,6 @@ export async function middleware(req: NextRequest) {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    // Si falta env, devolvemos 500 para que sea visible y no haga redirects raros
     return new NextResponse("Missing Supabase env vars", { status: 500 });
   }
 

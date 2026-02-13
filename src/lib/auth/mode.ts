@@ -1,5 +1,10 @@
 // src/lib/auth/mode.ts
-
+/**
+ * AUDIT TRACE
+ * Date: 2026-02-13
+ * Reason: Canonical entry — mode must NOT emit role portals paths
+ * Scope: pathForMode routing output only.
+ */
 export type ModeCode = "control-room" | "delegate" | "client";
 
 export const MODE_COOKIE = "viholabs_mode";
@@ -25,7 +30,7 @@ export function roleAllowsMode(roleRaw: unknown, mode: ModeCode): boolean {
     );
   }
 
-  // Delegate
+  // Delegate (modo lógico; no portal)
   if (mode === "delegate") {
     return (
       role === "DELEGATE" ||
@@ -36,7 +41,7 @@ export function roleAllowsMode(roleRaw: unknown, mode: ModeCode): boolean {
     );
   }
 
-  // Client (lo dejamos preparado; si no existe /client aún, no pasa nada)
+  // Client (modo lógico; no portal)
   if (mode === "client") {
     return role === "CLIENT" || role === "SUPER_ADMIN";
   }
@@ -44,8 +49,9 @@ export function roleAllowsMode(roleRaw: unknown, mode: ModeCode): boolean {
   return false;
 }
 
-export function pathForMode(mode: ModeCode): string {
-  if (mode === "control-room") return "/control-room/dashboard";
-  if (mode === "delegate") return "/delegate/dashboard";
-  return "/client/dashboard";
+/**
+ * Canon: single portal/shell. Mode never changes the entry route.
+ */
+export function pathForMode(_mode: ModeCode): string {
+  return "/control-room/dashboard";
 }
