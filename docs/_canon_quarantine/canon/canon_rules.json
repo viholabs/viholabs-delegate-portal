@@ -1,0 +1,103 @@
+{
+  "meta": {
+    "name": "VIHOLABS Canon Ruleset",
+    "version": "1.0.0",
+    "scope": "UI/SHELL",
+    "source_docs": [
+      "MANIFIESTO CANÓNICO DEL PORTAL OPERATIVO VIHOLABS",
+      "DOCUMENTO RECTOR DE DISEÑO",
+      "BIBLIA DEL PORTAL OPERATIVO VIHOLABS V6"
+    ],
+    "notes": [
+      "Reglas ejecutables (no interpretativas).",
+      "Si una regla produce falsos positivos, se ajusta el ruleset, no el código."
+    ]
+  },
+
+  "phases": {
+    "UI_SHELL_ONLY": {
+      "forbidden_paths": [
+        "pnpm-lock.yaml",
+        "src/app/api/",
+        "src/app/auth/",
+        "src/lib/supabase/",
+        "src/app/"
+      ],
+      "allowed_paths": [
+        "src/components/portal/PortalShell.tsx"
+      ],
+      "notes": [
+        "Fase estricta: solo se permite tocar PortalShell.tsx.",
+        "Si algún día se autoriza otro archivo, se añade explícitamente aquí."
+      ]
+    },
+
+    "UI_ONLY": {
+      "forbidden_paths": [
+        "pnpm-lock.yaml",
+        "src/app/api/",
+        "src/app/auth/",
+        "src/lib/supabase/"
+      ],
+      "allowed_paths": [
+        "src/components/"
+      ]
+    }
+  },
+
+  "traceability": {
+    "required": true,
+    "header_regex": "AUDIT(\\s*TRACE|\\s*\\(\\d{4}-\\d{2}-\\d{2}\\))",
+    "max_lines_to_scan": 60,
+    "message": "Falta trazabilidad (AUDIT TRACE) en cabecera del archivo modificado."
+  },
+
+  "canonical_prohibitions": {
+    "parallel_headers": {
+      "severity": "FAIL",
+      "forbidden_patterns": [
+        "EXEC TOP BAR",
+        "TOP BAR",
+        "TopBar",
+        "ContextHeader",
+        "Header contextual"
+      ],
+      "message": "Violación canónica: posible header paralelo. Solo existe un Header soberano (PortalShell)."
+    },
+
+    "saas_smell": {
+      "severity": "FAIL",
+      "forbidden_patterns": [
+        "backdrop-blur",
+        "gradient",
+        "glass",
+        "hero",
+        "shadow-2xl",
+        "drop-shadow"
+      ],
+      "message": "Violación canónica: estética SaaS (blur/gradient/glass/hero/shadows agresivos) detectada."
+    },
+
+    "animations": {
+      "severity": "FAIL",
+      "forbidden_patterns": [
+        "animate-",
+        "transition-all",
+        "motion."
+      ],
+      "message": "Violación canónica: animaciones o transiciones ruidosas detectadas (no permitido en Shell)."
+    }
+  },
+
+  "behavioral_rules": {
+    "no_empty_page_feel": {
+      "severity": "WARN",
+      "patterns_to_review": [
+        "return null",
+        "children &&",
+        "&& <"
+      ],
+      "message": "Revisión: posible riesgo de 'pantalla vacía'. Asegura estados EMPTY/RESTRICTED/NOT_AVAILABLE."
+    }
+  }
+}
