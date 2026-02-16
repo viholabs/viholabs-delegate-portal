@@ -1,75 +1,68 @@
 "use client";
 
 /**
- * VIHOLABS — ControlRoomShell (CONFIG WRAPPER over PortalShell)
- * Contracte canònic:
- * - ControlRoomShell NO és una pell pròpia.
- * - La pell única del portal és PortalShell.
- * - Només aporta configuració: sidebar + header (sense containers estructurals globals).
+ * VIHOLABS — ControlRoomShell (CANONICAL WRAPPER over PortalShell)
+ *
+ * Contracte:
+ * - Single Shell: PortalShell
+ * - Side Hall: ComunidadViholabs (Community Bar)
+ * - Tabs visibles: derivades del rol real (cookie viholabs_role)
+ * - NO SidebarNav (substituïda per Community Bar)
+ *
+ * IMPORTANT (Hydration):
+ * - NO llegir document.cookie durant render.
+ * - Llegir cookies només després de mount (useEffect).
  */
 
 import type { ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import PortalShell from "@/components/portal/PortalShell";
-import SidebarNav from "@/components/control-room/SidebarNav";
+import ComunidadViholabs from "@/components/portal/ComunidadViholabs";
 
-function titleForPath(pathname: string) {
-  if (pathname.startsWith("/control-room/import")) return "Importación";
-  if (pathname.startsWith("/control-room/users")) return "Usuarios";
-  if (pathname.startsWith("/control-room/delegates")) return "Delegados";
-  if (pathname.startsWith("/control-room/clients")) return "Clientes";
-  if (pathname.startsWith("/control-room/commission-rules")) return "Normas de comisiones";
-  if (pathname.startsWith("/control-room/roles")) return "Permisos y roles";
-  if (pathname.startsWith("/control-room/invoices")) return "Facturas";
-  if (pathname.startsWith("/control-room/audit")) return "Auditoría";
-  if (pathname.startsWith("/control-room/dashboard")) return "Dashboard";
-  return "Control Room";
+import {
+  getVisibleTabsForSystemRole,
+  toPortalShellTabs,
+  type VihoRole,
+} from "@/components/portal/tabs/tab-visibility";
+
+function readCookie(name: string): string | null {
+  try {
+    if (typeof document === "undefined") return null;
+    const m = document.cookie.match(new RegExp("(^|; )" + name.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&") + "=([^;]*)"));
+    return m ? decodeURIComponent(m[2]) : null;
+  } catch {
+    return null;
+  }
 }
 
 export default function ControlRoomShell({ children }: { children: ReactNode }) {
-  const pathname = usePathname() || "";
-  const title = titleForPath(pathname);
+  const [role, setRole] = useState<VihoRole | null>(null);
+
+  // 1) Llegir rol real després de mount (cookie set a /auth/callback)
+  useEffect(() => {
+    const r = (readCookie("viholabs_role") || "").trim().toUpperCase();
+    setRole((r as VihoRole) || null);
+  }, []);
+
+  // 2) Tabs visibles segons rol real (si encara no hi ha rol, cap tab)
+  const tabs = useMemo(() => {
+    if (!role) return [];
+    const visible = getVisibleTabsForSystemRole(role);
+    return toPortalShellTabs(visible);
+  }, [role]);
+
+  // 3) Header institucional (mínim; el contingut viu dins /control-room/shell?tab=)
+  const header = useMemo(
+    () => ({
+      title: "CONTROL ROOM",
+      subtitle: role ? `Rol: ${role}` : "—",
+    }),
+    [role]
+  );
 
   return (
-    <PortalShell
-      sidebar={
-        <div className="px-3 py-3">
-          {/* Identidad */}
-          <div className="mb-3 px-2">
-            <div
-              className="text-xs font-semibold tracking-wide"
-              style={{ color: "var(--viho-primary)" }}
-            >
-              VIHOLABS · CONTROL ROOM
-            </div>
-            <div className="text-sm" style={{ color: "var(--viho-muted)" }}>
-              Operativa y administración
-            </div>
-          </div>
-
-          {/* Nav */}
-          <SidebarNav />
-
-          {/* Acción única (logout) — dentro del sidebar para no romper PortalShell */}
-          <div className="mt-4 px-2">
-            <a
-              href="/logout"
-              className="block rounded-xl border px-3 py-2 text-sm font-medium hover:bg-[color:var(--viho-surface-2)]"
-              style={{ borderColor: "var(--viho-border)", color: "var(--viho-primary)" }}
-            >
-              Salir
-            </a>
-          </div>
-        </div>
-      }
-      header={{
-        kicker: "VIHOLABS · CONTROL ROOM",
-        title: title === "Control Room" ? "Portal Super Administrador" : title,
-        subtitle: "Operativa, KPIs y administración (MVP).",
-        badgeText: title && title !== "Control Room" ? `Control Room / ${title}` : "Control Room",
-      }}
-    >
+    <PortalShell sidebar={<ComunidadViholabs />} tabs={tabs} header={header}>
       {children}
     </PortalShell>
   );

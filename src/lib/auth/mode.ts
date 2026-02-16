@@ -1,9 +1,10 @@
 // src/lib/auth/mode.ts
 /**
  * AUDIT TRACE
- * Date: 2026-02-13
- * Reason: Canonical entry — mode must NOT emit role portals paths
- * Scope: pathForMode routing output only.
+ * Date: 2026-02-16
+ * Actor: VIHOLABS_AUTH_AGENT
+ * Reason: Canonical mode semantics — include missing canonical roles in roleAllowsMode (KOL, COMMISSION_AGENT, DISTRIBUTOR)
+ * Scope: roleAllowsMode only (no UI, no routes changes)
  */
 export type ModeCode = "control-room" | "delegate" | "client";
 
@@ -20,7 +21,7 @@ export function normalizeMode(v: unknown): ModeCode | null {
 export function roleAllowsMode(roleRaw: unknown, mode: ModeCode): boolean {
   const role = String(roleRaw ?? "").trim().toUpperCase();
 
-  // Control Room (supervisión)
+  // Control Room (supervisión / govern)
   if (mode === "control-room") {
     return (
       role === "SUPER_ADMIN" ||
@@ -30,10 +31,14 @@ export function roleAllowsMode(roleRaw: unknown, mode: ModeCode): boolean {
     );
   }
 
-  // Delegate (modo lógico; no portal)
+  // Delegate (lent operativa comercial / relacional)
+  // Nota: "mode" NO és portal; és estat/lent dins del Shell únic.
   if (mode === "delegate") {
     return (
       role === "DELEGATE" ||
+      role === "KOL" ||
+      role === "COMMISSION_AGENT" ||
+      role === "DISTRIBUTOR" ||
       role === "SUPER_ADMIN" ||
       role === "ADMINISTRATIVE" ||
       role === "COORDINATOR_COMMERCIAL" ||
@@ -41,7 +46,7 @@ export function roleAllowsMode(roleRaw: unknown, mode: ModeCode): boolean {
     );
   }
 
-  // Client (modo lógico; no portal)
+  // Client (lent relacional client)
   if (mode === "client") {
     return role === "CLIENT" || role === "SUPER_ADMIN";
   }
@@ -51,7 +56,8 @@ export function roleAllowsMode(roleRaw: unknown, mode: ModeCode): boolean {
 
 /**
  * Canon: single portal/shell. Mode never changes the entry route.
+ * /mode may exist as internal utility, but must never be a normal entrypoint.
  */
 export function pathForMode(_mode: ModeCode): string {
-  return "/control-room/dashboard";
+  return "/mode";
 }

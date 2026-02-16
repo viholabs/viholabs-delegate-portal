@@ -1,0 +1,325 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import RobotAvatarSvg from "./RobotAvatarSvg";
+
+type Profile = {
+  aka: string;
+  display_name: string;
+  company: string;
+  profile_type: string;
+  birthday: string; // pot estar buit; aquí només fem copy
+  consent_image_policy: boolean;
+  avatar_url: string;
+
+  is_internal: boolean;
+  department: string;
+  job_title: string;
+
+  effective_name: string;
+};
+
+type Lang = "ca" | "es" | "en" | "fr";
+
+function normalizeLang(raw: unknown): Lang | null {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (!v) return null;
+  if (v.startsWith("ca")) return "ca";
+  if (v.startsWith("es")) return "es";
+  if (v.startsWith("en")) return "en";
+  if (v.startsWith("fr")) return "fr";
+  return null;
+}
+
+// ✅ CANÒNIC (avui, sense tocar Shell/layout):
+// - NO deduïm idioma per navegador.
+// - NO fem cas de document.documentElement.lang (ara està forçat a "en").
+// - L'únic mecanisme acceptat és ?lang=ca|es|en|fr (posat pel portal).
+// - Fallback: "es" (portal ES per defecte).
+function getLangFromQuery(): Lang | null {
+  try {
+    const u = new URL(window.location.href);
+    return normalizeLang(u.searchParams.get("lang"));
+  } catch {
+    return null;
+  }
+}
+
+function resolvePortalLang(): Lang {
+  return getLangFromQuery() || "es";
+}
+
+const I18N: Record<
+  Lang,
+  {
+    g: { morning: string; afternoon: string; night: string };
+    robot: string;
+    akaLabel: string;
+    akaPlaceholder: string;
+    birthdayAsk: string;
+    savingError: string;
+  }
+> = {
+  ca: {
+    g: { morning: "Bon dia", afternoon: "Bona tarda", night: "Bona nit" },
+    robot: "Robot",
+    akaLabel: "Com t’agradaria que et diguéssim",
+    akaPlaceholder: "(p. ex. Mamen, Enka...)",
+    birthdayAsk: "Vols que et felicitem i et reservem un petit detall pel teu aniversari?",
+    savingError: "No s'ha pogut guardar l'AKA.",
+  },
+  es: {
+    g: { morning: "Buenos días", afternoon: "Buenas tardes", night: "Buenas noches" },
+    robot: "Robot",
+    akaLabel: "Cómo te gustaría que te llamemos",
+    akaPlaceholder: "(p. ej. Mamen, Enka...)",
+    birthdayAsk: "¿Quieres que te felicitemos y te reservemos un pequeño detalle por tu cumpleaños?",
+    savingError: "No se pudo guardar el AKA.",
+  },
+  en: {
+    g: { morning: "Good morning", afternoon: "Good afternoon", night: "Good evening" },
+    robot: "Robot",
+    akaLabel: "How would you like us to call you",
+    akaPlaceholder: "(e.g., Mamen, Enka...)",
+    birthdayAsk: "Would you like us to wish you happy birthday and reserve a small gift for you?",
+    savingError: "Could not save AKA.",
+  },
+  fr: {
+    g: { morning: "Bonjour", afternoon: "Bon après-midi", night: "Bonsoir" },
+    robot: "Robot",
+    akaLabel: "Comment aimerais-tu qu’on t’appelle",
+    akaPlaceholder: "(ex. Mamen, Enka...)",
+    birthdayAsk: "Souhaites-tu que l’on te souhaite ton anniversaire et qu’on te réserve une petite attention ?",
+    savingError: "Impossible d’enregistrer l’AKA.",
+  },
+};
+
+function firstNameFrom(full: string): string {
+  const s = String(full || "").trim();
+  if (!s) return "";
+  return s.split(/\s+/)[0] || "";
+}
+
+function timeKey(): "morning" | "afternoon" | "night" {
+  const h = new Date().getHours();
+  if (h >= 6 && h <= 13) return "morning";
+  if (h >= 14 && h <= 20) return "afternoon";
+  return "night";
+}
+
+async function safeReadJson(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: false, error: "Non-JSON server response." };
+  }
+}
+
+export default function IdentityBlock() {
+  const [lang, setLang] = useState<Lang>("es");
+  const t = useMemo(() => I18N[lang], [lang]);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  // ✅ Idioma canònic: només querystring (?lang=)
+  useEffect(() => {
+    const apply = () => setLang(resolvePortalLang());
+    apply();
+
+    // si canvia l'URL (p.ex. el portal canvia ?lang=...), re-apliquem.
+    const onPopState = () => apply();
+    window.addEventListener("popstate", onPopState);
+
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const hasAvatar = Boolean(profile?.avatar_url && String(profile.avatar_url).trim().length > 0);
+
+  const effectiveFirst = useMemo(() => {
+    const eff = profile?.aka || profile?.effective_name || profile?.display_name || "";
+    return firstNameFrom(eff);
+  }, [profile?.aka, profile?.effective_name, profile?.display_name]);
+
+  const greeting = useMemo(() => {
+    const base = String(t.g[timeKey()] || "");
+    if (!base) return "";
+
+    // ✅ regla: sense foto -> Robot
+    if (!hasAvatar) return `${base}, ${t.robot}.`;
+
+    // ✅ amb foto -> AKA (si no, effective/display)
+    const name = effectiveFirst || t.robot;
+    return `${base}, ${name}.`;
+  }, [t, hasAvatar, effectiveFirst]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setErr(null);
+
+      try {
+        const res = await fetch("/api/community/profile", { method: "GET" });
+        const data = await safeReadJson(res);
+
+        if (!res.ok) {
+          const msg = (data && (data.error || data.message)) || `HTTP ${res.status} loading profile`;
+          throw new Error(msg);
+        }
+        if (!data?.ok) throw new Error(data?.error || "No profile.");
+
+        const p: Profile = data.profile;
+
+        if (cancelled) return;
+
+        setProfile({
+          aka: String(p?.aka || ""),
+          display_name: String(p?.display_name || ""),
+          company: String(p?.company || ""),
+          profile_type: String(p?.profile_type || ""),
+          birthday: String(p?.birthday || ""),
+          consent_image_policy: Boolean(p?.consent_image_policy),
+          avatar_url: String(p?.avatar_url || ""),
+          is_internal: Boolean(p?.is_internal),
+          department: String(p?.department || ""),
+          job_title: String(p?.job_title || ""),
+          effective_name: String(p?.effective_name || ""),
+        });
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : "error");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function saveAka(nextAka: string) {
+    if (!profile) return;
+
+    setSaving(true);
+    setErr(null);
+
+    try {
+      const res = await fetch("/api/community/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aka: String(nextAka || "") }),
+      });
+
+      const data = await safeReadJson(res);
+
+      if (!res.ok || !data?.ok) {
+        const msg = (data && (data.error || data.message)) || t.savingError;
+        throw new Error(msg);
+      }
+
+      const saved: Profile = data.profile;
+
+      setProfile((p0) => {
+        const base = p0 ? { ...p0, ...saved } : saved;
+        return {
+          aka: String(base?.aka || ""),
+          display_name: String(base?.display_name || ""),
+          company: String(base?.company || ""),
+          profile_type: String(base?.profile_type || ""),
+          birthday: String(base?.birthday || ""),
+          consent_image_policy: Boolean(base?.consent_image_policy),
+          avatar_url: String(base?.avatar_url || ""),
+          is_internal: Boolean(base?.is_internal),
+          department: String(base?.department || ""),
+          job_title: String(base?.job_title || ""),
+          effective_name: String(base?.effective_name || ""),
+        };
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="mb-5">
+        <div className="text-[12px]" style={{ color: "var(--viho-muted)" }}>
+          …
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-5">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0">
+          <div
+            className="h-14 w-14 overflow-hidden rounded-2xl border"
+            style={{
+              borderColor: "var(--viho-border)",
+              background: "var(--viho-surface)",
+              color: "var(--viho-primary)",
+            }}
+            title={hasAvatar ? (profile?.aka || profile?.effective_name || "Avatar") : t.robot}
+          >
+            {hasAvatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={String(profile?.avatar_url || "")} alt="Avatar" className="h-full w-full object-cover" />
+            ) : (
+              <div style={{ opacity: 0.68, filter: "grayscale(0.25)" }}>
+                <RobotAvatarSvg />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold" style={{ color: "var(--viho-text)" }}>
+            {greeting}
+          </div>
+
+          <div className="mt-1 text-[12px]" style={{ color: "var(--viho-muted)" }}>
+            {t.birthdayAsk}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        <label className="text-[11px]" style={{ color: "var(--viho-muted)" }}>
+          {t.akaLabel}
+          <input
+            value={profile?.aka || ""}
+            onChange={(e) => setProfile((p) => (p ? { ...p, aka: e.target.value } : p))}
+            onBlur={() => void saveAka(profile?.aka || "")}
+            className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+            style={{
+              borderColor: "var(--viho-border)",
+              background: "var(--viho-surface)",
+              color: "var(--viho-text)",
+            }}
+            placeholder={t.akaPlaceholder}
+            disabled={saving}
+          />
+        </label>
+
+        {err ? (
+          <div className="text-[12px]" style={{ color: "var(--viho-primary)" }}>
+            {err}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

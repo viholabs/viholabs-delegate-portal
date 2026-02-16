@@ -1,10 +1,11 @@
 // src/lib/auth/roles.ts
 /**
  * AUDIT TRACE
- * Date: 2026-02-13
- * Reason: Canonical entry — roles must NOT emit role portals dashboards
+ * Date: 2026-02-16
+ * Reason: Canonical entry — NO role portals. Everyone lands on the single Shell.
  * Scope: entryForRole/entryForActor routing output only.
  */
+
 export type RoleCode =
   | "SUPER_ADMIN"
   | "COORDINATOR_COMMERCIAL"
@@ -35,27 +36,17 @@ export function normalizeCommissionLevel(v: unknown): CommissionLevel | null {
 /**
  * ✅ Canonical entry by role
  * Canon: role never changes the portal/shell path.
- * (Commission agent stays on its own dashboard.)
+ * Tabs/actions/data are filtered by permissions + scope, never by alternate routes.
  */
-export function entryForRole(role: unknown) {
-  const r = normalizeRole(role);
-
-  if (r === "COMMISSION_AGENT") return "/commissions/dashboard";
-
-  return "/control-room/dashboard";
+export function entryForRole(_role: unknown) {
+  // ✅ Single institutional entry for everyone
+  return "/control-room/shell";
 }
 
 /**
  * ✅ Entry by actor (compatibility)
+ * Canon: still returns the single Shell entry.
  */
-export function entryForActor(input: { role: unknown; commission_level?: unknown }) {
-  const role = normalizeRole(input.role);
-
-  if (role !== "COMMISSION_AGENT") {
-    return entryForRole(role);
-  }
-
-  const _lvl = normalizeCommissionLevel(input.commission_level);
-
-  return "/commissions/dashboard";
+export function entryForActor(_input: { role: unknown; commission_level?: unknown }) {
+  return "/control-room/shell";
 }

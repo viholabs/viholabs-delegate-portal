@@ -1,10 +1,14 @@
-export default function OrdersPage() {
-  return (
-    <div>
-      <h1 className="text-[28px] font-semibold tracking-tight">Pedidos</h1>
-      <p className="mt-2 text-sm" style={{ color: "var(--viho-muted)" }}>
-        Ver/editar pedidos (MVP).
-      </p>
-    </div>
-  );
+// src/app/(control room)/control-room/orders/page.tsx
+/**
+ * AUDIT TRACE
+ * Date: 2026-02-16
+ * Reason: Canonical Single Page enforcement — all Control Room sections redirect to /control-room/shell?tab=orders
+ * Scope: Routing only. No UI/content changes here.
+ */
+import { redirect } from "next/navigation";
+
+export const runtime = "nodejs";
+
+export default function Page() {
+  redirect("/control-room/shell?tab=orders");
 }
