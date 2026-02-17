@@ -14,29 +14,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Node FIRST
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "pnpm"
+          node-version: 20
 
+      # pnpm MUST be installed AFTER Node
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      - name: Install
+      - name: Install deps
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
         run: pnpm tsc --noEmit
 
-      - name: Smoke — /api/holded/poll (no-token)
-        run: |
-          chmod +x scripts/smoke-holded-poll.sh
-          ./scripts/smoke-holded-poll.sh
+      - name: Smoke — holded poll
+        run: ./scripts/smoke-holded-poll.sh
 
-      - name: Smoke — /api/holded/ping (no-token)
-        run: |
-          chmod +x scripts/smoke-holded-ping.sh
-          ./scripts/smoke-holded-ping.sh
+      - name: Smoke — holded ping
+        run: ./scripts/smoke-holded-ping.sh
