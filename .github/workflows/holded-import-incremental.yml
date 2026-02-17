@@ -1,0 +1,48 @@
+name: HOLDed — Import Incremental (Invoices)
+
+on:
+  schedule:
+    # Cada 10 minuts (canvia-ho si vols)
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: holded-import-incremental-invoices
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Call import-incremental endpoint (Invoices)
+        env:
+          BASE_URL: ${{ secrets.VIHOLABS_PORTAL_BASE_URL }}
+          BEARER: ${{ secrets.VIHOLABS_INTERNAL_BEARER }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${BASE_URL:-}" ]; then
+            echo "Missing secret: VIHOLABS_PORTAL_BASE_URL"
+            exit 1
+          fi
+
+          if [ -z "${BEARER:-}" ]; then
+            echo "Missing secret: VIHOLABS_INTERNAL_BEARER"
+            exit 1
+          fi
+
+          URL="${BASE_URL%/}/api/holded/invoices/import-incremental?limit=50"
+
+          echo "Calling: $URL"
+
+          # -f: falla si HTTP >= 400
+          # -S: mostra error
+          curl -fSs \
+            -H "Authorization: Bearer ${BEARER}" \
+            -H "Accept: application/json" \
+            "$URL" | tee response.json
+
+          echo ""
+          echo "OK — response.json written"
