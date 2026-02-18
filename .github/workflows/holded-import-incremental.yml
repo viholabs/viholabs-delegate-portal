@@ -22,48 +22,21 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck (tsc --noEmit)
+      - name: Typecheck
         run: pnpm tsc --noEmit
 
-      - name: Run Holded incremental import (NO HTTP)
+      - name: Run Holded Import (NO HTTP)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
-          # Keep existing bearer (not used here, but we don't delete it)
-          VIHOLABS_INTERNAL_BEARER: ${{ secrets.VIHOLABS_INTERNAL_BEARER }}
         run: |
-          set -euo pipefail
-
-          if [ -z "${SUPABASE_URL:-}" ]; then echo "Missing secret: SUPABASE_URL"; exit 1; fi
-          if [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then echo "Missing secret: SUPABASE_SERVICE_ROLE_KEY"; exit 1; fi
-          if [ -z "${HOLDED_API_KEY:-}" ]; then echo "Missing secret: HOLDED_API_KEY"; exit 1; fi
-
-          echo "OK — env present. Starting import…"
-
-          node -e "
-          const { createClient } = require('@supabase/supabase-js');
-
-          const url = process.env.SUPABASE_URL;
-          const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-          const supabase = createClient(url, key, { auth: { persistSession: false } });
-
-          (async () => {
-            // Call the canonical importer via an RPC that already exists in the app? 
-            // We will NOT guess. Instead, we trigger the same Next route code by importing the TS module directly.
-            // But Node -e is JS; so we execute the TS-built code through ts-node is not allowed here.
-            // Therefore, we call a dedicated script in the repo.
-            console.error('ERROR: Missing script. See next step in chat.');
-            process.exit(2);
-          })().catch((e)=>{ console.error(e); process.exit(1); });
-          "
+          echo "Importer execution will be wired next step"
+          exit 1
