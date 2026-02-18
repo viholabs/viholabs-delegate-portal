@@ -21,27 +21,35 @@ jobs:
           BEARER: ${{ secrets.VIHOLABS_INTERNAL_BEARER }}
         run: |
           set -euo pipefail
-
           if [ -z "${BASE_URL:-}" ]; then
             echo "Missing secret: VIHOLABS_PORTAL_BASE_URL"
             exit 1
           fi
-
           if [ -z "${BEARER:-}" ]; then
             echo "Missing secret: VIHOLABS_INTERNAL_BEARER"
             exit 1
           fi
 
-          URL="${BASE_URL%/}/api/holded/invoices/import-incremental?limit=50"
+          BASE="${BASE_URL%/}"
 
+          echo "PROBE 1 — GET / (should NOT be 404 if BASE_URL is correct host)"
+          ROOT_CODE="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE}/")" || true
+          echo "HTTP / = ${ROOT_CODE}"
+
+          echo "PROBE 2 — GET /api/holded/poll (should exist on the portal; may be 401/200 but NOT 404)"
+          POLL_CODE="$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${BEARER}" \
+            -H "Accept: application/json" \
+            "${BASE}/api/holded/poll")" || true
+          echo "HTTP /api/holded/poll = ${POLL_CODE}"
+
+          URL="${BASE}/api/holded/invoices/import-incremental?limit=50"
           echo "Calling: $URL"
-
           # -f: falla si HTTP >= 400
           # -S: mostra error
           curl -fSs \
             -H "Authorization: Bearer ${BEARER}" \
             -H "Accept: application/json" \
             "$URL" | tee response.json
-
           echo ""
           echo "OK — response.json written"
