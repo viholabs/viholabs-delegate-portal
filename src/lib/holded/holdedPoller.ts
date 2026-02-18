@@ -4,14 +4,12 @@
  * - Sense estat extern (excepte lock infra de procés)
  * - Sense dependència UI
  * - Node runtime compatible
- * - Single entry-point: holdedFetch.ts
+ * - Single entry-point: holdedClient.ts
  * - Concurrency-safe: 1 execució simultània màxim (backpressure)
  */
 
-import { holdedFetchJson } from "./holdedFetch";
+import { holdedListDocuments } from "./holdedClient";
 import { tryAcquireLock, releaseLock } from "@/lib/infra/processLock";
-
-const HOLDED_INVOICES_ENDPOINT = "documents/invoice";
 
 // Canon lock TTL (recuperació si queda “penjat”)
 const POLL_LOCK_TTL_MS = 30_000;
@@ -48,9 +46,8 @@ export async function pollHoldedInvoices(limit = 50): Promise<HoldedPollResult> 
   }
 
   try {
-    const json = await holdedFetchJson<any[]>(HOLDED_INVOICES_ENDPOINT, {
-      query: { limit: safeLimit },
-    });
+    // Canon: list documents via holdedClient
+    const json = await holdedListDocuments<any[]>("invoice", { limit: safeLimit });
 
     if (!Array.isArray(json)) {
       return {
@@ -63,7 +60,7 @@ export async function pollHoldedInvoices(limit = 50): Promise<HoldedPollResult> 
 
     const invoices: HoldedInvoice[] = json
       .map((inv: any) => ({
-        id: String(inv?.id ?? "").trim(),
+        id: String(inv?.id ?? inv?._id ?? "").trim(),
         docNumber: inv?.docNumber ? String(inv.docNumber) : undefined,
         contactName: inv?.contactName ? String(inv.contactName) : undefined,
         total: typeof inv?.total === "number" ? inv.total : undefined,

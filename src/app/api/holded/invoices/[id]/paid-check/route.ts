@@ -1,6 +1,8 @@
 // src/app/api/holded/invoices/[id]/paid-check/route.ts
 import { NextResponse } from "next/server";
 import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { holdedDocumentDetail, HoldedClientError } from "@/lib/holded/holdedClient";
+import { computeCanonicalPaidState } from "@/lib/holded/holdedPaidState";
 
 export const runtime = "nodejs";
 
@@ -24,16 +26,6 @@ function pick(obj: any, keys: string[]) {
   return null;
 }
 
-/**
- * Regla robusta de pagada:
- * - is_paid = (paymentsPending == 0) AND (paymentsTotal >= total)
- * Si falta alguno de los campos, devolvemos is_paid = null para no inventar.
- */
-function computeIsPaid(paymentsTotal: number | null, paymentsPending: number | null, total: number | null): boolean | null {
-  if (paymentsTotal === null || paymentsPending === null || total === null) return null;
-  return paymentsPending === 0 && paymentsTotal >= total;
-}
-
 export async function GET(req: Request, { params }: any) {
   let stage = "init";
 
@@ -42,61 +34,55 @@ export async function GET(req: Request, { params }: any) {
     stage = "auth_actor";
     const ar: any = await getActorFromRequest(req);
     if (!ar?.ok) {
-      return json(ar?.status ?? 401, { ok: false, stage, error: ar?.error ?? "Unauthorized" });
+      return json(ar?.status ?? 401, {
+        ok: false,
+        stage,
+        error: ar?.error ?? "Unauthorized",
+      });
     }
 
     const roleRaw = ar?.actor?.role ?? "";
     const role = normalizeRole(roleRaw);
     const allowed = new Set(["super_admin", "admin", "superadmin"]);
     if (!allowed.has(role)) {
-      return json(403, { ok: false, stage, error: "Forbidden (admin only)", role_raw: roleRaw, role_norm: role });
+      return json(403, {
+        ok: false,
+        stage,
+        error: "Forbidden (admin only)",
+        role_raw: roleRaw,
+        role_norm: role,
+      });
     }
 
-    // 2) Env
+    // 2) Env (kept for observability / compatibility)
     stage = "env";
     const baseUrl = (process.env.HOLDED_BASE_URL ?? "https://api.holded.com").replace(/\/+$/, "");
     const docType = process.env.HOLDED_DOC_TYPE ?? "invoice";
-    const apiKey = process.env.HOLDED_API_KEY ?? "";
-
-    if (!apiKey || apiKey === "RELLENAR_EN_LOCAL_NO_PEGAR_EN_CHAT") {
-      return json(500, { ok: false, stage, error: "Falta HOLDED_API_KEY en el servidor. Rellénala en .env.local." });
-    }
 
     // 3) Params
     stage = "params";
     const id = String(params?.id ?? "").trim();
     if (!id) return json(400, { ok: false, stage, error: "Missing id param" });
 
-    // 4) Fetch detail
+    // 4) Fetch detail (CANONICAL CLIENT)
     stage = "fetch_holded_detail";
-    const url = `${baseUrl}/api/invoicing/v1/documents/${encodeURIComponent(docType)}/${encodeURIComponent(id)}`;
-
-    const resp = await fetch(url, {
-      method: "GET",
-      headers: {
-        accept: "application/json",
-        key: apiKey,
-      } as any,
-      cache: "no-store",
-    });
-
-    const rawText = await resp.text();
     let data: any = null;
-    try {
-      data = rawText ? JSON.parse(rawText) : null;
-    } catch {
-      data = { non_json: true, rawText: rawText?.slice(0, 800) };
-    }
 
-    if (!resp.ok) {
-      return json(resp.status, {
-        ok: false,
-        stage,
-        error: "HOLDed API error",
-        http_status: resp.status,
-        url,
-        sample: data,
-      });
+    try {
+      data = await holdedDocumentDetail<any>(docType, id);
+    } catch (e: any) {
+      if (e instanceof HoldedClientError) {
+        return json(e.status ?? 500, {
+          ok: false,
+          stage,
+          error: "HOLDed API error",
+          http_status: e.status,
+          url: `${baseUrl}/api/invoicing/v1/documents/${encodeURIComponent(docType)}/${encodeURIComponent(id)}`,
+          sample: e.body ?? null,
+        });
+      }
+
+      return json(500, { ok: false, stage, error: e?.message ?? "Error inesperado" });
     }
 
     // 5) Extract paid-related fields (sin inventar)
@@ -108,9 +94,18 @@ export async function GET(req: Request, { params }: any) {
     const status = pick(data, ["status", "state"]);
     const docNumber = pick(data, ["docNumber", "documentNumber", "invoiceNumber", "number", "num"]);
     const date = pick(data, ["date", "issueDate", "issue_date", "createdAt", "created_at"]);
-    const draft = pick(data, ["draft"]);
+    const draftRaw = pick(data, ["draft"]);
+    const draft = typeof draftRaw === "boolean" ? draftRaw : null;
 
-    const is_paid = computeIsPaid(paymentsTotal, paymentsPending, total);
+    // 6) Canonical paid engine
+    stage = "compute_paid";
+    const paid = computeCanonicalPaidState({
+      total_gross: total,
+      payments_total: paymentsTotal,
+      payments_pending: paymentsPending,
+      payments_refunds: paymentsRefunds,
+      draft,
+    });
 
     return json(200, {
       ok: true,
@@ -121,13 +116,13 @@ export async function GET(req: Request, { params }: any) {
         doc_number: docNumber ?? null,
         date: date ?? null,
         status: status ?? null,
-        draft: draft ?? null,
+        draft: draftRaw ?? null,
         total: total,
         payments_total: paymentsTotal,
         payments_pending: paymentsPending,
         payments_refunds: paymentsRefunds,
-        is_paid,
-        rule: "is_paid = (payments_pending == 0) AND (payments_total >= total); null si faltan campos",
+        is_paid: paid.is_paid,
+        rule: "is_paid = (payments_pending == 0) AND (payments_total >= total) AND (draft != true); null si faltan campos",
       },
       actor: { id: ar.actor?.id, role: roleRaw, name: ar.actor?.name ?? ar.actor?.email ?? "—" },
     });

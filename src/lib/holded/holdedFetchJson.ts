@@ -1,14 +1,9 @@
-/**
- * VIHOLABS — HOLDED FETCH JSON (CANÒNIC)
- *
- * Canon:
- * - holdedFetch.ts és la font de veritat (single entry-point)
- * - Aquest fitxer només re-exporta per compatibilitat i claredat semàntica
- */
+// VIHOLABS — HOLDed FetchJson (CANONICAL WRAPPER)
+// Deprecated HTTP logic removed.
+// Canonical client lives in holdedClient.ts
 
 export {
-  holdedFetchJson,
-  HOLDED_API_BASE,
-  HoldedError,
-  type HoldedFetchOptions,
-} from "./holdedFetch";
+  HoldedClientError,
+  holdedListDocuments,
+  holdedDocumentDetail,
+} from "./holdedClient";
