@@ -38,4 +38,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
           LIMIT: "50"
-        run: pnpm tsx scripts/holded-import-incremental.ts
+        run: |
+          set -euo pipefail
+          pnpm exec tsx scripts/holded-import-incremental.ts
