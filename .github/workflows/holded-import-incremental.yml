@@ -32,6 +32,23 @@ jobs:
       - name: Typecheck
         run: pnpm tsc --noEmit
 
+      - name: Debug pnpm + bins
+        run: |
+          set -euo pipefail
+          echo "GITHUB_SHA=$GITHUB_SHA"
+          node -v
+          pnpm -v
+          echo "--- node_modules/.bin (first 200) ---"
+          ls -la node_modules/.bin | sed -n '1,200p'
+          echo "--- which/command -v ---"
+          command -v tsx || true
+          command -v tsc || true
+          echo "--- pnpm exec versions ---"
+          pnpm exec -- tsc -v
+          pnpm exec -- tsx -v || true
+          echo "--- pnpm list tsx (depth 0) ---"
+          pnpm list tsx --depth 0 || true
+
       - name: Run Holded Import (NO HTTP)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -40,4 +57,4 @@ jobs:
           LIMIT: "50"
         run: |
           set -euo pipefail
-          pnpm exec tsx scripts/holded-import-incremental.ts
+          pnpm exec -- tsx scripts/holded-import-incremental.ts
