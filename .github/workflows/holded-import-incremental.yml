@@ -32,24 +32,32 @@ jobs:
 
           BASE="${BASE_URL%/}"
 
-          echo "PROBE 1 — GET / (should NOT be 404 if BASE_URL is correct host)"
-          ROOT_CODE="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE}/")" || true
-          echo "HTTP / = ${ROOT_CODE}"
+          # Print host only (no path). This is safe and helps diagnosis.
+          HOST_ONLY="$(echo "$BASE" | sed -E 's#^https?://##' | cut -d/ -f1)"
+          echo "BASE_URL host = ${HOST_ONLY}"
 
-          echo "PROBE 2 — GET /api/holded/poll (should exist on the portal; may be 401/200 but NOT 404)"
-          POLL_CODE="$(curl -sS -o /dev/null -w "%{http_code}" \
+          echo "PROBE 1 — GET / (follow redirects, show final URL + code)"
+          curl -sS -L -D /tmp/h1.txt -o /dev/null \
+            -w "final_url=%{url_effective} http_code=%{http_code}\n" \
+            "${BASE}/" || true
+          echo "headers:"
+          tail -n 15 /tmp/h1.txt || true
+
+          echo "PROBE 2 — GET /api/holded/poll (follow redirects, show final URL + code)"
+          curl -sS -L -D /tmp/h2.txt -o /dev/null \
             -H "Authorization: Bearer ${BEARER}" \
             -H "Accept: application/json" \
-            "${BASE}/api/holded/poll")" || true
-          echo "HTTP /api/holded/poll = ${POLL_CODE}"
+            -w "final_url=%{url_effective} http_code=%{http_code}\n" \
+            "${BASE}/api/holded/poll" || true
+          echo "headers:"
+          tail -n 15 /tmp/h2.txt || true
 
           URL="${BASE}/api/holded/invoices/import-incremental?limit=50"
           echo "Calling: $URL"
-          # -f: falla si HTTP >= 400
-          # -S: mostra error
-          curl -fSs \
+          curl -fSs -L \
             -H "Authorization: Bearer ${BEARER}" \
             -H "Accept: application/json" \
+            -w "\nfinal_url=%{url_effective} http_code=%{http_code}\n" \
             "$URL" | tee response.json
           echo ""
           echo "OK — response.json written"
