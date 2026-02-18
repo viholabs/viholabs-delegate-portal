@@ -37,6 +37,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
-        run: |
-          echo "Importer execution will be wired next step"
-          exit 1
+          LIMIT: "50"
+        run: pnpm tsx scripts/holded-import-incremental.ts
