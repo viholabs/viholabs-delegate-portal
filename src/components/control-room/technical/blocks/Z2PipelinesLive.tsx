@@ -1,188 +1,356 @@
-//src/components/control-room/technical/blocks/Z2PipelinesLive.tsx <<'EOF'
+//src/components/control-room/technical/blocks/Z2PipelinesLive.tsx <<'TS'
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import Z2Pipelines, {
-  type Z2PipelineError,
-  type Z2PipelineRow,
-  type Z2PipelineStatus,
-  type Z2PipelinesModel,
-} from "./Z2Pipelines";
-import Z2_1HoldedInvoicesThisMonth from "./Z2_1HoldedInvoicesThisMonth";
+/**
+ * VIHOLABS — Z2.1 HOLDed Invoices + Detail Drawer (LOCAL TRUTH + ITEMS)
+ *
+ * Canon:
+ * - READ ONLY
+ * - No HOLDed API calls
+ * - No schema changes
+ */
 
-type SubsystemKey = "holded" | "shopify" | "bixgrow" | "commissions";
-type LogSeverity = "INFO" | "WARN" | "CRITICAL";
+import { useEffect, useMemo, useState } from "react";
 
-type LogItem = {
-  at: string;
-  message: string;
-  severity: LogSeverity;
+type Row = {
+  invoice_id: string | null;
+  invoice_number: string | null;
+  client_name: string | null;
+  invoice_date: string | null; // ISO date
+  invoice_month: string | null; // YYYY-MM
+  imported_at: string | null;
 };
 
-type LogsLatestResponse = {
+type InvoiceDetail = {
+  id: string;
+  invoice_number: string | null;
+  client_name: string | null;
+  external_invoice_id: string | null;
+  currency: string | null;
+  total_gross: number | null;
+  created_at: string | null;
+  source_month: string | null;
+  source_meta: any;
+};
+
+type ItemKind = "SALE" | "PROMO" | "NEUTRAL" | "DISCOUNT";
+
+type InvoiceItem = {
+  id: string;
+  line_type: string | null;
+  kind: ItemKind;
+  units: number | null;
+  description: string | null;
+  unit_net_price: number | null;
+  line_net_amount: number | null;
+  vat_rate: number | null;
+  line_vat_amount: number | null;
+  line_gross_amount: number | null;
+  created_at: string | null;
+};
+
+type DrawerPayload = {
   ok: boolean;
-  logs?: Record<SubsystemKey, LogItem[]>;
+  invoice?: InvoiceDetail;
+  items?: InvoiceItem[];
+  units?: { sold: number; promo: number; discount: number; neutral: number };
+  items_error?: string;
+  error?: string;
 };
 
-function statusFromPing(ok: boolean, httpStatus?: number | null): Z2PipelineStatus {
-  if (ok) return "OK";
-  if (httpStatus && httpStatus >= 400 && httpStatus < 500) return "DEGRADED";
-  if (httpStatus && httpStatus >= 500) return "CRITICAL";
-  return "UNKNOWN";
+function currentMonthKeyUTC(): string {
+  return new Date().toISOString().slice(0, 7);
 }
 
-function statusFromLogs(base: Z2PipelineStatus, logs?: LogItem[]): Z2PipelineStatus {
-  const arr = Array.isArray(logs) ? logs : [];
-  if (arr.some((e) => e.severity === "CRITICAL")) return "CRITICAL";
-  if (arr.some((e) => e.severity === "WARN")) return base === "CRITICAL" ? "CRITICAL" : "DEGRADED";
-  return base; // pot ser UNKNOWN
+function shiftMonthKey(yyyyMm: string, deltaMonths: number): string {
+  const [yStr, mStr] = yyyyMm.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  d.setUTCMonth(d.getUTCMonth() + deltaMonths);
+  const yy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${yy}-${mm}`;
 }
 
-function classifyError(message: string): Z2PipelineError["type"] {
-  const s = String(message || "").toLowerCase();
-  if (s.includes("auth") || s.includes("unauth") || s.includes("no autorizado") || s.includes("no autenticado")) return "auth";
-  if (s.includes("schema") || s.includes("column") || s.includes("relation") || s.includes("does not exist")) return "schema";
-  if (s.includes("mapping") || s.includes("normalize") || s.includes("parse")) return "mapping";
-  return "runtime";
+function fmtDateHuman(isoLike: string | null | undefined): string {
+  if (!isoLike) return "—";
+  const s = String(isoLike).trim();
+  const d10 = s.length >= 10 ? s.slice(0, 10) : s;
+  const m = d10.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return d10;
+  const [, yyyy, mm, dd] = m;
+  return `${dd}-${mm}-${yyyy}`;
 }
 
-function errorsFromLogs(logs?: LogItem[]): Z2PipelineError[] {
-  const arr = Array.isArray(logs) ? logs : [];
-  return arr
-    .filter((e) => e.severity === "WARN" || e.severity === "CRITICAL")
-    .map((e) => ({
-      type: classifyError(e.message),
-      message: e.message,
-    }));
+function badgeForKind(kind: ItemKind) {
+  if (kind === "SALE") return { text: "VENDA", subtle: false };
+  if (kind === "PROMO") return { text: "PROMO", subtle: true };
+  if (kind === "DISCOUNT") return { text: "DESCOMPTE", subtle: false };
+  return { text: "NEUTRAL", subtle: true };
 }
 
 export default function Z2PipelinesLive() {
-  const [logsBy, setLogsBy] = useState<Record<SubsystemKey, LogItem[]>>({
-    holded: [],
-    shopify: [],
-    bixgrow: [],
-    commissions: [],
-  });
+  const [rows, setRows] = useState<Row[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const [holdedPing, setHoldedPing] = useState<{ ok: boolean; status: number | null; count: number | null }>({
-    ok: false,
-    status: null,
-    count: null,
-  });
+  const currentMonth = currentMonthKeyUTC();
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);
 
-  const [shopifyPing, setShopifyPing] = useState<{ ok: boolean; status: number | null }>({
-    ok: false,
-    status: null,
-  });
-
-  const lastOkRef = useRef<{ model: Z2PipelinesModel | null }>({ model: null });
+  // Drawer
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
+  const [drawerInvoice, setDrawerInvoice] = useState<InvoiceDetail | null>(null);
+  const [drawerItems, setDrawerItems] = useState<InvoiceItem[]>([]);
+  const [drawerUnits, setDrawerUnits] =
+    useState<{ sold: number; promo: number; discount: number; neutral: number } | null>(null);
+  const [drawerItemsError, setDrawerItemsError] = useState<string | null>(null);
 
   useEffect(() => {
-    let alive = true;
+    let cancelled = false;
 
-    async function tick() {
+    async function run() {
       try {
-        // 1) Logs latest (font canònica de senyal funcional)
-        const logsRes = await fetch("/api/control-room/tech/logs/latest", {
-          credentials: "include",
-          headers: { accept: "application/json" },
+        const res = await fetch("/api/holded/imported", {
+          headers: { Authorization: "Bearer 3040V1H0lb54376Quyriux" },
         });
 
-        const logsData = (await logsRes.json().catch(() => null)) as LogsLatestResponse | null;
+        const text = await res.text();
+        if (!text) throw new Error("Empty response");
 
-        if (alive && logsRes.ok && logsData?.ok && logsData.logs) {
-          setLogsBy({
-            holded: Array.isArray(logsData.logs.holded) ? logsData.logs.holded : [],
-            shopify: Array.isArray(logsData.logs.shopify) ? logsData.logs.shopify : [],
-            bixgrow: Array.isArray(logsData.logs.bixgrow) ? logsData.logs.bixgrow : [],
-            commissions: Array.isArray(logsData.logs.commissions) ? logsData.logs.commissions : [],
-          });
+        const json = JSON.parse(text);
+        if (!json?.ok) throw new Error(json?.error || "Failed");
+
+        if (!cancelled) {
+          setRows((json.rows ?? []) as Row[]);
+          setError(null);
         }
-
-        // 2) Holded ping
-        const hp = await fetch("/api/holded/ping", { credentials: "include" });
-        const hpJson = await hp.json().catch(() => null);
-
-        if (alive) {
-          setHoldedPing({
-            ok: Boolean(hp.ok && hpJson?.ok),
-            status: hp.status,
-            count: typeof hpJson?.holded?.count === "number" ? hpJson.holded.count : null,
-          });
-        }
-
-        // 3) Shopify ping
-        const sp = await fetch("/api/shopify/ping", { credentials: "include" });
-        const spJson = await sp.json().catch(() => null);
-
-        if (alive) {
-          setShopifyPing({
-            ok: Boolean(sp.ok && spJson?.ok),
-            status: sp.status,
-          });
-        }
-      } catch {
-        // silenci canònic (sense stacktraces)
+      } catch (e: any) {
+        if (!cancelled) setError(String(e?.message ?? e));
       }
     }
 
-    tick();
-    const id = setInterval(tick, 20000);
-
+    run();
+    const id = setInterval(run, 15000);
     return () => {
-      alive = false;
+      cancelled = true;
       clearInterval(id);
     };
   }, []);
 
-  const model = useMemo<Z2PipelinesModel>(() => {
-    const holdedBase = statusFromPing(holdedPing.ok, holdedPing.status);
-    const shopifyBase = statusFromPing(shopifyPing.ok, shopifyPing.status);
+  const monthOptions = useMemo(() => {
+    const present = new Set<string>();
+    for (const r of rows) if (r.invoice_month) present.add(r.invoice_month);
 
-    // REALITAT: si no hi ha ping dedicat, la base és UNKNOWN (no inventem degradació).
-    const bixgrowBase: Z2PipelineStatus = "UNKNOWN";
-    const commissionsBase: Z2PipelineStatus = "UNKNOWN";
+    let minMonth = currentMonth;
+    for (const mk of present) if (mk < minMonth) minMonth = mk;
 
-    const rows: Z2PipelineRow[] = [
-      {
-        key: "holded",
-        label: "Holded",
-        status: statusFromLogs(holdedBase, logsBy.holded),
-        records_affected: typeof holdedPing.count === "number" ? String(holdedPing.count) : "—",
-        errors: errorsFromLogs(logsBy.holded),
-      },
-      {
-        key: "shopify",
-        label: "Shopify",
-        status: statusFromLogs(shopifyBase, logsBy.shopify),
-        records_affected: "—",
-        errors: errorsFromLogs(logsBy.shopify),
-      },
-      {
-        key: "bixgrow",
-        label: "BixGrow",
-        status: statusFromLogs(bixgrowBase, logsBy.bixgrow),
-        records_affected: "—",
-        errors: errorsFromLogs(logsBy.bixgrow),
-      },
-      {
-        key: "commissions",
-        label: "Comissions",
-        status: statusFromLogs(commissionsBase, logsBy.commissions),
-        records_affected: "—",
-        errors: errorsFromLogs(logsBy.commissions),
-      },
-    ];
+    const opts: Array<{ value: string; label: string }> = [];
+    const MAX_MONTHS = 24;
 
-    const m = { rows };
-    lastOkRef.current.model = m;
-    return m;
-  }, [logsBy, holdedPing, shopifyPing]);
+    for (let i = 0; i < MAX_MONTHS; i++) {
+      const value = shiftMonthKey(currentMonth, -i);
+      const mustKeepAtLeast = i <= 5;
+      if (!mustKeepAtLeast && value < minMonth) break;
+
+      opts.push({
+        value,
+        label: i === 0 ? `En curs (${value})` : `En curs - ${i} (${value})`,
+      });
+    }
+
+    return opts;
+  }, [rows, currentMonth]);
+
+  useEffect(() => {
+    if (!monthOptions.find((o) => o.value === selectedMonth)) {
+      setSelectedMonth(currentMonth);
+    }
+  }, [monthOptions, selectedMonth, currentMonth]);
+
+  const visibleRows = useMemo(() => {
+    return rows
+      .filter((r) => r.invoice_month === selectedMonth)
+      .slice()
+      .sort((a, b) => String(b.invoice_number ?? "").localeCompare(String(a.invoice_number ?? "")));
+  }, [rows, selectedMonth]);
+
+  async function openDrawer(invoiceId: string) {
+    setDrawerOpen(true);
+    setDrawerLoading(true);
+    setDrawerError(null);
+    setDrawerItemsError(null);
+    setDrawerInvoice(null);
+    setDrawerItems([]);
+    setDrawerUnits(null);
+
+    try {
+      const res = await fetch(`/api/holded/invoices/${encodeURIComponent(invoiceId)}`, {
+        headers: { Authorization: "Bearer 3040V1H0lb54376Quyriux" },
+      });
+
+      const text = await res.text();
+      if (!text) throw new Error("Empty response");
+
+      const json = JSON.parse(text) as DrawerPayload;
+      if (!json?.ok) throw new Error(json?.error || "Drawer fetch failed");
+
+      setDrawerInvoice((json.invoice ?? null) as any);
+      setDrawerItems((json.items ?? []) as any);
+      setDrawerUnits((json.units ?? null) as any);
+      setDrawerItemsError(json.items_error ?? null);
+    } catch (e: any) {
+      setDrawerError(String(e?.message ?? e));
+    } finally {
+      setDrawerLoading(false);
+    }
+  }
+
+  function closeDrawer() {
+    setDrawerOpen(false);
+  }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Z2_1HoldedInvoicesThisMonth />
-      <Z2Pipelines model={model} />
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold" style={{ color: "var(--viho-muted)" }}>
+          Holded (Z2.1) · Factures (per data factura)
+        </div>
+
+        <select
+          className="text-xs rounded-xl border px-2 py-1"
+          style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface)" }}
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+        >
+          {monthOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {error ? (
+        <div className="text-xs" style={{ color: "var(--viho-danger)" }}>
+          {error}
+        </div>
+      ) : (
+        <div className="text-xs" style={{ color: "var(--viho-muted)" }}>
+          Factures: <span className="font-semibold">{visibleRows.length}</span>
+        </div>
+      )}
+
+      <div className="space-y-1">
+        {visibleRows.map((r) => (
+          <button
+            key={r.invoice_id ?? `${r.invoice_number}-${r.imported_at}`}
+            type="button"
+            onClick={() => r.invoice_id && openDrawer(r.invoice_id)}
+            className="w-full text-left rounded-2xl border px-3 py-2"
+            style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface)" }}
+            disabled={!r.invoice_id}
+          >
+            <div className="text-xs">
+              <span className="font-semibold">{r.invoice_number ?? "—"}</span>
+              {" · "}
+              <span>{r.client_name ?? "—"}</span>
+              {" · "}
+              <span className="font-semibold">{fmtDateHuman(r.invoice_date)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Drawer */}
+      {drawerOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-end"
+          style={{ background: "rgba(0,0,0,0.18)" }}
+          onClick={closeDrawer}
+        >
+          <div
+            className="w-full max-w-xl h-full overflow-auto p-4"
+            style={{ background: "white" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold" style={{ color: "var(--viho-muted)" }}>
+                INVOICE DETAIL (LOCAL TRUTH)
+              </div>
+              <button
+                className="text-xs font-semibold rounded-xl border px-3 py-1"
+                style={{ borderColor: "var(--viho-border)" }}
+                onClick={closeDrawer}
+              >
+                Tancar
+              </button>
+            </div>
+
+            {drawerLoading ? (
+              <div className="mt-4 text-sm">Carregant…</div>
+            ) : drawerError ? (
+              <div className="mt-4 text-sm" style={{ color: "var(--viho-danger)" }}>
+                {drawerError}
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div>
+                  <div className="text-sm font-semibold">Factura</div>
+                  <div className="mt-1 text-sm">
+                    {drawerInvoice?.invoice_number ?? "—"} · {drawerInvoice?.client_name ?? "—"}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-sm font-semibold">ITEMS</div>
+                  {drawerItemsError ? (
+                    <div className="mt-1 text-sm" style={{ color: "var(--viho-danger)" }}>
+                      {drawerItemsError}
+                    </div>
+                  ) : drawerItems.length === 0 ? (
+                    <div className="mt-1 text-sm" style={{ color: "var(--viho-muted)" }}>
+                      Sense items.
+                    </div>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      {drawerItems.map((it) => {
+                        const b = badgeForKind(it.kind);
+                        return (
+                          <div
+                            key={it.id}
+                            className="rounded-2xl border p-3"
+                            style={{ borderColor: "var(--viho-border)" }}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-semibold">{it.description ?? "—"}</div>
+                              <div
+                                className="text-xs font-semibold px-2 py-1 rounded-full"
+                                style={{
+                                  border: "1px solid var(--viho-border)",
+                                  background: b.subtle ? "rgba(0,0,0,0.03)" : "rgba(0,0,0,0.06)",
+                                  color: "var(--viho-muted)",
+                                }}
+                              >
+                                {b.text}
+                              </div>
+                            </div>
+
+                            <div className="mt-2 text-xs" style={{ color: "var(--viho-muted)" }}>
+                              Unitats (venda / promo): <span className="font-semibold">{it.units ?? 0}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

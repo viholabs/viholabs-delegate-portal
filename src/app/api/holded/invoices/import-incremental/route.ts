@@ -135,11 +135,25 @@ export async function GET(req: Request) {
 
     let imported = 0;
     const failures: Array<ImportError & { holded_id: string }> = [];
+    const skipped: Array<{ holded_id: string; reason: string }> = [];
 
     for (const holdedId of invoiceIds) {
       const r = await importOneHoldedInvoiceById(supabase, holdedId);
-      if (r.ok) imported += 1;
-      else failures.push({ ...r.err, holded_id: holdedId });
+      if (r.ok) {
+        imported += 1;
+        continue;
+      }
+
+      const msg = String(r?.err?.error ?? "").toLowerCase();
+
+      // Canonical deterministic skip: HOLDed returns docs with empty/null docNumber (number),
+      // which cannot be imported into local truth because invoice_number is required.
+      if (msg.includes("missing invoice_number")) {
+        skipped.push({ holded_id: holdedId, reason: "missing_invoice_number" });
+        continue;
+      }
+
+      failures.push({ ...r.err, holded_id: holdedId });
     }
 
     // Advance cursor only if fully OK.
@@ -171,6 +185,8 @@ export async function GET(req: Request) {
       limit,
       total_ids: invoiceIds.length,
       imported,
+      skipped: skipped.length,
+      skipped_ids: skipped,
       failed: failures.length,
       failures,
       cursor: {

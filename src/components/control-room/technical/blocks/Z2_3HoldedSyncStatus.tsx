@@ -62,11 +62,16 @@ export default function Z2_3HoldedSyncStatus() {
   }, []);
 
   const mins = minutesSince(row?.finished_at ?? null);
+  const failedN = Number(row?.failed ?? 0);
 
+  // ✅ Canon: failed > 0 => FAIL even if row.ok is true
   let status: "OK" | "FAIL" | "STALE" = "STALE";
-  if (row?.ok === true) status = "OK";
-  if (row?.ok === false) status = "FAIL";
-  if (row?.ok === true && mins !== null && mins > 30) status = "STALE";
+  if (row) {
+    if (failedN > 0) status = "FAIL";
+    else if (row.ok === true) status = "OK";
+    else if (row.ok === false) status = "FAIL";
+  }
+  if (status === "OK" && mins !== null && mins > 30) status = "STALE";
 
   const failureKind = status === "FAIL" ? classifyFailure(row?.error_message) : null;
 
@@ -89,7 +94,8 @@ export default function Z2_3HoldedSyncStatus() {
     >
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs font-semibold" style={{ color }}>
-          HOLDed Sync — {status}{status === "FAIL" && failureKind ? ` (${failureKind})` : ""}
+          HOLDed Sync — {status}
+          {status === "FAIL" && failureKind ? ` (${failureKind})` : ""}
         </div>
 
         {evidenceUrl ? (
@@ -111,7 +117,10 @@ export default function Z2_3HoldedSyncStatus() {
         </div>
       ) : row ? (
         <div className="text-xs mt-2 space-y-1" style={{ color: "var(--viho-muted)" }}>
-          <div>Última execució: {row.finished_at ?? "—"}{mins !== null ? ` (fa ${mins} min)` : ""}</div>
+          <div>
+            Última execució: {row.finished_at ?? "—"}
+            {mins !== null ? ` (fa ${mins} min)` : ""}
+          </div>
           <div>Registres: {row.total_ids ?? 0}</div>
           <div>Importades: {row.imported ?? 0}</div>
           <div>Errors: {row.failed ?? 0}</div>

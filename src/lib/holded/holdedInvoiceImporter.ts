@@ -7,6 +7,11 @@
  * - Deterministic
  * - Uses canonical Holded façade (holdedFetch / holdedFetchJson)
  * - PROMO classification is amount-based (0€), not units-based
+ *
+ * Robustness (canonical operational rule):
+ * - If Holded docNumber is missing/empty, we DO NOT invent invoice_number.
+ * - We return a deterministic SKIP result so incremental cursor is not blocked by upstream-corrupt docs.
+ * - This preserves "DB = truth" and avoids permanent deadlocks.
  */
 
 import { holdedFetch, holdedFetchJson } from "@/lib/holded/holdedFetch";
@@ -50,6 +55,12 @@ export type ImportError = {
   error: string;
   meta?: any;
 };
+
+export type ImportOk = { ok: true };
+export type ImportFail = { ok: false; err: ImportError };
+export type ImportSkip = { ok: false; skipped: true; err: ImportError };
+
+export type ImportResult = ImportOk | ImportFail | ImportSkip;
 
 function holdedIdFromAny(x: any): string | null {
   const raw = x?.id ?? x?._id ?? null;
@@ -140,7 +151,13 @@ async function writeInvoiceIdempotent(
 
   if (foundByExternal.error) return { ok: false, error: foundByExternal.error.message };
   if (foundByExternal.data?.id) {
-    const upd = await supabase.from("invoices").update(payload).eq("id", foundByExternal.data.id).select("id").single();
+    const upd = await supabase
+      .from("invoices")
+      .update(payload)
+      .eq("id", foundByExternal.data.id)
+      .select("id")
+      .single();
+
     if (upd.error) return { ok: false, error: upd.error.message };
     return { ok: true, invoiceId: String(upd.data.id) };
   }
@@ -173,26 +190,40 @@ async function writeInvoiceIdempotent(
 export async function importOneHoldedInvoiceById(
   supabase: ReturnType<typeof supabaseAdminClient>,
   holdedId: string
-): Promise<{ ok: true } | { ok: false; err: ImportError }> {
+): Promise<ImportResult> {
   let detail: HoldedInvoiceDetail;
   try {
     // ✅ Canonical signature (docType, id)
     detail = await holdedFetch<HoldedInvoiceDetail>("invoice", holdedId);
   } catch (e: any) {
-    return { ok: false, err: { holded_id: holdedId, step: "holded_detail", error: String(e?.message ?? e) } };
+    return {
+      ok: false,
+      err: { holded_id: holdedId, step: "holded_detail", error: String(e?.message ?? e) },
+    };
   }
 
   const invoiceNumber = (detail.docNumber ?? "").toString().trim();
+
+  // ✅ Canonical SKIP: never invent invoice_number
   if (!invoiceNumber) {
     return {
       ok: false,
-      err: { holded_id: holdedId, step: "invoice_number", error: "Missing invoice_number (Holded docNumber is null/empty)" },
+      skipped: true,
+      err: {
+        holded_id: holdedId,
+        step: "invoice_number",
+        error: "SKIP: Missing invoice_number (Holded docNumber is null/empty)",
+        meta: { holded_docNumber: detail.docNumber ?? null },
+      },
     };
   }
 
   const unix = Number(detail.date ?? NaN);
   if (!Number.isFinite(unix) || unix <= 0) {
-    return { ok: false, err: { holded_id: holdedId, step: "invoice_date", error: "Missing/invalid invoice_date" } };
+    return {
+      ok: false,
+      err: { holded_id: holdedId, step: "invoice_date", error: "Missing/invalid invoice_date" },
+    };
   }
 
   const invoiceDateISO = unixToISODate(unix);
@@ -217,7 +248,9 @@ export async function importOneHoldedInvoiceById(
       detailAny?.customer?.name ??
       null) as string | null;
 
-  const externalModifiedAtISO = safeISOFromUnknown(detailAny?.updatedAt ?? detailAny?.modifiedAt ?? null);
+  const externalModifiedAtISO = safeISOFromUnknown(
+    detailAny?.updatedAt ?? detailAny?.modifiedAt ?? null
+  );
 
   const invoicePayload: Record<string, any> = {
     invoice_number: invoiceNumber,
@@ -260,16 +293,17 @@ export async function importOneHoldedInvoiceById(
 
   const invoiceId = w.invoiceId;
 
-  const del = await supabase.from("invoice_items").delete().eq("invoice_id", invoiceId);
-  if (del.error) return { ok: false, err: { holded_id: holdedId, step: "items_delete", error: del.error.message } };
-
-  const products = Array.isArray(detail.products) ? detail.products : [];
+  // 1) Build rows FIRST. Canon: never wipe existing evidence if we have no replacement rows.
+  const products = Array.isArray((detail as any)?.products) ? (detail as any).products : [];
   const rows: any[] = [];
 
   for (const p of products) {
     const units = safeNumber(p?.units, 0);
     if (units < 0) {
-      return { ok: false, err: { holded_id: holdedId, step: "items_units", error: "Negative units encountered" } };
+      return {
+        ok: false,
+        err: { holded_id: holdedId, step: "items_units", error: "Negative units encountered" },
+      };
     }
 
     const unitNet = safeNumber(p?.price, 0);
@@ -299,9 +333,21 @@ export async function importOneHoldedInvoiceById(
     });
   }
 
-  if (rows.length > 0) {
-    const ins = await supabase.from("invoice_items").insert(rows as any);
-    if (ins.error) return { ok: false, err: { holded_id: holdedId, step: "items_insert", error: ins.error.message } };
+  // 2) If no rows, do NOT delete existing items (canon: preserve evidence).
+  if (rows.length === 0) {
+    // Canon: preserve evidence. If we have no replacement rows, we do NOT wipe existing items.
+    return { ok: true };
+  }
+
+  // 3) Replace deterministically: delete then insert.
+  const del = await supabase.from("invoice_items").delete().eq("invoice_id", invoiceId);
+  if (del.error) {
+    return { ok: false, err: { holded_id: holdedId, step: "items_delete", error: del.error.message } };
+  }
+
+  const ins = await supabase.from("invoice_items").insert(rows as any);
+  if (ins.error) {
+    return { ok: false, err: { holded_id: holdedId, step: "items_insert", error: ins.error.message } };
   }
 
   return { ok: true };

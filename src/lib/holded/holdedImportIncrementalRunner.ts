@@ -6,7 +6,11 @@
  * Canon preserved:
  * - Cursor logic untouched
  * - Import logic untouched
- * - Only adds run logging + evidence fields (GitHub Actions)
+ * - Adds deterministic SKIP handling for upstream-corrupt docs (missing docNumber)
+ *
+ * Rule:
+ * - FAILURES (real) block cursor advance
+ * - SKIPS do NOT block cursor advance
  */
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -14,6 +18,7 @@ import { fetchChangedIds } from "@/lib/holded/holdedIncremental";
 import {
   importOneHoldedInvoiceById,
   type ImportError,
+  type ImportResult,
 } from "@/lib/holded/holdedInvoiceImporter";
 
 function parseLimit(v: unknown, fallback: number, max = 300): number {
@@ -63,9 +68,11 @@ export type RunHoldedIncrementalArgs = {
   until?: string;
 };
 
-export async function runHoldedInvoicesIncrementalImport(
-  args: RunHoldedIncrementalArgs
-) {
+function isSkip(r: ImportResult): r is { ok: false; skipped: true; err: ImportError } {
+  return !!r && (r as any).ok === false && (r as any).skipped === true;
+}
+
+export async function runHoldedInvoicesIncrementalImport(args: RunHoldedIncrementalArgs) {
   const startedAt = new Date();
   const limit = parseLimit(args.limit, 50, 300);
   const supabase = supabaseAdmin();
@@ -125,14 +132,29 @@ export async function runHoldedInvoicesIncrementalImport(
     const invoiceIds = idsAll.slice(0, limit);
 
     let imported = 0;
+    let skipped = 0;
+
     const failures: Array<ImportError & { holded_id: string }> = [];
+    const skipped_items: Array<ImportError & { holded_id: string }> = [];
 
     for (const holdedId of invoiceIds) {
       const r = await importOneHoldedInvoiceById(supabase, holdedId);
-      if (r.ok) imported++;
-      else failures.push({ ...r.err, holded_id: holdedId });
+
+      if (r.ok) {
+        imported++;
+        continue;
+      }
+
+      if (isSkip(r)) {
+        skipped++;
+        skipped_items.push({ ...r.err, holded_id: holdedId });
+        continue;
+      }
+
+      failures.push({ ...(r as any).err, holded_id: holdedId });
     }
 
+    // Advance cursor only if no REAL failures.
     let cursorAdvanced = false;
 
     if (failures.length === 0) {
@@ -151,6 +173,7 @@ export async function runHoldedInvoicesIncrementalImport(
       total_ids: invoiceIds.length,
       imported,
       failed: failures.length,
+      skipped,
       advanced: cursorAdvanced,
       cursor: {
         source: cursor_source,
@@ -158,6 +181,8 @@ export async function runHoldedInvoicesIncrementalImport(
         since: since.toISOString(),
         until: until.toISOString(),
       },
+      failures,
+      skipped_items,
     };
 
     // 2️⃣ UPDATE RUN (success)
@@ -176,6 +201,8 @@ export async function runHoldedInvoicesIncrementalImport(
         since: since.toISOString(),
         until: until.toISOString(),
         payload,
+        // IMPORTANT: error_message remains null on success; failures/skips are in payload
+        error_message: failures.length > 0 ? "One or more invoice imports failed" : null,
       })
       .eq("id", runId);
 

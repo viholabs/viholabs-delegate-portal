@@ -125,6 +125,35 @@ export async function getActorFromRequest(req: Request) {
       return { ok: false as const, status: 401, error: "Missing Bearer token" };
     }
 
+    // -------------------------
+    // 2A) INTERNAL BEARER (CANONICAL SUPER_ADMIN bypass)
+    // -------------------------
+    stage = "internal_bearer";
+    const internal = String(process.env.VIHOLABS_INTERNAL_BEARER ?? "").trim();
+    if (internal && token === internal) {
+      // Deterministic: pick an ACTIVE SUPER_ADMIN actor from DB truth.
+      // NOTE: No schema changes. No heuristics beyond "role=SUPER_ADMIN & status=active".
+      const { data: actors, error: aErr } = await supaService
+        .from("actors")
+        .select("id, role, status, name, email, auth_user_id")
+        .eq("status", "active")
+        .in("role", ["SUPER_ADMIN", "super_admin"])
+        .limit(1);
+
+      if (aErr) return { ok: false as const, status: 500, error: aErr.message };
+      const actor = Array.isArray(actors) ? actors[0] : null;
+      if (!actor) return { ok: false as const, status: 403, error: "Super admin actor not found" };
+
+      return {
+        ok: true as const,
+        supaService,
+        supaRls: supaService, // internal bearer = service role (bypass RLS)
+        actor,
+        authUserId: actor.auth_user_id ?? null,
+        authMode: "internal_bearer" as const,
+      };
+    }
+
     const { url, anon } = getEnvOrThrow();
 
     stage = "bearer_validate";
