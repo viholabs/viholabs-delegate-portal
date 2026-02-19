@@ -1,18 +1,20 @@
 // src/lib/holded/holdedImportIncrementalRunner.ts
 /**
  * VIHOLABS — HOLDed Incremental Import Runner (NO HTTP)
+ * + Observability logging (holded_sync_runs)
  *
- * Canon:
- * - Same logic as /api/holded/invoices/import-incremental/route.ts
- * - No NextRequest / NextResponse dependency
- * - Uses supabaseAdmin() + holdedIncremental + holdedInvoiceImporter
- * - No schema changes
- * - Deterministic, infra-only
+ * Canon preserved:
+ * - Cursor logic untouched
+ * - Import logic untouched
+ * - Only adds run logging
  */
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fetchChangedIds } from "@/lib/holded/holdedIncremental";
-import { importOneHoldedInvoiceById, type ImportError } from "@/lib/holded/holdedInvoiceImporter";
+import {
+  importOneHoldedInvoiceById,
+  type ImportError,
+} from "@/lib/holded/holdedInvoiceImporter";
 
 function parseLimit(v: unknown, fallback: number, max = 300): number {
   const n = Number(v ?? "");
@@ -57,65 +59,43 @@ async function writeHoldedSyncState(
 
 export type RunHoldedIncrementalArgs = {
   limit?: number;
-  // optional overrides (ISO date strings)
   since?: string;
   until?: string;
 };
 
-export type RunHoldedIncrementalResult = {
-  ok: boolean;
-  mode: "incremental_stateful_no_http";
-  limit: number;
-  total_ids: number;
-  imported: number;
-  failed: number;
-  failures: Array<ImportError & { holded_id: string }>;
-  cursor: {
-    source: "override" | "db" | "fallback_30d";
-    prev_db_cursor: string | null;
-    since: string;
-    until: string;
-    advanced: boolean;
-  };
-  at: { started: string; finished: string };
-  error?: string;
-  stage?: string;
-};
-
 export async function runHoldedInvoicesIncrementalImport(
   args: RunHoldedIncrementalArgs
-): Promise<RunHoldedIncrementalResult> {
-  const startedAt = new Date().toISOString();
+) {
+  const startedAt = new Date();
   const limit = parseLimit(args.limit, 50, 300);
+  const supabase = supabaseAdmin();
+
+  // 1️⃣ INSERT RUN (start)
+  const { data: runRow, error: runInsertError } = await supabase
+    .from("holded_sync_runs")
+    .insert({
+      job: "holded_invoices_incremental",
+      mode: "incremental_stateful_no_http",
+      started_at: startedAt.toISOString(),
+      ok: false,
+      stage: "started",
+      limit_n: limit,
+    })
+    .select("id")
+    .single();
+
+  if (runInsertError) {
+    throw new Error(`holded_sync_runs insert failed: ${runInsertError.message}`);
+  }
+
+  const runId = runRow.id;
 
   try {
     const sinceOverride = args.since ? safeDateOrUndefined(args.since) : undefined;
     const untilOverride = args.until ? safeDateOrUndefined(args.until) : undefined;
 
-    const supabase = supabaseAdmin();
-
     const stateRes = await readHoldedSyncState(supabase);
-    if (!stateRes.ok) {
-      return {
-        ok: false,
-        mode: "incremental_stateful_no_http",
-        limit,
-        total_ids: 0,
-        imported: 0,
-        failed: 0,
-        failures: [],
-        cursor: {
-          source: "fallback_30d",
-          prev_db_cursor: null,
-          since: "",
-          until: "",
-          advanced: false,
-        },
-        at: { started: startedAt, finished: new Date().toISOString() },
-        stage: "read_sync_state",
-        error: stateRes.error,
-      };
-    }
+    if (!stateRes.ok) throw new Error(stateRes.error);
 
     const state = stateRes.row ?? null;
     const cursorDate = safeDateOrUndefined(state?.last_cursor);
@@ -137,11 +117,10 @@ export async function runHoldedInvoicesIncrementalImport(
 
     for (const holdedId of invoiceIds) {
       const r = await importOneHoldedInvoiceById(supabase, holdedId);
-      if (r.ok) imported += 1;
+      if (r.ok) imported++;
       else failures.push({ ...r.err, holded_id: holdedId });
     }
 
-    // Advance cursor only if fully OK.
     let cursorAdvanced = false;
 
     if (failures.length === 0) {
@@ -149,68 +128,50 @@ export async function runHoldedInvoicesIncrementalImport(
         cursorISO: until.toISOString(),
         syncAtISO: until.toISOString(),
       });
-      if (!w.ok) {
-        return {
-          ok: false,
-          mode: "incremental_stateful_no_http",
-          limit,
-          total_ids: invoiceIds.length,
-          imported,
-          failed: failures.length,
-          failures,
-          cursor: {
-            source: sinceOverride ? "override" : cursorDate ? "db" : "fallback_30d",
-            prev_db_cursor: state?.last_cursor ?? null,
-            since: since.toISOString(),
-            until: until.toISOString(),
-            advanced: false,
-          },
-          at: { started: startedAt, finished: new Date().toISOString() },
-          stage: "write_sync_state",
-          error: w.error,
-        };
-      }
+      if (!w.ok) throw new Error(w.error);
       cursorAdvanced = true;
     }
 
-    const finishedAt = new Date().toISOString();
+    const finishedAt = new Date();
 
-    return {
+    const payload = {
       ok: true,
-      mode: "incremental_stateful_no_http",
-      limit,
       total_ids: invoiceIds.length,
       imported,
       failed: failures.length,
-      failures,
-      cursor: {
-        source: sinceOverride ? "override" : cursorDate ? "db" : "fallback_30d",
-        prev_db_cursor: state?.last_cursor ?? null,
-        since: since.toISOString(),
-        until: until.toISOString(),
+      advanced: cursorAdvanced,
+    };
+
+    // 2️⃣ UPDATE RUN (success)
+    await supabase
+      .from("holded_sync_runs")
+      .update({
+        finished_at: finishedAt.toISOString(),
+        ok: true,
+        stage: "completed",
+        total_ids: invoiceIds.length,
+        imported,
+        failed: failures.length,
         advanced: cursorAdvanced,
-      },
-      at: { started: startedAt, finished: finishedAt },
-    };
+        payload,
+      })
+      .eq("id", runId);
+
+    return payload;
   } catch (e: any) {
-    return {
-      ok: false,
-      mode: "incremental_stateful_no_http",
-      limit,
-      total_ids: 0,
-      imported: 0,
-      failed: 0,
-      failures: [],
-      cursor: {
-        source: "fallback_30d",
-        prev_db_cursor: null,
-        since: "",
-        until: "",
-        advanced: false,
-      },
-      at: { started: startedAt, finished: new Date().toISOString() },
-      stage: "exception",
-      error: String(e?.message ?? e),
-    };
+    const finishedAt = new Date();
+
+    await supabase
+      .from("holded_sync_runs")
+      .update({
+        finished_at: finishedAt.toISOString(),
+        ok: false,
+        stage: "exception",
+        error_message: String(e?.message ?? e),
+        payload: { ok: false, error: String(e?.message ?? e) },
+      })
+      .eq("id", runId);
+
+    throw e;
   }
 }
