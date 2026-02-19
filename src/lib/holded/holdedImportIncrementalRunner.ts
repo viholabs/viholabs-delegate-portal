@@ -6,7 +6,7 @@
  * Canon preserved:
  * - Cursor logic untouched
  * - Import logic untouched
- * - Only adds run logging
+ * - Only adds run logging + evidence fields (GitHub Actions)
  */
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -70,6 +70,11 @@ export async function runHoldedInvoicesIncrementalImport(
   const limit = parseLimit(args.limit, 50, 300);
   const supabase = supabaseAdmin();
 
+  // Evidence (GitHub Actions provides these env vars)
+  const github_run_id = process.env.GITHUB_RUN_ID ? String(process.env.GITHUB_RUN_ID) : null;
+  const github_repo = process.env.GITHUB_REPOSITORY ? String(process.env.GITHUB_REPOSITORY) : null;
+  const github_sha = process.env.GITHUB_SHA ? String(process.env.GITHUB_SHA) : null;
+
   // 1️⃣ INSERT RUN (start)
   const { data: runRow, error: runInsertError } = await supabase
     .from("holded_sync_runs")
@@ -80,6 +85,10 @@ export async function runHoldedInvoicesIncrementalImport(
       ok: false,
       stage: "started",
       limit_n: limit,
+      github_run_id,
+      github_repo,
+      github_sha,
+      payload: {},
     })
     .select("id")
     .single();
@@ -103,6 +112,9 @@ export async function runHoldedInvoicesIncrementalImport(
     const until = untilOverride ?? new Date();
     const fallbackSince = new Date(until.getTime() - 30 * 24 * 60 * 60 * 1000);
     const since = sinceOverride ?? cursorDate ?? fallbackSince;
+
+    const cursor_source = sinceOverride ? "override" : cursorDate ? "db" : "fallback_30d";
+    const prev_db_cursor = state?.last_cursor ?? null;
 
     const idsAll = await fetchChangedIds({
       docType: "invoice",
@@ -140,6 +152,12 @@ export async function runHoldedInvoicesIncrementalImport(
       imported,
       failed: failures.length,
       advanced: cursorAdvanced,
+      cursor: {
+        source: cursor_source,
+        prev_db_cursor,
+        since: since.toISOString(),
+        until: until.toISOString(),
+      },
     };
 
     // 2️⃣ UPDATE RUN (success)
@@ -153,6 +171,10 @@ export async function runHoldedInvoicesIncrementalImport(
         imported,
         failed: failures.length,
         advanced: cursorAdvanced,
+        cursor_source: cursor_source,
+        prev_db_cursor: prev_db_cursor,
+        since: since.toISOString(),
+        until: until.toISOString(),
         payload,
       })
       .eq("id", runId);
