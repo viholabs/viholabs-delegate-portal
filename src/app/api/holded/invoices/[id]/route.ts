@@ -1,23 +1,6 @@
-// src/app/api/holded/invoices/[id]/route.ts
-/**
- * VIHOLABS — HOLDed Invoice Detail (LOCAL TRUTH + ITEMS)
- *
- * Canon:
- * - READ ONLY
- * - No HOLDed API calls
- * - No schema changes
- * - SUPER_ADMIN only
- *
- * Input:
- * - params.id = invoices.id (UUID)  [as used by Z2PipelinesLive]
- *
- * Output (for Z2PipelinesLive drawer):
- * - { ok, invoice, items, units, items_error? }
- */
-
 import { NextResponse } from "next/server";
 import { getActorFromRequest } from "@/app/api/delegate/_utils";
-import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
@@ -25,128 +8,80 @@ function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
-type ActorLite = { id: string; role: string | null };
+function deriveKind(lineType: any): "SALE" | "PROMO" | "DISCOUNT" | "NEUTRAL" {
+  const lt = String(lineType ?? "").toUpperCase();
 
-type ActorFromRequestOk = {
-  ok: true;
-  actor: ActorLite;
-  supaRls: any;
-};
+  if (lt.includes("PROMO")) return "PROMO";
+  if (lt.includes("DISCOUNT")) return "DISCOUNT";
+  if (lt.includes("SALE")) return "SALE";
 
-function isOk(ar: any): ar is ActorFromRequestOk {
-  return !!ar && ar.ok === true && !!ar.actor;
+  return "NEUTRAL";
 }
 
-function getServiceSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-
-  if (!url || !key) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY"
-    );
-  }
-
-  return createAdminClient(url, key, { auth: { persistSession: false } });
-}
-
-function toNumber(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-export async function GET(req: Request, { params }: any) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   let stage = "init";
 
   try {
-    stage = "actor_from_request";
+    stage = "auth";
     const ar: any = await getActorFromRequest(req);
-    if (!isOk(ar)) {
-      return json(ar?.status ?? 401, {
-        ok: false,
-        stage,
-        error: ar?.error ?? "Unauthorized",
-      });
+    if (!ar?.ok) {
+      return json(ar?.status ?? 401, { ok: false, stage, error: ar?.error });
     }
 
-    const role = String(ar.actor.role ?? "").trim().toLowerCase();
-    if (role !== "super_admin") {
-      return json(403, { ok: false, stage: "authz", error: "Forbidden" });
+    const { id: rawId } = await ctx.params;
+    const id = String(rawId ?? "").trim();
+    if (!id) {
+      return json(400, { ok: false, stage, error: "Missing id" });
     }
 
-    const invoiceId = String(params?.id ?? "").trim();
-    if (!invoiceId) return json(400, { ok: false, stage: "input", error: "Missing id" });
+    const supabase = supabaseAdmin();
 
-    stage = "supabase_service";
-    const admin = getServiceSupabase();
-
-    stage = "query_invoice";
-    const { data: inv, error: invErr } = await admin
+    stage = "invoice_query";
+    const { data: invoice, error: invErr } = await supabase
       .from("invoices")
-      .select(
-        "id, invoice_number, client_name, external_invoice_id, currency, total_gross, created_at, source_month, source_meta"
-      )
-      .eq("id", invoiceId)
+      .select("*")
+      .eq("id", id)
       .maybeSingle();
 
-    if (invErr) return json(500, { ok: false, stage, error: invErr.message });
-    if (!inv?.id) return json(404, { ok: false, stage, error: "Invoice not found" });
+    if (invErr) {
+      return json(500, { ok: false, stage, error: invErr.message });
+    }
 
-    stage = "query_items";
-    // We assume invoice_items has invoice_id FK to invoices.id (UUID).
-    // If not, we'll return items_error deterministically.
-    const { data: itemsData, error: itemsErr } = await admin
+    if (!invoice) {
+      return json(404, { ok: false, stage, error: "Invoice not found" });
+    }
+
+    stage = "items_query";
+    const { data: itemsRaw, error: itemsErr } = await supabase
       .from("invoice_items")
       .select(
-        "id, line_type, kind, units, description, unit_net_price, line_net_amount, vat_rate, line_vat_amount, line_gross_amount, created_at"
+        "id, line_type, units, description, unit_net_price, line_net_amount, vat_rate, line_vat_amount, line_gross_amount, created_at"
       )
-      .eq("invoice_id", invoiceId)
-      .order("created_at", { ascending: true });
+      .eq("invoice_id", id);
 
     let items_error: string | null = null;
-    const items = Array.isArray(itemsData) ? itemsData : [];
+    if (itemsErr) items_error = itemsErr.message;
 
-    if (itemsErr) {
-      // Do not fail the whole drawer: return invoice + items_error (canon: evidence)
-      items_error = itemsErr.message;
+    const safeItems = Array.isArray(itemsRaw) ? itemsRaw : [];
+    const items = safeItems.map((it: any) => ({
+      ...it,
+      kind: deriveKind(it.line_type),
+    }));
+
+    const units = { sold: 0, promo: 0, discount: 0, neutral: 0 };
+    for (const it of items) {
+      const u = Number(it.units ?? 0) || 0;
+      if (it.kind === "SALE") units.sold += u;
+      else if (it.kind === "PROMO") units.promo += u;
+      else if (it.kind === "DISCOUNT") units.discount += u;
+      else units.neutral += u;
     }
 
-    stage = "compute_units";
-    const units = {
-      sold: 0,
-      promo: 0,
-      discount: 0,
-      neutral: 0,
-    };
-
-    if (!itemsErr) {
-      for (const it of items as any[]) {
-        const kind = String(it?.kind ?? "").toUpperCase();
-        const u = toNumber(it?.units) ?? 0;
-        if (kind === "SALE") units.sold += u;
-        else if (kind === "PROMO") units.promo += u;
-        else if (kind === "DISCOUNT") units.discount += u;
-        else units.neutral += u;
-      }
-    }
-
-    stage = "ok";
     return json(200, {
       ok: true,
-      stage,
-      invoice: {
-        id: inv.id,
-        invoice_number: inv.invoice_number ?? null,
-        client_name: inv.client_name ?? null,
-        external_invoice_id: inv.external_invoice_id ?? null,
-        currency: inv.currency ?? null,
-        total_gross: inv.total_gross ?? null,
-        created_at: inv.created_at ?? null,
-        source_month: inv.source_month ?? null,
-        source_meta: inv.source_meta ?? null,
-      },
-      items: itemsErr ? [] : items,
+      stage: "ok",
+      invoice,
+      items,
       units,
       ...(items_error ? { items_error } : {}),
     });
