@@ -32,68 +32,28 @@ jobs:
       - name: Typecheck
         run: pnpm tsc --noEmit
 
-      - name: Debug pnpm + bins
-        run: |
-          set -euo pipefail
-          echo "GITHUB_SHA=$GITHUB_SHA"
-          node -v
-          pnpm -v
-          echo "--- node_modules/.bin (first 200) ---"
-          ls -la node_modules/.bin | sed -n '1,200p'
-          echo "--- which/command -v ---"
-          command -v tsx || true
-          command -v tsc || true
-          echo "--- pnpm exec versions ---"
-          pnpm exec -- tsc -v
-          pnpm exec -- tsx -v || true
-          echo "--- pnpm list tsx (depth 0) ---"
-          pnpm list tsx --depth 0 || true
-
-      - name: Debug Holded IDs (find correct endpoint)
+      - name: Debug Holded Auth (Bearer vs key)
         env:
           HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
         run: |
           set -euo pipefail
           node - <<'NODE'
-          const ids = ["699cb4b9c0c7da158d024924", "699c9d4822559e4eff0b7d94"];
-          const key = process.env.HOLDED_API_KEY;
-          if (!key) { console.error("HOLDED_API_KEY missing"); process.exit(1); }
+          const key = (process.env.HOLDED_API_KEY || "").trim();
+          if (!key) { console.error("HOLDED_API_KEY missing in workflow"); process.exit(1); }
 
-          const endpoints = [
-            // invoicing documents (the one we tried)
-            (id) => `https://api.holded.com/api/invoicing/v1/documents/${id}`,
-            // legacy-ish: documents root (some accounts expose this)
-            (id) => `https://api.holded.com/api/documents/v1/documents/${id}`,
-            // contacts (just to detect if IDs are contacts etc.)
-            (id) => `https://api.holded.com/api/crm/v1/contacts/${id}`,
-          ];
+          const url = "https://api.holded.com/api/invoicing/v1/documents/invoice?limit=1";
 
-          async function tryUrl(url) {
-            const r = await fetch(url, { headers: { accept: "application/json", key } });
-            const txt = await r.text().catch(() => "");
-            const head = txt.slice(0, 300).replace(/\s+/g, " ").trim();
-            return { status: r.status, head };
+          async function probe(name, headers) {
+            const r = await fetch(url, { headers: { accept: "application/json", ...headers } });
+            const txt = await r.text().catch(()=> "");
+            console.log("PROBE", name, "HTTP", r.status);
+            console.log("body_head:", txt.slice(0, 200).replace(/\s+/g," ").trim() || "(empty)");
           }
 
           (async () => {
-            for (const id of ids) {
-              console.log("=== ID", id, "===");
-              for (const make of endpoints) {
-                const url = make(id);
-                const res = await tryUrl(url);
-                console.log(res.status, url);
-                console.log("body_head:", res.head || "(empty)");
-              }
-            }
-
-            // Also list latest 20 invoicing documents to see real invoice numbers
-            const listUrl = "https://api.holded.com/api/invoicing/v1/documents?sort=desc&limit=20";
-            const lr = await fetch(listUrl, { headers: { accept: "application/json", key } });
-            const ltxt = await lr.text().catch(() => "");
-            console.log("=== LIST invoicing documents (limit 20) ===");
-            console.log("HTTP", lr.status, listUrl);
-            console.log(ltxt.slice(0, 1200));
-          })().catch((e) => { console.error(e); process.exit(1); });
+            await probe("Authorization Bearer", { Authorization: `Bearer ${key}` });
+            await probe("Header key", { key });
+          })().catch(e => { console.error(e); process.exit(1); });
           NODE
 
       - name: Run Holded Import (NO HTTP)
