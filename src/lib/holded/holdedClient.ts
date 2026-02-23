@@ -52,8 +52,8 @@ async function holdedFetch<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
-        // Holded API key auth (as per Holded docs examples)
-        key: apiKey,
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
         ...(init?.headers || {}),
       } as any,
       signal: controller.signal,
