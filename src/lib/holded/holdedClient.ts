@@ -53,7 +53,8 @@ async function holdedFetch<T>(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        // ✅ Canonical auth for this Holded account: Header "key"
+        key: apiKey,
         ...(init?.headers || {}),
       } as any,
       signal: controller.signal,
@@ -117,7 +118,6 @@ export async function holdedDocumentDetail<T = unknown>(
 
 /* ===========================
    CONTACTS (CANONICAL)
-   Holded docs: /api/invoicing/v1/contacts/{contactId}
    =========================== */
 
 export type HoldedContact = {
