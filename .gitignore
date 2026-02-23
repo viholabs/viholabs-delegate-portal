@@ -49,3 +49,5 @@ REPO_DUMP_SAFE_REPORT.json
 # local backups
 *.bak.*
 docs/_local_backups/
+.next-dev.log
+holded_invoices_export.xlsx
