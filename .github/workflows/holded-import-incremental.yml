@@ -49,7 +49,7 @@ jobs:
           echo "--- pnpm list tsx (depth 0) ---"
           pnpm list tsx --depth 0 || true
 
-      - name: Debug Holded docs (2 ids)
+      - name: Debug Holded IDs (find correct endpoint)
         env:
           HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
         run: |
@@ -57,51 +57,43 @@ jobs:
           node - <<'NODE'
           const ids = ["699cb4b9c0c7da158d024924", "699c9d4822559e4eff0b7d94"];
           const key = process.env.HOLDED_API_KEY;
+          if (!key) { console.error("HOLDED_API_KEY missing"); process.exit(1); }
 
-          if (!key) {
-            console.error("HOLDED_API_KEY missing in workflow");
-            process.exit(1);
-          }
+          const endpoints = [
+            // invoicing documents (the one we tried)
+            (id) => `https://api.holded.com/api/invoicing/v1/documents/${id}`,
+            // legacy-ish: documents root (some accounts expose this)
+            (id) => `https://api.holded.com/api/documents/v1/documents/${id}`,
+            // contacts (just to detect if IDs are contacts etc.)
+            (id) => `https://api.holded.com/api/crm/v1/contacts/${id}`,
+          ];
 
-          async function fetchDoc(id) {
-            const url = `https://api.holded.com/api/invoicing/v1/documents/${id}`;
-            const r = await fetch(url, {
-              headers: { accept: "application/json", key },
-            });
-
-            let j = null;
-            try {
-              j = await r.json();
-            } catch {
-              j = null;
-            }
-
-            const out = j
-              ? {
-                  id: j.id ?? null,
-                  docNumber: j.docNumber ?? null,
-                  number: j.number ?? null,
-                  type: j.type ?? null,
-                  status: j.status ?? null,
-                  kind: j.kind ?? null,
-                  date: j.date ?? null,
-                  createdAt: j.createdAt ?? null,
-                  updatedAt: j.updatedAt ?? null
-                }
-              : null;
-
-            console.log("DOC", id, "HTTP", r.status);
-            console.log(JSON.stringify(out, null, 2));
+          async function tryUrl(url) {
+            const r = await fetch(url, { headers: { accept: "application/json", key } });
+            const txt = await r.text().catch(() => "");
+            const head = txt.slice(0, 300).replace(/\s+/g, " ").trim();
+            return { status: r.status, head };
           }
 
           (async () => {
             for (const id of ids) {
-              await fetchDoc(id);
+              console.log("=== ID", id, "===");
+              for (const make of endpoints) {
+                const url = make(id);
+                const res = await tryUrl(url);
+                console.log(res.status, url);
+                console.log("body_head:", res.head || "(empty)");
+              }
             }
-          })().catch((e) => {
-            console.error(e);
-            process.exit(1);
-          });
+
+            // Also list latest 20 invoicing documents to see real invoice numbers
+            const listUrl = "https://api.holded.com/api/invoicing/v1/documents?sort=desc&limit=20";
+            const lr = await fetch(listUrl, { headers: { accept: "application/json", key } });
+            const ltxt = await lr.text().catch(() => "");
+            console.log("=== LIST invoicing documents (limit 20) ===");
+            console.log("HTTP", lr.status, listUrl);
+            console.log(ltxt.slice(0, 1200));
+          })().catch((e) => { console.error(e); process.exit(1); });
           NODE
 
       - name: Run Holded Import (NO HTTP)
