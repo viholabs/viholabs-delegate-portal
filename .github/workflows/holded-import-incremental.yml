@@ -49,6 +49,61 @@ jobs:
           echo "--- pnpm list tsx (depth 0) ---"
           pnpm list tsx --depth 0 || true
 
+      - name: Debug Holded docs (2 ids)
+        env:
+          HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const ids = ["699cb4b9c0c7da158d024924", "699c9d4822559e4eff0b7d94"];
+          const key = process.env.HOLDED_API_KEY;
+
+          if (!key) {
+            console.error("HOLDED_API_KEY missing in workflow");
+            process.exit(1);
+          }
+
+          async function fetchDoc(id) {
+            const url = `https://api.holded.com/api/invoicing/v1/documents/${id}`;
+            const r = await fetch(url, {
+              headers: { accept: "application/json", key },
+            });
+
+            let j = null;
+            try {
+              j = await r.json();
+            } catch {
+              j = null;
+            }
+
+            const out = j
+              ? {
+                  id: j.id ?? null,
+                  docNumber: j.docNumber ?? null,
+                  number: j.number ?? null,
+                  type: j.type ?? null,
+                  status: j.status ?? null,
+                  kind: j.kind ?? null,
+                  date: j.date ?? null,
+                  createdAt: j.createdAt ?? null,
+                  updatedAt: j.updatedAt ?? null
+                }
+              : null;
+
+            console.log("DOC", id, "HTTP", r.status);
+            console.log(JSON.stringify(out, null, 2));
+          }
+
+          (async () => {
+            for (const id of ids) {
+              await fetchDoc(id);
+            }
+          })().catch((e) => {
+            console.error(e);
+            process.exit(1);
+          });
+          NODE
+
       - name: Run Holded Import (NO HTTP)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
