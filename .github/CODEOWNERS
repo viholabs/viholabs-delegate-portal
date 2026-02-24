@@ -1,0 +1,5 @@
+# VIHOLABS — CODEOWNERS (CANON LOCK)
+
+.github/workflows/holded-import-incremental.yml   @viholabs
+scripts/holded-import-incremental.ts              @viholabs
+src/lib/holded/**                                 @viholabs
