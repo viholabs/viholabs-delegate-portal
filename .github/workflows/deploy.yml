@@ -14,13 +14,22 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Decode SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > /tmp/vps_key
+          chmod 600 /tmp/vps_key
+          # minimal sanity check (no secret leak)
+          head -n 1 /tmp/vps_key | grep -q "BEGIN OPENSSH PRIVATE KEY"
+
       - name: SSH deploy (pull, install, build, restart)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           port: ${{ secrets.VPS_PORT }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          key_path: /tmp/vps_key
           command_timeout: 30m
           script_stop: true
           script: |
@@ -30,7 +39,7 @@ jobs:
             date
             echo "USER=$(whoami)"
             echo "HOST=$(hostname)"
-            echo "PWD=$(pwd)"
+            echo "***"
 
             APP_DIR="/var/www/viholabs-delegate-portal"
 
@@ -82,12 +91,9 @@ jobs:
 
             restarted="no"
 
-            # A) PM2 (only if pm2 exists AND a process looks like this app)
             if command -v pm2 >/dev/null 2>&1; then
               echo "--- pm2 detected ---"
               pm2 ls || true
-
-              # Try common names first; adjust ONLY if they exist.
               if pm2 describe viholabs-delegate-portal >/dev/null 2>&1; then
                 pm2 restart viholabs-delegate-portal
                 restarted="yes"
@@ -95,20 +101,14 @@ jobs:
                 pm2 restart portal
                 restarted="yes"
               fi
-
-              # If still not restarted, try ecosystem file if present
               if [ "$restarted" = "no" ] && [ -f "ecosystem.config.js" ]; then
                 pm2 reload ecosystem.config.js --update-env
                 restarted="yes"
               fi
             fi
 
-            # B) systemd (only if service exists)
             if [ "$restarted" = "no" ] && command -v systemctl >/dev/null 2>&1; then
               echo "--- systemd detected ---"
-              systemctl list-units --type=service --all | sed -n '1,120p' || true
-
-              # Try common candidates ONLY if they exist
               for svc in viholabs-delegate-portal portal viholabs-portal; do
                 if systemctl status "$svc" >/dev/null 2>&1; then
                   systemctl restart "$svc"
@@ -119,7 +119,6 @@ jobs:
               done
             fi
 
-            # C) docker compose (only if compose file exists)
             if [ "$restarted" = "no" ]; then
               if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ] || [ -f "compose.yml" ] || [ -f "compose.yaml" ]; then
                 echo "--- docker compose files detected ---"
@@ -132,18 +131,8 @@ jobs:
 
             if [ "$restarted" = "no" ]; then
               echo "FATAL: Could not restart — manager not detected or app process/service name unknown."
-              echo "EVIDENCE:"
-              echo " - pm2? $(command -v pm2 >/dev/null 2>&1 && echo yes || echo no)"
-              echo " - systemctl? $(command -v systemctl >/dev/null 2>&1 && echo yes || echo no)"
-              echo " - docker? $(command -v docker >/dev/null 2>&1 && echo yes || echo no)"
-              echo " - ecosystem.config.js? $(test -f ecosystem.config.js && echo yes || echo no)"
-              echo "ACTION REQUIRED (one-time canonical): define restart target (pm2 name OR systemd service OR compose)."
               exit 5
             fi
-
-            echo "=== 8) Post-check (best effort) ==="
-            if command -v pm2 >/dev/null 2>&1; then pm2 ls || true; fi
-            if command -v systemctl >/dev/null 2>&1; then systemctl is-system-running || true; fi
 
             echo "=== VIHOLABS DEPLOY END ==="
             date
