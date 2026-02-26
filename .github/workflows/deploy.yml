@@ -14,37 +14,13 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Decode SSH key (base64) — debug safe
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=== DEBUG: secret presence/length (NO secret printed) ==="
-          # If secret is missing, this will be 1 char (newline) or very small
-          LEN="$(printf "%s" "${{ secrets.VPS_SSH_KEY_B64 }}" | wc -c | tr -d ' ')"
-          echo "VPS_SSH_KEY_B64_LEN=$LEN"
-
-          if [ "$LEN" -lt 200 ]; then
-            echo "FATAL: VPS_SSH_KEY_B64 too short or missing (len=$LEN)."
-            echo "ACTION: Set GitHub Secret VPS_SSH_KEY_B64 to base64 -w0 of /root/viholabs_github_actions"
-            exit 12
-          fi
-
-          echo "=== Decode to /tmp/vps_key ==="
-          printf "%s" "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > /tmp/vps_key
-          chmod 600 /tmp/vps_key
-
-          echo "=== Sanity check key header ==="
-          head -n 1 /tmp/vps_key | cat
-          head -n 1 /tmp/vps_key | grep -q "BEGIN OPENSSH PRIVATE KEY"
-
       - name: SSH deploy (pull, install, build, restart)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           port: ${{ secrets.VPS_PORT }}
-          key_path: /tmp/vps_key
+          key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 30m
           script_stop: true
           script: |
