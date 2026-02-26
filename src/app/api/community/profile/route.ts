@@ -7,7 +7,13 @@ import { createClient as createJsClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 
 function json(status: number, body: any) {
-  return NextResponse.json(body, { status });
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      // Canon: never cache identity/profile payloads
+      "Cache-Control": "no-store, max-age=0",
+    },
+  });
 }
 
 async function safeRead(req: NextRequest) {
@@ -55,8 +61,8 @@ async function getAuthedClient(req: NextRequest): Promise<{
     if (!error && data?.user?.id) {
       return { supabase: supabaseCookie, userId: data.user.id, authMode: "cookie" };
     }
-  } catch (e: any) {
-    // ignore; we'll fallback to bearer
+  } catch {
+    // ignore; fallback to bearer
   }
 
   // 2) Bearer fallback
@@ -164,6 +170,5 @@ export async function POST(req: NextRequest) {
     if (error) return json(500, { ok: false, error: error.message });
   }
 
-  // Re-GET
   return await GET(req);
 }

@@ -61,6 +61,8 @@ export function useCommunityProfile() {
         const res = await fetch("/api/community/profile", {
           method: "GET",
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          // Canon: avoid browser caching stale identity
+          cache: "no-store",
         });
 
         const data = await safeReadJson(res);
