@@ -96,8 +96,36 @@ jobs:
             echo "=== 8) Post-check ==="
             pm2 ls || true
 
-            echo "=== 9) Health-check ==="
-            curl -fsS https://portal.viholabs.com/api/auth/whoami | head -c 200; echo
+            echo "=== 9) Health-check (status) ==="
+            CODE="$(curl -sS -o /tmp/whoami.json -w "%{http_code}" https://portal.viholabs.com/api/auth/whoami)"
+            echo "HEALTH_HTTP_CODE=$CODE"
+            head -c 200 /tmp/whoami.json; echo
+            test "$CODE" = "200"
 
             echo "=== VIHOLABS DEPLOY END ==="
             date
+
+      - name: Deploy summary (success)
+        if: ${{ success() }}
+        run: |
+          {
+            echo "## ✅ Deploy OK"
+            echo ""
+            echo "- Repo: \`${GITHUB_REPOSITORY}\`"
+            echo "- Ref: \`${GITHUB_REF_NAME}\`"
+            echo "- SHA: \`${GITHUB_SHA}\`"
+            echo "- Target: \`portal.viholabs.com\`"
+            echo "- Health: \`/api/auth/whoami\` returned 200"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy summary (failure)
+        if: ${{ failure() }}
+        run: |
+          {
+            echo "## ❌ Deploy FAILED"
+            echo ""
+            echo "- Repo: \`${GITHUB_REPOSITORY}\`"
+            echo "- Ref: \`${GITHUB_REF_NAME}\`"
+            echo "- SHA: \`${GITHUB_SHA}\`"
+            echo "- Check logs above for the failing step."
+          } >> "$GITHUB_STEP_SUMMARY"
