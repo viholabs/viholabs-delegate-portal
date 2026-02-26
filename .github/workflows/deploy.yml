@@ -87,7 +87,7 @@ jobs:
             pm2 ls || true
 
             if pm2 describe viholabs >/dev/null 2>&1; then
-              pm2 restart viholabs
+              pm2 restart viholabs --update-env
             else
               echo "FATAL: pm2 process 'viholabs' not found"
               exit 5
@@ -95,6 +95,9 @@ jobs:
 
             echo "=== 8) Post-check ==="
             pm2 ls || true
+
+            echo "=== 9) Health-check ==="
+            curl -fsS https://portal.viholabs.com/api/auth/whoami | head -c 200; echo
 
             echo "=== VIHOLABS DEPLOY END ==="
             date
