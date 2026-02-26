@@ -316,9 +316,17 @@ export default function IdentityBlock() {
     async function load() {
       setLoading(true);
       try {
-        const res = await fetch("/api/community/profile", { method: "GET" });
-        const data = await safeReadJson(res);
-        if (!res.ok || !data?.ok) throw new Error("Load failed");
+        const res = await fetch("/api/community/profile", {
+  method: "GET",
+  cache: "no-store",
+});
+
+const data = await safeReadJson(res);
+
+if (!res.ok || !data?.ok) {
+  if (!cancelled) setProfile(null);
+  return;
+}
 
         const p = data.profile || {};
         if (cancelled) return;
