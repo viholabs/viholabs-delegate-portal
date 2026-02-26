@@ -1,0 +1,149 @@
+name: Deploy to VPS (main)
+
+on:
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: SSH deploy (pull, install, build, restart)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 30m
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            echo "=== VIHOLABS DEPLOY START ==="
+            date
+            echo "USER=$(whoami)"
+            echo "HOST=$(hostname)"
+            echo "PWD=$(pwd)"
+
+            APP_DIR="/var/www/viholabs-delegate-portal"
+
+            echo "=== 1) Verify path ==="
+            if [ ! -d "$APP_DIR" ]; then
+              echo "FATAL: APP_DIR does not exist: $APP_DIR"
+              exit 2
+            fi
+
+            cd "$APP_DIR"
+            echo "APP_DIR_OK=$(pwd)"
+
+            echo "=== 2) Verify git repo ==="
+            if [ ! -d ".git" ]; then
+              echo "FATAL: Not a git repository: $APP_DIR"
+              ls -la
+              exit 3
+            fi
+
+            echo "REMOTE_URL=$(git remote get-url origin || true)"
+            echo "BRANCH_BEFORE=$(git branch --show-current || true)"
+            echo "HEAD_BEFORE=$(git rev-parse --short HEAD || true)"
+            git status -sb || true
+
+            echo "=== 3) Pull main deterministically ==="
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+
+            echo "BRANCH_AFTER=$(git branch --show-current)"
+            echo "HEAD_AFTER=$(git rev-parse --short HEAD)"
+            git log -1 --oneline
+
+            echo "=== 4) Ensure pnpm exists ==="
+            if ! command -v pnpm >/dev/null 2>&1; then
+              echo "FATAL: pnpm not found on VPS. Install pnpm or enable corepack."
+              echo "HINT: node --version && corepack enable && corepack prepare pnpm@latest --activate"
+              exit 4
+            fi
+            echo "PNPM=$(pnpm --version)"
+
+            echo "=== 5) Install deps (frozen) ==="
+            pnpm install --frozen-lockfile
+
+            echo "=== 6) Build ==="
+            pnpm build
+
+            echo "=== 7) Restart (detect manager; no assumptions) ==="
+
+            restarted="no"
+
+            # A) PM2 (only if pm2 exists AND a process looks like this app)
+            if command -v pm2 >/dev/null 2>&1; then
+              echo "--- pm2 detected ---"
+              pm2 ls || true
+
+              # Try common names first; adjust ONLY if they exist.
+              if pm2 describe viholabs-delegate-portal >/dev/null 2>&1; then
+                pm2 restart viholabs-delegate-portal
+                restarted="yes"
+              elif pm2 describe portal >/dev/null 2>&1; then
+                pm2 restart portal
+                restarted="yes"
+              fi
+
+              # If still not restarted, try ecosystem file if present
+              if [ "$restarted" = "no" ] && [ -f "ecosystem.config.js" ]; then
+                pm2 reload ecosystem.config.js --update-env
+                restarted="yes"
+              fi
+            fi
+
+            # B) systemd (only if service exists)
+            if [ "$restarted" = "no" ] && command -v systemctl >/dev/null 2>&1; then
+              echo "--- systemd detected ---"
+              systemctl list-units --type=service --all | sed -n '1,120p' || true
+
+              # Try common candidates ONLY if they exist
+              for svc in viholabs-delegate-portal portal viholabs-portal; do
+                if systemctl status "$svc" >/dev/null 2>&1; then
+                  systemctl restart "$svc"
+                  systemctl --no-pager --full status "$svc" || true
+                  restarted="yes"
+                  break
+                fi
+              done
+            fi
+
+            # C) docker compose (only if compose file exists)
+            if [ "$restarted" = "no" ]; then
+              if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ] || [ -f "compose.yml" ] || [ -f "compose.yaml" ]; then
+                echo "--- docker compose files detected ---"
+                if command -v docker >/dev/null 2>&1; then
+                  docker compose up -d --build
+                  restarted="yes"
+                fi
+              fi
+            fi
+
+            if [ "$restarted" = "no" ]; then
+              echo "FATAL: Could not restart — manager not detected or app process/service name unknown."
+              echo "EVIDENCE:"
+              echo " - pm2? $(command -v pm2 >/dev/null 2>&1 && echo yes || echo no)"
+              echo " - systemctl? $(command -v systemctl >/dev/null 2>&1 && echo yes || echo no)"
+              echo " - docker? $(command -v docker >/dev/null 2>&1 && echo yes || echo no)"
+              echo " - ecosystem.config.js? $(test -f ecosystem.config.js && echo yes || echo no)"
+              echo "ACTION REQUIRED (one-time canonical): define restart target (pm2 name OR systemd service OR compose)."
+              exit 5
+            fi
+
+            echo "=== 8) Post-check (best effort) ==="
+            if command -v pm2 >/dev/null 2>&1; then pm2 ls || true; fi
+            if command -v systemctl >/dev/null 2>&1; then systemctl is-system-running || true; fi
+
+            echo "=== VIHOLABS DEPLOY END ==="
+            date
