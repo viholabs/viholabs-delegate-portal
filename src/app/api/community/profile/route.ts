@@ -1,7 +1,8 @@
 // src/app/api/community/profile/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient as createSsrClient } from "@/lib/supabase/server";
+import { createClient as createJsClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
@@ -17,24 +18,75 @@ async function safeRead(req: NextRequest) {
   }
 }
 
-export async function GET() {
-  const supabase = await createClient();
+function getSupabaseUrl() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  if (!url) throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL)");
+  return url;
+}
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+function getAnonKey() {
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!key) throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_ANON_KEY (or SUPABASE_ANON_KEY)");
+  return key;
+}
 
-  if (userErr || !user?.id) {
-    return json(401, { ok: false, error: "unauthorized" });
+function readBearerToken(req: NextRequest): string {
+  const authHeader = req.headers.get("authorization") || "";
+  const lower = authHeader.toLowerCase();
+  if (!lower.startsWith("bearer ")) return "";
+  return authHeader.slice("bearer ".length).trim();
+}
+
+/**
+ * Canonical auth resolver:
+ * 1) Try SSR cookie-based client (preferred).
+ * 2) If no user, try Authorization: Bearer <access_token> (fallback for client-localStorage sessions).
+ */
+async function getAuthedClient(req: NextRequest): Promise<{
+  supabase: any;
+  userId: string | null;
+  authMode: "cookie" | "bearer" | "none";
+  authError?: string;
+}> {
+  // 1) Cookie SSR
+  try {
+    const supabaseCookie = await createSsrClient();
+    const { data, error } = await supabaseCookie.auth.getUser();
+    if (!error && data?.user?.id) {
+      return { supabase: supabaseCookie, userId: data.user.id, authMode: "cookie" };
+    }
+  } catch (e: any) {
+    // ignore; we'll fallback to bearer
   }
 
-  const { data, error } = await supabase
+  // 2) Bearer fallback
+  const token = readBearerToken(req);
+  if (!token) return { supabase: null, userId: null, authMode: "none", authError: "missing_session" };
+
+  const supabaseBearer = createJsClient(getSupabaseUrl(), getAnonKey(), {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data, error } = await supabaseBearer.auth.getUser();
+  if (error || !data?.user?.id) {
+    return { supabase: supabaseBearer, userId: null, authMode: "none", authError: "invalid_token" };
+  }
+
+  return { supabase: supabaseBearer, userId: data.user.id, authMode: "bearer" };
+}
+
+export async function GET(req: NextRequest) {
+  const a = await getAuthedClient(req);
+  if (!a.userId) return json(401, { ok: false, error: "unauthorized" });
+
+  const { data, error } = await a.supabase
     .from("v_community_identity_card_v1")
     .select(
       `
       viholabs_id,
       joined_at,
+      user_id,
       display_name,
       aka,
       effective_name,
@@ -47,18 +99,16 @@ export async function GET() {
       consent_image_policy
     `
     )
-    .eq("user_id", user.id)
+    .eq("user_id", a.userId)
     .limit(1)
     .maybeSingle();
 
   if (error) return json(500, { ok: false, error: error.message });
   if (!data) return json(404, { ok: false, error: "profile_not_found" });
 
-  // Respuesta compatible con tu UI previa
   return json(200, {
     ok: true,
     profile: {
-      // legacy-compatible
       aka: data.aka ?? "",
       display_name: data.display_name ?? "",
       company: data.company ?? "",
@@ -66,13 +116,12 @@ export async function GET() {
       birthday: data.birthday ?? null,
       consent_image_policy: Boolean(data.consent_image_policy),
       avatar_url: data.avatar_url ?? "",
-      is_internal: data.department != null || data.job_title != null, // heurística suave
+      is_internal: data.department != null || data.job_title != null,
 
       department: data.department ?? "",
       job_title: data.job_title ?? "",
       effective_name: data.effective_name ?? data.display_name ?? "",
 
-      // NUEVO: canónico
       viholabs_id: data.viholabs_id,
       joined_at: data.joined_at,
     },
@@ -80,54 +129,41 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-
-  if (userErr || !user?.id) {
-    return json(401, { ok: false, error: "unauthorized" });
-  }
+  const a = await getAuthedClient(req);
+  if (!a.userId) return json(401, { ok: false, error: "unauthorized" });
 
   const body = await safeRead(req);
 
   const nextAka = typeof body?.aka === "string" ? body.aka.trim() : null;
   const nextDisplayName = typeof body?.display_name === "string" ? body.display_name.trim() : null;
 
-  // consent: solo permite pasar a true
   const wantsConsentTrue = body?.consent_image_policy === true;
 
-  // Nada que hacer
   if (nextAka === null && nextDisplayName === null && !wantsConsentTrue) {
     return json(200, { ok: true });
   }
 
-  // 1) Update PROFILES.display_name si viene
   if (nextDisplayName !== null) {
-    const { error } = await supabase
+    const { error } = await a.supabase
       .from("profiles")
       .update({ display_name: nextDisplayName })
-      .eq("user_id", user.id);
+      .eq("user_id", a.userId);
 
     if (error) return json(500, { ok: false, error: error.message });
   }
 
-  // 2) Update user_profile_private (aka, consent_image_policy)
-  // Nota: si no existe fila, intentamos upsert (canónico: 1 fila por user_id)
   if (nextAka !== null || wantsConsentTrue) {
     const patch: any = {};
     if (nextAka !== null) patch.aka = nextAka;
     if (wantsConsentTrue) patch.consent_image_policy = true;
 
-    const { error } = await supabase
+    const { error } = await a.supabase
       .from("user_profile_private")
-      .upsert({ user_id: user.id, ...patch }, { onConflict: "user_id" });
+      .upsert({ user_id: a.userId, ...patch }, { onConflict: "user_id" });
 
     if (error) return json(500, { ok: false, error: error.message });
   }
 
-  // devolver perfil ya actualizado (re-GET)
-  return await GET();
+  // Re-GET
+  return await GET(req);
 }
