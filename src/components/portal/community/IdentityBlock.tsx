@@ -450,14 +450,8 @@ export default function IdentityBlock() {
         }}
       />
 
-      {/* Título de Sección */}
-      <div className="mb-3">
-        <div className="text-[11px] uppercase tracking-[0.15em] font-medium" style={{ color: "var(--viho-muted)" }}>
-          COMUNIDAD VIHOLABS
-        </div>
-
-        {/* Saludo + Nombre */}
-        <div className="mt-2 leading-tight">
+          <div className="mb-3">
+            <div className="mt-2 leading-tight">
           <span className="text-[18px] font-semibold" style={{ color: "var(--viho-primary)" }}>
             {greetingTime},{" "}
           </span>

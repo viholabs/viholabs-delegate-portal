@@ -1,53 +1,19 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# --- VIHOLABS local dumps / artifacts (NO REPO) ---
+$OUT_DIR/
+holded_*.json
+holded*.json
+importer_products_identity_sample
+*.bak
+*.log
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# --- local folders ---
+next/
+tmp/
+temp/
+out/
+outputs/
 
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# --- VIHOLABS safety: NO dumps / reports / backups in git ---
-REPO_DUMP*.txt
-REPO_DUMP_SAFE*.txt
-REPO_DUMP_SAFE_REPORT.json
-*.BAK.*
-
-# local backups
-*.bak.*
-docs/_local_backups/
-.next-dev.log
-holded_invoices_export.xlsx
+# --- node / next ---
+node_modules/
+.next/
+dist/

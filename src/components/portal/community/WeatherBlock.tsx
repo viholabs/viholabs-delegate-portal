@@ -5,6 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 type Props = {
   tempC: number;
   code: number;
+  phrase?: string | null;
+  locationLabel?: string | null;
+  variant?: "default" | "compact";
 };
 
 type Category =
@@ -43,12 +46,12 @@ function isNightLocal(): boolean {
   return h < 7 || h >= 20;
 }
 
-function WeatherIcon({ cat, night }: { cat: Category; night: boolean }) {
-  const cls = "h-8 w-8 shrink-0";
+function WeatherIcon({ cat, night, size }: { cat: Category; night: boolean; size: "default" | "compact" }) {
+  const cls = size === "compact" ? "h-5 w-5 shrink-0" : "h-8 w-8 shrink-0";
   const common = {
     fill: "none",
     stroke: "currentColor",
-    strokeWidth: 1.6,
+    strokeWidth: size === "compact" ? 1.6 : 1.6,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
   };
@@ -91,11 +94,7 @@ function WeatherIcon({ cat, night }: { cat: Category; night: boolean }) {
         />
         <path
           {...common}
-          d={
-            cat === "heavy_rain"
-              ? "M8 18l-1 3M12 18l-1 3M16 18l-1 3"
-              : "M10 18l-1 3M14 18l-1 3"
-          }
+          d={cat === "heavy_rain" ? "M8 18l-1 3M12 18l-1 3M16 18l-1 3" : "M10 18l-1 3M14 18l-1 3"}
         />
       </svg>
     );
@@ -135,20 +134,26 @@ function WeatherIcon({ cat, night }: { cat: Category; night: boolean }) {
 }
 
 export default function WeatherBlock(props: Props) {
-  const { tempC, code } = props;
+  const { tempC, code, phrase, locationLabel, variant = "default" } = props;
 
   const cat = useMemo(() => categoryFrom(tempC, code), [tempC, code]);
   const night = useMemo(() => isNightLocal(), []);
 
-  const [phrase, setPhrase] = useState<string>("");
+  const [autoPhrase, setAutoPhrase] = useState<string>("");
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
 
+  // Si ens passen phrase ja resolta (des de WeatherModule), no fem fetch aquí.
   useEffect(() => {
+    if (phrase && String(phrase).trim()) {
+      setAutoPhrase(String(phrase).trim());
+      setStatus("ok");
+      return;
+    }
+
     let cancelled = false;
 
     async function run() {
       setStatus("loading");
-
       const key = `viho_weather_last_phrase_${cat}`;
       const last = (() => {
         try {
@@ -171,10 +176,7 @@ export default function WeatherBlock(props: Props) {
 
         const contentType = (res.headers.get("content-type") || "").toLowerCase();
         const raw = await res.text();
-
-        // Si no és JSON, és que ens han donat HTML (signin) o similar → ho tractem com error controlat
         if (!contentType.includes("application/json")) throw new Error("non_json_response");
-
         const j = JSON.parse(raw);
 
         if (!res.ok || !j?.ok) throw new Error(j?.error || `HTTP ${res.status}`);
@@ -184,31 +186,51 @@ export default function WeatherBlock(props: Props) {
 
         if (cancelled) return;
 
-        setPhrase(p);
+        setAutoPhrase(p);
         setStatus("ok");
         try {
           window.sessionStorage.setItem(key, p);
         } catch {}
       } catch {
         if (cancelled) return;
-        setPhrase("hoy el tiempo no se deja decir.");
+        setAutoPhrase("hoy el tiempo no se deja decir.");
         setStatus("error");
       }
     }
 
     void run();
-
     return () => {
       cancelled = true;
     };
-  }, [cat]);
+  }, [cat, phrase]);
 
-  const line = status === "loading" || status === "idle" ? "mirando por la ventana…" : phrase;
+  const line = phrase && String(phrase).trim() ? String(phrase).trim() : status === "loading" || status === "idle" ? "mirando por la ventana…" : autoPhrase;
+
+  if (variant === "compact") {
+    return (
+      <div className="mt-2" style={{ color: "var(--viho-text)" }}>
+        <div className="flex items-center gap-2 text-sm leading-none">
+          <WeatherIcon cat={cat} night={night} size="compact" />
+          <span className="font-semibold" style={{ color: "var(--viho-gold, #C7AE6A)" }}>
+            {Math.round(tempC)}°
+          </span>
+          {locationLabel ? (
+            <span className="text-[11px]" style={{ color: "var(--viho-muted)" }}>
+              {locationLabel}
+            </span>
+          ) : null}
+          <span className="text-[12px]" style={{ color: "var(--viho-muted)" }}>
+            {line}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-4" style={{ color: "var(--viho-text)" }}>
       <div className="flex items-center gap-2 text-3xl leading-none">
-        <WeatherIcon cat={cat} night={night} />
+        <WeatherIcon cat={cat} night={night} size="default" />
         <span className="font-medium">{Math.round(tempC)}°</span>
         <span className="text-base opacity-70">{line}</span>
       </div>
