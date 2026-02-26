@@ -20,7 +20,6 @@ jobs:
           set -euo pipefail
           echo "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > /tmp/vps_key
           chmod 600 /tmp/vps_key
-          # minimal sanity check (no secret leak)
           head -n 1 /tmp/vps_key | grep -q "BEGIN OPENSSH PRIVATE KEY"
 
       - name: SSH deploy (pull, install, build, restart)
@@ -76,7 +75,7 @@ jobs:
             echo "=== 4) Ensure pnpm exists ==="
             if ! command -v pnpm >/dev/null 2>&1; then
               echo "FATAL: pnpm not found on VPS. Install pnpm or enable corepack."
-              echo "HINT: node --version && corepack enable && corepack prepare pnpm@latest --activate"
+              echo "HINT: node --version && corepack enable && corepack prepare pnpm@9.15.5 --activate"
               exit 4
             fi
             echo "PNPM=$(pnpm --version)"
@@ -87,52 +86,23 @@ jobs:
             echo "=== 6) Build ==="
             pnpm build
 
-            echo "=== 7) Restart (detect manager; no assumptions) ==="
-
-            restarted="no"
-
-            if command -v pm2 >/dev/null 2>&1; then
-              echo "--- pm2 detected ---"
-              pm2 ls || true
-              if pm2 describe viholabs-delegate-portal >/dev/null 2>&1; then
-                pm2 restart viholabs-delegate-portal
-                restarted="yes"
-              elif pm2 describe portal >/dev/null 2>&1; then
-                pm2 restart portal
-                restarted="yes"
-              fi
-              if [ "$restarted" = "no" ] && [ -f "ecosystem.config.js" ]; then
-                pm2 reload ecosystem.config.js --update-env
-                restarted="yes"
-              fi
-            fi
-
-            if [ "$restarted" = "no" ] && command -v systemctl >/dev/null 2>&1; then
-              echo "--- systemd detected ---"
-              for svc in viholabs-delegate-portal portal viholabs-portal; do
-                if systemctl status "$svc" >/dev/null 2>&1; then
-                  systemctl restart "$svc"
-                  systemctl --no-pager --full status "$svc" || true
-                  restarted="yes"
-                  break
-                fi
-              done
-            fi
-
-            if [ "$restarted" = "no" ]; then
-              if [ -f "docker-compose.yml" ] || [ -f "docker-compose.yaml" ] || [ -f "compose.yml" ] || [ -f "compose.yaml" ]; then
-                echo "--- docker compose files detected ---"
-                if command -v docker >/dev/null 2>&1; then
-                  docker compose up -d --build
-                  restarted="yes"
-                fi
-              fi
-            fi
-
-            if [ "$restarted" = "no" ]; then
-              echo "FATAL: Could not restart — manager not detected or app process/service name unknown."
+            echo "=== 7) Restart (pm2 canonical) ==="
+            if ! command -v pm2 >/dev/null 2>&1; then
+              echo "FATAL: pm2 not found, cannot restart"
               exit 5
             fi
+
+            pm2 ls || true
+
+            if pm2 describe viholabs >/dev/null 2>&1; then
+              pm2 restart viholabs
+            else
+              echo "FATAL: pm2 process 'viholabs' not found"
+              exit 5
+            fi
+
+            echo "=== 8) Post-check (best effort) ==="
+            pm2 ls || true
 
             echo "=== VIHOLABS DEPLOY END ==="
             date
