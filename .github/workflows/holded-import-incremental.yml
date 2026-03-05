@@ -1,67 +1,81 @@
-name: HOLDed — Import Incremental (Invoices)
+name: Holded — Import Invoices Incremental
 
 on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max invoices to import"
+        required: false
+        default: "50"
+      since:
+        description: "Override since cursor (ISO). Empty = use DB cursor."
+        required: false
+        default: ""
+      until:
+        description: "Override until (ISO). Empty = now."
+        required: false
+        default: ""
   schedule:
-    - cron: "*/15 * * * *"
-  workflow_dispatch: {}
+    - cron: "*/30 * * * *"
 
 concurrency:
-  group: holded-import-incremental-invoices
+  group: holded-invoices-incremental
   cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+
+    env:
+      # Evidence (DB)
+      GITHUB_RUN_ID: ${{ github.run_id }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      GITHUB_SHA: ${{ github.sha }}
+
+      # Secrets
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
+
+      # Inputs (optional)
+      LIMIT: ${{ inputs.limit }}
+      SINCE: ${{ inputs.since }}
+      UNTIL: ${{ inputs.until }}
 
     steps:
-      - name: Checkout
+      - name: Checkout (THIS commit)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: Setup Node
+      - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
 
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: npm ci
 
       - name: Typecheck
-        run: pnpm tsc --noEmit
+        run: npm run -s tsc -- --noEmit
 
-      - name: Debug Holded Auth (Bearer vs key)
-        env:
-          HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
+      - name: Run Holded incremental import
         run: |
-          set -euo pipefail
-          node - <<'NODE'
-          const key = (process.env.HOLDED_API_KEY || "").trim();
-          if (!key) { console.error("HOLDED_API_KEY missing in workflow"); process.exit(1); }
+          echo "RUNNING SHA = $GITHUB_SHA"
+          npx -y tsx -e "
+            import { runHoldedInvoicesIncrementalImport } from './src/lib/holded/holdedImportIncrementalRunner';
 
-          const url = "https://api.holded.com/api/invoicing/v1/documents/invoice?limit=1";
+            const limit = Number(process.env.LIMIT || '50');
+            const sinceRaw = String(process.env.SINCE || '').trim();
+            const untilRaw = String(process.env.UNTIL || '').trim();
 
-          async function probe(name, headers) {
-            const r = await fetch(url, { headers: { accept: "application/json", ...headers } });
-            const txt = await r.text().catch(()=> "");
-            console.log("PROBE", name, "HTTP", r.status);
-            console.log("body_head:", txt.slice(0, 200).replace(/\s+/g," ").trim() || "(empty)");
-          }
+            const args = {
+              limit,
+              since: sinceRaw ? sinceRaw : undefined,
+              until: untilRaw ? untilRaw : undefined,
+            };
 
-          (async () => {
-            await probe("Authorization Bearer", { Authorization: `Bearer ${key}` });
-            await probe("Header key", { key });
-          })().catch(e => { console.error(e); process.exit(1); });
-          NODE
-
-      - name: Run Holded Import (NO HTTP)
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
-          LIMIT: "50"
-        run: |
-          set -euo pipefail
-          pnpm exec -- tsx scripts/holded-import-incremental.ts
+            const res = await runHoldedInvoicesIncrementalImport(args);
+            console.log(JSON.stringify(res, null, 2));
+          "
