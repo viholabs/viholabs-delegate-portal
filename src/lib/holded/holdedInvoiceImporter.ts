@@ -13,9 +13,12 @@
  * - We return a deterministic SKIP result so incremental cursor is not blocked by upstream-corrupt docs.
  * - This preserves "DB = truth" and avoids permanent deadlocks.
  *
- * Evidence (added, minimal):
- * - We capture raw_invoice (best-effort) and attach it to FAIL/SKIP results.
- * - Runner can then store raw_min into holded_sync_runs.payload.failures[].raw_min
+ * Evidence:
+ * - raw_invoice is attached to FAIL/SKIP so runner can store raw_min evidence.
+ *
+ * G1 STRICT (items):
+ * - invoice_items must carry at least one of: sku / holded_product_id / holded_variant_id (per invoice)
+ *   otherwise DB blocks commit ("Holded is source of truth").
  */
 
 import { holdedFetch, holdedFetchJson } from "@/lib/holded/holdedFetch";
@@ -49,6 +52,13 @@ type HoldedInvoiceDetail = {
         tax?: number | null; // VAT rate (%)
         total?: number | null;
         subtotal?: number | null;
+
+        // holded optional identifiers (sometimes present)
+        sku?: string | null;
+        productId?: string | null;
+        variantId?: string | null;
+        id?: string | null;
+        _id?: string | null;
       }>
     | null;
 };
@@ -61,11 +71,8 @@ export type ImportError = {
 };
 
 export type ImportOk = { ok: true };
-
-// ✅ Added raw_invoice (best-effort) to FAIL/SKIP to enable runner evidence storage.
 export type ImportFail = { ok: false; err: ImportError; raw_invoice?: any | null };
 export type ImportSkip = { ok: false; skipped: true; err: ImportError; raw_invoice?: any | null };
-
 export type ImportResult = ImportOk | ImportFail | ImportSkip;
 
 function holdedIdFromAny(x: any): string | null {
@@ -134,6 +141,7 @@ function extractContactIdCandidate(detailAny: any): string | null {
     detailAny?.client?._id,
     detailAny?.customer?.id,
     detailAny?.customer?._id,
+    detailAny?.contact, // some payloads use "contact" as a string id
   ];
 
   for (const c of candidates) {
@@ -141,6 +149,11 @@ function extractContactIdCandidate(detailAny: any): string | null {
     if (s) return s;
   }
   return null;
+}
+
+function normalizeHoldedIdLike(v: any): string | null {
+  const s = String(v ?? "").trim();
+  return s ? s : null;
 }
 
 async function writeInvoiceIdempotent(
@@ -201,7 +214,6 @@ export async function importOneHoldedInvoiceById(
   let detail: HoldedInvoiceDetail;
 
   try {
-    // ✅ Capture raw invoice for evidence (best-effort)
     raw_invoice = await holdedFetch<any>("invoice", holdedId);
     detail = raw_invoice as HoldedInvoiceDetail;
   } catch (e: any) {
@@ -214,7 +226,6 @@ export async function importOneHoldedInvoiceById(
 
   const invoiceNumber = (detail.docNumber ?? "").toString().trim();
 
-  // ✅ Canonical SKIP: never invent invoice_number
   if (!invoiceNumber) {
     return {
       ok: false,
@@ -262,6 +273,59 @@ export async function importOneHoldedInvoiceById(
 
   const externalModifiedAtISO = safeISOFromUnknown(detailAny?.updatedAt ?? detailAny?.modifiedAt ?? null);
 
+  if (!contactIdCandidate) {
+    return {
+      ok: false,
+      skipped: true,
+      raw_invoice,
+      err: {
+        holded_id: holdedId,
+        step: "holded_contact_id",
+        error: "SKIP: Missing Holded contact id (required by G1 STRICT to resolve client_id)",
+        meta: { detail_keys: detailKeys },
+      },
+    };
+  }
+
+  const clientLookup = await supabase
+    .from("clients")
+    .select("id")
+    .eq("holded_contact_id", contactIdCandidate)
+    .maybeSingle();
+
+  if (clientLookup.error) {
+    return {
+      ok: false,
+      raw_invoice,
+      err: {
+        holded_id: holdedId,
+        step: "client_lookup",
+        error: clientLookup.error.message,
+        meta: { holded_contact_id: contactIdCandidate },
+      },
+    };
+  }
+
+  if (!clientLookup.data?.id) {
+    return {
+      ok: false,
+      skipped: true,
+      raw_invoice,
+      err: {
+        holded_id: holdedId,
+        step: "client_mapping",
+        error: `SKIP: no client mapping for holded_contact_id=${contactIdCandidate} (G1 STRICT)`,
+        meta: {
+          holded_contact_id: contactIdCandidate,
+          invoice_number: invoiceNumber,
+          invoice_date: invoiceDateISO,
+        },
+      },
+    };
+  }
+
+  const clientId = String(clientLookup.data.id);
+
   const invoicePayload: Record<string, any> = {
     invoice_number: invoiceNumber,
     invoice_date: invoiceDateISO,
@@ -274,6 +338,9 @@ export async function importOneHoldedInvoiceById(
     external_invoice_id: holdedId,
     needs_review: needsReview,
     state_code: stateCode,
+
+    holded_contact_id: contactIdCandidate,
+    client_id: clientId,
 
     client_name: clientName,
     external_modified_at: externalModifiedAtISO,
@@ -307,9 +374,11 @@ export async function importOneHoldedInvoiceById(
 
   const invoiceId = w.invoiceId;
 
-  // 1) Build rows FIRST. Canon: never wipe existing evidence if we have no replacement rows.
   const products = Array.isArray((detail as any)?.products) ? (detail as any).products : [];
   const rows: any[] = [];
+
+  // ✅ G1 STRICT evidence: at least one line must carry sku/productId/variantId
+  let anyLineHasHoldedIdentity = false;
 
   for (const p of products) {
     const units = safeNumber(p?.units, 0);
@@ -321,7 +390,15 @@ export async function importOneHoldedInvoiceById(
       };
     }
 
-    const unitNet = safeNumber(p?.price, 0);
+    const unitNet = safeNumber(p?.price, NaN);
+    if (!Number.isFinite(unitNet) || unitNet < 0) {
+      return {
+        ok: false,
+        raw_invoice,
+        err: { holded_id: holdedId, step: "items_price", error: "Missing/invalid price (must be >= 0)" },
+      };
+    }
+
     const vatRate = safeNumber(p?.tax, 0);
 
     const lineNet = units * unitNet;
@@ -332,6 +409,15 @@ export async function importOneHoldedInvoiceById(
 
     const descriptionBase = (p?.description ?? p?.name ?? "").toString().trim();
     const description = descriptionBase || "(no description)";
+
+    // ✅ Holded identity fields (best-effort, no invention)
+    const sku = String(p?.sku ?? "").trim() || null;
+    const holdedProductId = normalizeHoldedIdLike(p?.productId);
+    const holdedVariantId = normalizeHoldedIdLike(p?.variantId);
+
+    if (sku || holdedProductId || holdedVariantId) {
+      anyLineHasHoldedIdentity = true;
+    }
 
     rows.push({
       invoice_id: invoiceId,
@@ -344,16 +430,37 @@ export async function importOneHoldedInvoiceById(
       line_gross_amount: lineGross,
       line_type: lineType,
       state_code: stateCode,
+
       product_id: null,
+
+      // ✅ Columns expected by G1 STRICT (in DB)
+      sku,
+      holded_product_id: holdedProductId,
+      holded_variant_id: holdedVariantId,
     });
   }
 
-  // 2) If no rows, do NOT delete existing items (canon: preserve evidence).
+  // If no rows, preserve evidence (do not delete existing items)
   if (rows.length === 0) {
     return { ok: true };
   }
 
-  // 3) Replace deterministically: delete then insert.
+  // ✅ If Holded provides invoice_items but none include identity, upstream is corrupt → SKIP (not FAIL)
+  if (!anyLineHasHoldedIdentity) {
+    return {
+      ok: false,
+      skipped: true,
+      raw_invoice,
+      err: {
+        holded_id: holdedId,
+        step: "items_identity",
+        error:
+          `SKIP: Holded invoice has items but none carry sku/productId/variantId (G1 STRICT). ` +
+          `invoice=${invoiceNumber}, invoice_id=${invoiceId}`,
+      },
+    };
+  }
+
   const del = await supabase.from("invoice_items").delete().eq("invoice_id", invoiceId);
   if (del.error) {
     return {
@@ -376,7 +483,6 @@ export async function importOneHoldedInvoiceById(
 }
 
 export async function listHoldedInvoiceIds(limit: number): Promise<string[]> {
-  // ✅ Canonical signature (docType, query?)
   const list = await holdedFetchJson<HoldedInvoiceListItem[]>("invoice");
   const ids: string[] = [];
   for (const it of Array.isArray(list) ? list : []) {
