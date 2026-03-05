@@ -12,6 +12,10 @@
  * - If Holded docNumber is missing/empty, we DO NOT invent invoice_number.
  * - We return a deterministic SKIP result so incremental cursor is not blocked by upstream-corrupt docs.
  * - This preserves "DB = truth" and avoids permanent deadlocks.
+ *
+ * Evidence (added, minimal):
+ * - We capture raw_invoice (best-effort) and attach it to FAIL/SKIP results.
+ * - Runner can then store raw_min into holded_sync_runs.payload.failures[].raw_min
  */
 
 import { holdedFetch, holdedFetchJson } from "@/lib/holded/holdedFetch";
@@ -57,8 +61,10 @@ export type ImportError = {
 };
 
 export type ImportOk = { ok: true };
-export type ImportFail = { ok: false; err: ImportError };
-export type ImportSkip = { ok: false; skipped: true; err: ImportError };
+
+// ✅ Added raw_invoice (best-effort) to FAIL/SKIP to enable runner evidence storage.
+export type ImportFail = { ok: false; err: ImportError; raw_invoice?: any | null };
+export type ImportSkip = { ok: false; skipped: true; err: ImportError; raw_invoice?: any | null };
 
 export type ImportResult = ImportOk | ImportFail | ImportSkip;
 
@@ -191,13 +197,17 @@ export async function importOneHoldedInvoiceById(
   supabase: ReturnType<typeof supabaseAdminClient>,
   holdedId: string
 ): Promise<ImportResult> {
+  let raw_invoice: any = null;
   let detail: HoldedInvoiceDetail;
+
   try {
-    // ✅ Canonical signature (docType, id)
-    detail = await holdedFetch<HoldedInvoiceDetail>("invoice", holdedId);
+    // ✅ Capture raw invoice for evidence (best-effort)
+    raw_invoice = await holdedFetch<any>("invoice", holdedId);
+    detail = raw_invoice as HoldedInvoiceDetail;
   } catch (e: any) {
     return {
       ok: false,
+      raw_invoice,
       err: { holded_id: holdedId, step: "holded_detail", error: String(e?.message ?? e) },
     };
   }
@@ -209,6 +219,7 @@ export async function importOneHoldedInvoiceById(
     return {
       ok: false,
       skipped: true,
+      raw_invoice,
       err: {
         holded_id: holdedId,
         step: "invoice_number",
@@ -222,6 +233,7 @@ export async function importOneHoldedInvoiceById(
   if (!Number.isFinite(unix) || unix <= 0) {
     return {
       ok: false,
+      raw_invoice,
       err: { holded_id: holdedId, step: "invoice_date", error: "Missing/invalid invoice_date" },
     };
   }
@@ -248,9 +260,7 @@ export async function importOneHoldedInvoiceById(
       detailAny?.customer?.name ??
       null) as string | null;
 
-  const externalModifiedAtISO = safeISOFromUnknown(
-    detailAny?.updatedAt ?? detailAny?.modifiedAt ?? null
-  );
+  const externalModifiedAtISO = safeISOFromUnknown(detailAny?.updatedAt ?? detailAny?.modifiedAt ?? null);
 
   const invoicePayload: Record<string, any> = {
     invoice_number: invoiceNumber,
@@ -288,7 +298,11 @@ export async function importOneHoldedInvoiceById(
   );
 
   if (!w.ok) {
-    return { ok: false, err: { holded_id: holdedId, step: "invoice_write", error: w.error } };
+    return {
+      ok: false,
+      raw_invoice,
+      err: { holded_id: holdedId, step: "invoice_write", error: w.error },
+    };
   }
 
   const invoiceId = w.invoiceId;
@@ -302,6 +316,7 @@ export async function importOneHoldedInvoiceById(
     if (units < 0) {
       return {
         ok: false,
+        raw_invoice,
         err: { holded_id: holdedId, step: "items_units", error: "Negative units encountered" },
       };
     }
@@ -335,19 +350,26 @@ export async function importOneHoldedInvoiceById(
 
   // 2) If no rows, do NOT delete existing items (canon: preserve evidence).
   if (rows.length === 0) {
-    // Canon: preserve evidence. If we have no replacement rows, we do NOT wipe existing items.
     return { ok: true };
   }
 
   // 3) Replace deterministically: delete then insert.
   const del = await supabase.from("invoice_items").delete().eq("invoice_id", invoiceId);
   if (del.error) {
-    return { ok: false, err: { holded_id: holdedId, step: "items_delete", error: del.error.message } };
+    return {
+      ok: false,
+      raw_invoice,
+      err: { holded_id: holdedId, step: "items_delete", error: del.error.message },
+    };
   }
 
   const ins = await supabase.from("invoice_items").insert(rows as any);
   if (ins.error) {
-    return { ok: false, err: { holded_id: holdedId, step: "items_insert", error: ins.error.message } };
+    return {
+      ok: false,
+      raw_invoice,
+      err: { holded_id: holdedId, step: "items_insert", error: ins.error.message },
+    };
   }
 
   return { ok: true };

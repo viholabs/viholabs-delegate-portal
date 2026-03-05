@@ -12,9 +12,9 @@
  * - FAILURES (real) block cursor advance
  * - SKIPS do NOT block cursor advance
  *
- * Added (evidence, minimal & deterministic):
- * - When an import fails, we persist a small raw_min snapshot (invoice header + items sketch)
- *   to make root-cause debugging possible for cases like missing holded_contact_id.
+ * IMPORTANT:
+ * - If failures > 0 => ok MUST be false and stage MUST be "failed"
+ * - Store minimal evidence raw_min if importer provides raw_invoice/raw
  */
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -25,10 +25,7 @@ import {
   type ImportResult,
 } from "@/lib/holded/holdedInvoiceImporter";
 
-/**
- * Minimal evidence snapshot to store in holded_sync_runs.payload.failures[].raw_min
- * (do NOT store the full raw invoice object; it can be huge / contain sensitive data)
- */
+/** Minimal evidence snapshot (do NOT store full raw invoice). */
 function pickInvoiceRawMin(inv: any) {
   if (!inv || typeof inv !== "object") return null;
 
@@ -43,6 +40,8 @@ function pickInvoiceRawMin(inv: any) {
     inv.client?.id ??
     inv.client?._id ??
     inv.client ??
+    inv.customer?.id ??
+    inv.customer?._id ??
     null;
 
   const number =
@@ -134,16 +133,16 @@ export type RunHoldedIncrementalArgs = {
   until?: string;
 };
 
-function isSkip(r: ImportResult): r is { ok: false; skipped: true; err: ImportError } {
+function isSkip(r: ImportResult): r is { ok: false; skipped: true; err: ImportError; raw_invoice?: any | null } {
   return !!r && (r as any).ok === false && (r as any).skipped === true;
 }
 
-type ImportFailureRow = ImportError & {
+type FailureRow = ImportError & {
   holded_id: string;
   raw_min?: ReturnType<typeof pickInvoiceRawMin> | null;
 };
 
-type ImportSkipRow = ImportError & {
+type SkipRow = ImportError & {
   holded_id: string;
   raw_min?: ReturnType<typeof pickInvoiceRawMin> | null;
 };
@@ -153,12 +152,11 @@ export async function runHoldedInvoicesIncrementalImport(args: RunHoldedIncremen
   const limit = parseLimit(args.limit, 50, 300);
   const supabase = supabaseAdmin();
 
-  // Evidence (GitHub Actions provides these env vars)
   const github_run_id = process.env.GITHUB_RUN_ID ? String(process.env.GITHUB_RUN_ID) : null;
   const github_repo = process.env.GITHUB_REPOSITORY ? String(process.env.GITHUB_REPOSITORY) : null;
   const github_sha = process.env.GITHUB_SHA ? String(process.env.GITHUB_SHA) : null;
 
-  // 1️⃣ INSERT RUN (start)
+  // INSERT RUN (start)
   const { data: runRow, error: runInsertError } = await supabase
     .from("holded_sync_runs")
     .insert({
@@ -210,8 +208,8 @@ export async function runHoldedInvoicesIncrementalImport(args: RunHoldedIncremen
     let imported = 0;
     let skipped = 0;
 
-    const failures: ImportFailureRow[] = [];
-    const skipped_items: ImportSkipRow[] = [];
+    const failures: FailureRow[] = [];
+    const skipped_items: SkipRow[] = [];
 
     for (const holdedId of invoiceIds) {
       const r = await importOneHoldedInvoiceById(supabase, holdedId);
@@ -221,8 +219,8 @@ export async function runHoldedInvoicesIncrementalImport(args: RunHoldedIncremen
         continue;
       }
 
-      // Attach minimal evidence if the importer provided it (best-effort).
-      const raw_min = pickInvoiceRawMin((r as any)?.raw_invoice ?? (r as any)?.raw ?? null);
+      const raw_invoice = (r as any)?.raw_invoice ?? (r as any)?.raw ?? null;
+      const raw_min = pickInvoiceRawMin(raw_invoice);
 
       if (isSkip(r)) {
         skipped++;
@@ -264,10 +262,9 @@ export async function runHoldedInvoicesIncrementalImport(args: RunHoldedIncremen
       skipped_items,
     };
 
-    // Canon: FAILURES are real -> ok must be false and stage must be "failed" (not "completed")
+    // IMPORTANT: real failures => ok false + stage failed
     const ok = failures.length === 0;
 
-    // 2️⃣ UPDATE RUN (end)
     await supabase
       .from("holded_sync_runs")
       .update({
