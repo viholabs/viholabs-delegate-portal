@@ -1,7 +1,11 @@
 // src/app/api/delegate/clients/new/route.ts
-export const runtime = "nodejs";
+/**
+ * Back-compat route.
+ * This endpoint is a thin re-export of /api/delegate/clients.
+ *
+ * IMPORTANT:
+ * - ../route DOES NOT export POST (only GET).
+ * - Exporting POST here breaks build (TS2305).
+ */
 
-// Reutiliza exactamente el endpoint correcto:
-//  - GET: búsqueda de clientes (recomendadores, etc.)
-//  - POST: crear cliente + (opcional) recomendación
-export { GET, POST } from "../route";
+export { GET } from "../route";
