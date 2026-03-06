@@ -21,6 +21,7 @@ export type TabCode =
   | "recursos"
   | "delegados"
   | "clientes"
+  | "orders"
   | "knowledge"
   | "obexperience"
   | "el_elyon"; // ✅ NUEVO SOBERANO
@@ -52,6 +53,7 @@ export const TAB_REGISTRY: TabDefinition[] = [
 
   { tab_code: "delegados", label: "Delegados", href: shellHref("delegados") },
   { tab_code: "clientes", label: "Clientes", href: shellHref("clientes") },
+  { tab_code: "orders", label: "Pedidos", href: shellHref("orders") },
 
   { tab_code: "knowledge", label: "Akademia", href: shellHref("knowledge") },
   { tab_code: "obexperience", label: "Obexperience", href: shellHref("obexperience") },

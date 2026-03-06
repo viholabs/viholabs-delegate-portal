@@ -38,10 +38,8 @@ async function handle(req: Request) {
   let stage = "init";
 
   try {
-    // 1) Auth + actor + supaRls
     stage = "actor_from_request";
     const ar = (await getActorFromRequest(req)) as ActorFromRequestOk | ActorFromRequestFail | any;
-
     if (!isOk(ar)) {
       return json((ar?.status as number) ?? 401, {
         ok: false,
@@ -53,7 +51,6 @@ async function handle(req: Request) {
     const actor = ar.actor;
     const supaRls = ar.supaRls;
 
-    // 2) Permisos efectivos
     stage = "effective_permissions";
     const eff = await getEffectivePermissionsByActorId(String(actor.id));
 
@@ -61,7 +58,7 @@ async function handle(req: Request) {
     const allowed =
       eff.isSuperAdmin ||
       eff.has("control_room.delegates.read") ||
-      eff.has("actors.read"); // fallback temporal
+      eff.has("actors.read");
 
     if (!allowed) {
       return json(403, {
@@ -71,11 +68,13 @@ async function handle(req: Request) {
       });
     }
 
-    // 3) Lectura con RLS
+    // ✅ Fuente canónica real: public.actors con role=delegate y status=active
     stage = "delegates_select";
     const { data: delegates, error: dErr } = await supaRls
-      .from("delegates")
-      .select("id, name, email")
+      .from("actors")
+      .select("id, name, email, role, status")
+      .eq("role", "delegate")
+      .eq("status", "active")
       .order("name", { ascending: true });
 
     if (dErr) {
@@ -89,7 +88,13 @@ async function handle(req: Request) {
         role: actor.role ?? null,
         name: actor.name ?? actor.email ?? null,
       },
-      delegates: Array.isArray(delegates) ? delegates : [],
+      delegates: Array.isArray(delegates)
+        ? delegates.map((d: any) => ({
+            id: String(d.id),
+            name: d?.name ?? null,
+            email: d?.email ?? null,
+          }))
+        : [],
     });
   } catch (e: any) {
     return json(500, {
@@ -104,7 +109,6 @@ export async function GET(req: Request) {
   return handle(req);
 }
 
-// Mantenemos POST para no romper frontend existente
 export async function POST(req: Request) {
   return handle(req);
 }

@@ -57,6 +57,7 @@ export const ROLE_VISIBILITY_MAP_V1: Record<VihoRole, TabCode[]> = {
     "recursos",
     "delegados",
     "clientes",
+    "orders",
     "knowledge",
     "obexperience",
   ],
@@ -75,6 +76,7 @@ export const ROLE_VISIBILITY_MAP_V1: Record<VihoRole, TabCode[]> = {
     "recursos",
     "delegados",
     "clientes",
+    "orders",
     "knowledge",
     "obexperience",
     "el_elyon", // ✅ EXCLUSIVO
@@ -104,6 +106,7 @@ export const ROLE_VISIBILITY_MAP_V1: Record<VihoRole, TabCode[]> = {
     "recursos",
     "delegados",
     "clientes",
+    "orders",
     "knowledge",
   ],
 
@@ -115,6 +118,7 @@ export const ROLE_VISIBILITY_MAP_V1: Record<VihoRole, TabCode[]> = {
     "communications",
     "recursos",
     "clientes",
+    "orders",
     "knowledge",
   ],
 
@@ -126,6 +130,7 @@ export const ROLE_VISIBILITY_MAP_V1: Record<VihoRole, TabCode[]> = {
     "recursos",
     "delegados",
     "clientes",
+    "orders",
     "knowledge",
   ],
 

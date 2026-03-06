@@ -1,11 +1,11 @@
 // src/app/api/delegate/clients/new/route.ts
-/**
- * Back-compat route.
- * This endpoint is a thin re-export of /api/delegate/clients.
- *
- * IMPORTANT:
- * - ../route DOES NOT export POST (only GET).
- * - Exporting POST here breaks build (TS2305).
- */
+//
+// Alias canónico de creación de cliente.
+// Reutiliza exactamente el POST ya implementado en ../route
+// para evitar duplicar lógica y eliminar errores de imports.
 
-export { GET } from "../route";
+import { POST as CreateClientPost } from "../route";
+
+export const runtime = "nodejs";
+
+export const POST = CreateClientPost;

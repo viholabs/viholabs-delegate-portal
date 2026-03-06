@@ -24,14 +24,13 @@ function pickDelegateIdOrThrow(args: {
   eff: { isSuperAdmin: boolean; has: (code: string) => boolean };
   r: any;
 }) {
-  const { delegateIdQuery, eff, r } = args;
+  const { delegateIdQuery, eff } = args;
 
-  // Supervisión SOLO por permisos efectivos (Biblia)
   if (delegateIdQuery) {
     const allowed =
       eff.isSuperAdmin ||
       eff.has("actors.read") ||
-      eff.has("control_room.delegates.read"); // compat temporal si existe
+      eff.has("control_room.delegates.read");
 
     if (!allowed) {
       throw new Error("No autorizado para supervisión (actors.read)");
@@ -39,7 +38,6 @@ function pickDelegateIdOrThrow(args: {
     return delegateIdQuery;
   }
 
-  // Self: resolver delegateId desde actor (RLS)
   return null;
 }
 
@@ -67,25 +65,37 @@ export async function GET(req: Request) {
     stage = "resolve_delegate";
     const delegateIdForced = pickDelegateIdOrThrow({ delegateIdQuery, eff, r });
 
-    const delegateId = delegateIdForced
-      ? delegateIdForced
-      : await resolveDelegateIdOrThrow({
-          supaRls: r.supaRls,
-          actor: r.actor,
-          delegateIdFromQuery: null, // 👈 evitamos rol-hardcode dentro del helper
-        });
+    const delegateId =
+      delegateIdForced
+        ? delegateIdForced
+        : eff.isSuperAdmin
+          ? null
+          : await resolveDelegateIdOrThrow({
+              supaRls: r.supaRls,
+              actor: r.actor,
+              delegateIdFromQuery: null,
+            });
+
+    // ✅ Supervisión => SERVICE ROLE
+    // ✅ Self delegate => RLS
+    const reader =
+      delegateIdForced || eff.isSuperAdmin
+        ? r.supaService
+        : r.supaRls;
 
     stage = "query";
-    let query = r.supaRls
+    let query = reader
       .from("clients")
       .select("id, name, tax_id, contact_email, contact_phone, status, profile_type, created_at, delegate_id")
-      .eq("delegate_id", delegateId)
       .order("name", { ascending: true })
       .limit(50);
 
+    if (delegateId) {
+      query = query.eq("delegate_id", delegateId);
+    }
+
     if (q) {
       const nq = normalize(q);
-      // Búsqueda simple (ilike) — RLS decide alcance
       query = query.or(
         [
           `name.ilike.%${q}%`,
@@ -139,7 +149,7 @@ export async function POST(req: Request) {
       : await resolveDelegateIdOrThrow({
           supaRls: r.supaRls,
           actor: r.actor,
-          delegateIdFromQuery: null, // 👈 evitamos rol-hardcode
+          delegateIdFromQuery: null,
         });
 
     stage = "body";
@@ -154,7 +164,6 @@ export async function POST(req: Request) {
     if (!name) return json(400, { ok: false, stage, error: "name required" });
     if (!tax_id) return json(400, { ok: false, stage, error: "tax_id required" });
 
-    // ✅ Escritura: SERVICE ROLE (Biblia)
     stage = "insert_client";
     const { data: client, error: cErr } = await r.supaService
       .from("clients")
@@ -172,7 +181,6 @@ export async function POST(req: Request) {
 
     if (cErr) return json(500, { ok: false, stage, error: cErr.message });
 
-    // Recomendación (opcional) — usando schema REAL (sin columnas inventadas)
     stage = "insert_recommendation_optional";
     const recommender_client_id = body?.recommender_client_id
       ? String(body.recommender_client_id).trim()
@@ -186,7 +194,7 @@ export async function POST(req: Request) {
         referred_client_id: client.id,
         percentage,
         active: true,
-        mode: "deduct", // según schema: deduct/additive
+        mode: "deduct",
       });
 
       if (recErr) return json(500, { ok: false, stage, error: recErr.message });

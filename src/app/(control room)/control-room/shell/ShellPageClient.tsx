@@ -6,6 +6,7 @@ import { TabFrame, TabDominant, TabSecondary, TabResidual } from "@/components/p
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import TechnicalTab from "@/components/control-room/technical/TechnicalTab";
+import OrdersConsoleTab from "@/components/control-room/orders/OrdersConsoleTab";
 
 function ShellDemoPage() {
   return (
@@ -75,11 +76,40 @@ function ShellTechBlockPage() {
   );
 }
 
+function ShellOrdersPage() {
+  return (
+    <TabFrame>
+      <TabDominant>
+        <OrdersConsoleTab />
+      </TabDominant>
+
+      <TabSecondary>
+        <Card>
+          <CardHeader>
+            <CardTitle>Señales relevantes</CardTitle>
+          </CardHeader>
+          <CardContent>Creación de pedido borrador en Holded desde portal.</CardContent>
+        </Card>
+      </TabSecondary>
+
+      <TabResidual>
+        <Card>
+          <CardHeader>
+            <CardTitle>Observación</CardTitle>
+          </CardHeader>
+          <CardContent>Uso interno Control Room.</CardContent>
+        </Card>
+      </TabResidual>
+    </TabFrame>
+  );
+}
+
 export default function ShellPageClient() {
   const sp = useSearchParams();
   const tab = (sp?.get("tab") || "").trim();
 
   if (tab === "tech_block") return <ShellTechBlockPage />;
+  if (tab === "orders") return <ShellOrdersPage />;
 
   return <ShellDemoPage />;
 }
