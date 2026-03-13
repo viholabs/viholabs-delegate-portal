@@ -696,12 +696,6 @@ export async function buildHoldedImportDecision(args: {
     };
   }
 
-  const missingClientMappingSoft =
-    !!holdedContactId && !clientMatch.clientId;
-
-  const missingHoldedIdentitySoft =
-    !holdedContactId;
-
   const invoice: CanonicalInvoiceRow = {
     source_provider: "holded",
     external_invoice_id: externalInvoiceId,
@@ -709,16 +703,16 @@ export async function buildHoldedImportDecision(args: {
     invoice_date: invoiceDate,
     client_name: clientName,
     holded_contact_id: holdedContactId,
-    client_id:
-      clientMatch.matchedBy === "holded_contact_id" ? clientMatch.clientId : null,
-    delegate_id:
-      clientMatch.matchedBy === "holded_contact_id" ? clientMatch.delegateId : null,
+    client_id: clientMatch.clientId,
+    delegate_id: clientMatch.delegateId,
     currency,
     source_meta: {
       ...sourceMeta,
       g1_strict_disabled: true,
-      missing_client_mapping_soft: missingClientMappingSoft,
-      missing_holded_contact_identity_soft: missingHoldedIdentitySoft,
+      requires_holded_contact_client_map_g1: false,
+      auto_create_holded_contact_client_map_g1: false,
+      missing_client_mapping_soft: !!holdedContactId && !clientMatch.clientId,
+      missing_holded_contact_identity_soft: !holdedContactId,
     },
   };
 
@@ -737,8 +731,10 @@ export async function buildHoldedImportDecision(args: {
       source_meta_ok: Object.keys(sourceMeta).length > 0,
       summary_source: summarySource,
       g1_strict_disabled: true,
-      missing_client_mapping_soft: missingClientMappingSoft,
-      missing_holded_contact_identity_soft: missingHoldedIdentitySoft,
+      requires_holded_contact_client_map_g1: false,
+      auto_create_holded_contact_client_map_g1: false,
+      missing_client_mapping_soft: !!holdedContactId && !clientMatch.clientId,
+      missing_holded_contact_identity_soft: !holdedContactId,
     },
   };
 }
@@ -747,32 +743,18 @@ async function resolveByHoldedContactIdFromSupabase(
   supabase: SupabaseLike,
   holdedContactId: string
 ): Promise<{ clientId: string | null; delegateId: string | null } | null> {
-  const { data: mapRow, error: mapError } = await supabase
-    .from("holded_contact_client_map_g1")
-    .select("client_id")
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id, delegate_id, holded_contact_id")
     .eq("holded_contact_id", holdedContactId)
     .maybeSingle();
 
-  if (mapError) throw mapError;
-  if (!mapRow?.client_id) return null;
-
-  const { data: clientRow, error: clientError } = await supabase
-    .from("clients")
-    .select("id, delegate_id")
-    .eq("id", mapRow.client_id)
-    .maybeSingle();
-
-  if (clientError) throw clientError;
-  if (!clientRow) {
-    return {
-      clientId: mapRow.client_id ?? null,
-      delegateId: null,
-    };
-  }
+  if (error) throw error;
+  if (!data?.id) return null;
 
   return {
-    clientId: clientRow.id ?? mapRow.client_id ?? null,
-    delegateId: clientRow.delegate_id ?? null,
+    clientId: data.id ?? null,
+    delegateId: data.delegate_id ?? null,
   };
 }
 
@@ -792,168 +774,6 @@ async function resolveByContactNamePreviewFromSupabase(
   return {
     clientId: data.id ?? null,
     delegateId: data.delegate_id ?? null,
-  };
-}
-
-function inferIsCompany(name: string | null): boolean | null {
-  if (!name) return null;
-
-  const upper = name.toUpperCase();
-
-  if (
-    upper.includes(" S.L.") ||
-    upper.includes(" SL ") ||
-    upper.endsWith(" SL") ||
-    upper.includes(" S.A.") ||
-    upper.endsWith(" SA") ||
-    upper.includes(" S.C.P.") ||
-    upper.endsWith(" SCP") ||
-    upper.includes(" SLL") ||
-    upper.includes(" S.L.L.") ||
-    upper.includes(" S.COOP.") ||
-    upper.includes(" COOP")
-  ) {
-    return true;
-  }
-
-  return null;
-}
-
-async function createClientFromHoldedIfMissing(args: {
-  supabase: SupabaseLike;
-  holdedContactId: string;
-  clientName: string;
-  logger?: Pick<Console, "info" | "warn" | "error">;
-}): Promise<{ clientId: string | null; delegateId: string | null } | null> {
-  const { supabase, holdedContactId, clientName, logger = console } = args;
-
-  const existingByMap = await resolveByHoldedContactIdFromSupabase(
-    supabase,
-    holdedContactId
-  );
-  if (existingByMap?.clientId) {
-    return existingByMap;
-  }
-
-  const { data: existingClient, error: existingClientError } = await supabase
-    .from("clients")
-    .select("id, delegate_id, holded_contact_id")
-    .eq("holded_contact_id", holdedContactId)
-    .maybeSingle();
-
-  if (existingClientError) throw existingClientError;
-
-  if (existingClient?.id) {
-    const { data: existingMap, error: existingMapError } = await supabase
-      .from("holded_contact_client_map_g1")
-      .select("client_id")
-      .eq("holded_contact_id", holdedContactId)
-      .maybeSingle();
-
-    if (existingMapError) throw existingMapError;
-
-    if (!existingMap?.client_id) {
-      const { error: insertMapError } = await supabase
-        .from("holded_contact_client_map_g1")
-        .insert({
-          holded_contact_id: holdedContactId,
-          client_id: existingClient.id,
-          notes: "Auto-created mapping from Holded single import",
-        });
-
-      if (insertMapError) throw insertMapError;
-    }
-
-    return {
-      clientId: existingClient.id ?? null,
-      delegateId: existingClient.delegate_id ?? null,
-    };
-  }
-
-  const isCompany = inferIsCompany(clientName);
-
-  const clientInsertPayload = {
-    name: clientName,
-    name_raw: clientName,
-    legal_name: clientName,
-    holded_contact_id: holdedContactId,
-    status: "active",
-    state_code: "ACTIVE",
-    is_company: isCompany,
-    updated_at: new Date().toISOString(),
-  };
-
-  const { data: insertedClient, error: insertClientError } = await supabase
-    .from("clients")
-    .insert(clientInsertPayload)
-    .select("id, delegate_id")
-    .single();
-
-  if (insertClientError) throw insertClientError;
-
-  const { error: insertMapError } = await supabase
-    .from("holded_contact_client_map_g1")
-    .insert({
-      holded_contact_id: holdedContactId,
-      client_id: insertedClient.id,
-      notes: "Auto-created from Holded because client did not exist in portal",
-    });
-
-  if (insertMapError) throw insertMapError;
-
-  logger.info(
-    `[HOLDED][CLIENT_CREATED][ONE] ${clientName} :: ${holdedContactId} :: ${insertedClient.id}`
-  );
-
-  return {
-    clientId: insertedClient.id ?? null,
-    delegateId: insertedClient.delegate_id ?? null,
-  };
-}
-
-async function ensureAcceptedDecisionHasClient(args: {
-  supabase: SupabaseLike;
-  decision: Extract<HoldedImportDecision, { status: "accept" }>;
-  logger?: Pick<Console, "info" | "warn" | "error">;
-}): Promise<Extract<HoldedImportDecision, { status: "accept" }>> {
-  const { supabase, decision, logger = console } = args;
-
-  if (decision.invoice.client_id) {
-    return decision;
-  }
-
-  const holdedContactId = decision.invoice.holded_contact_id;
-  const clientName = decision.invoice.client_name;
-
-  if (!holdedContactId || !clientName) {
-    return decision;
-  }
-
-  const resolution = await createClientFromHoldedIfMissing({
-    supabase,
-    holdedContactId,
-    clientName,
-    logger,
-  });
-
-  if (!resolution?.clientId) {
-    return decision;
-  }
-
-  return {
-    ...decision,
-    invoice: {
-      ...decision.invoice,
-      client_id: resolution.clientId,
-      delegate_id: resolution.delegateId,
-    },
-    diagnostics: {
-      ...(decision.diagnostics ?? {}),
-      auto_created_client_from_holded: true,
-      client_id_preview: resolution.clientId,
-      delegate_id_preview: resolution.delegateId,
-      missing_client_mapping_soft: false,
-    },
   };
 }
 
@@ -1142,16 +962,8 @@ export async function importOneHoldedInvoiceById(...args: any[]): Promise<{
       };
     }
 
-    let acceptedDecision: Extract<HoldedImportDecision, { status: "accept" }> =
+    const acceptedDecision: Extract<HoldedImportDecision, { status: "accept" }> =
       decision;
-
-    if (!parsed.preview) {
-      acceptedDecision = await ensureAcceptedDecisionHasClient({
-        supabase: parsed.supabase,
-        decision: acceptedDecision,
-        logger: parsed.logger,
-      });
-    }
 
     if (!parsed.preview) {
       const existingInvoice = await getExistingHoldedInvoice({
