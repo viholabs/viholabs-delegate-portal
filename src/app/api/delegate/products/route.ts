@@ -116,14 +116,24 @@ export async function GET(req: Request) {
     const eff = await getEffectivePermissionsByActorId(String(r.actor.id));
 
     stage = "authorize";
-    const allowed = eff.isSuperAdmin || eff.has("products.read");
+    const allowed =
+      eff.isSuperAdmin ||
+      eff.has("products.read") ||
+      eff.has("orders.create") ||
+      eff.has("orders.manage");
+
     if (!allowed) {
       return json(403, { ok: false, stage, error: "No autorizado (products.read)" });
     }
 
+    /**
+     * Importante:
+     * - Para Melquisedec / super_admin / supervisión NO se debe resolver delegate propio.
+     * - El catálogo visible no depende del actor delegado.
+     * - Se usa service role como lectura canónica del catálogo.
+     */
     const reader = r.supaService;
 
-    // 1) Bundles activos = fuente canónica de packs visibles
     stage = "bundles";
     const { data: rawBundles, error: bErr } = await reader
       .from("product_bundles")
@@ -135,7 +145,6 @@ export async function GET(req: Request) {
       return json(500, { ok: false, stage, error: bErr.message });
     }
 
-    // 2) Producto simple visible real: spray
     stage = "spray";
     const { data: rawSpray, error: pErr } = await reader
       .from("products")
@@ -157,9 +166,6 @@ export async function GET(req: Request) {
         }))
       : [];
 
-    // Catálogo visible EXACTAMENTE como en Holded:
-    // - bundles activos
-    // - spray real
     const bundleProducts = bundles.map((b) => ({
       id: b.sku,
       sku: b.sku,

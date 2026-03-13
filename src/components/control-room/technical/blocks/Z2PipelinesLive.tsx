@@ -1,8 +1,7 @@
-//src/components/control-room/technical/blocks/Z2PipelinesLive.tsx <<'TS'
 "use client";
 
 /**
- * VIHOLABS — Z2.1 HOLDed Invoices + Detail Drawer (LOCAL TRUTH + ITEMS)
+ * VIHOLABS — Z2.1 HOLDed Documents + Detail Drawer (LOCAL TRUTH + LAST SYNC EVIDENCE)
  *
  * Canon:
  * - READ ONLY
@@ -12,6 +11,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+type DocType = "invoice" | "creditnote";
+type RowStatus = "IMPORTED" | "SKIPPED";
+
 type Row = {
   invoice_id: string | null;
   invoice_number: string | null;
@@ -19,6 +21,9 @@ type Row = {
   invoice_date: string | null; // ISO date
   invoice_month: string | null; // YYYY-MM
   imported_at: string | null;
+  doc_type: DocType;
+  row_status: RowStatus;
+  skip_reason: string | null;
 };
 
 type InvoiceDetail = {
@@ -90,6 +95,31 @@ function badgeForKind(kind: ItemKind) {
   return { text: "NEUTRAL", subtle: true };
 }
 
+function docTypeLabel(docType: DocType) {
+  return docType === "creditnote" ? "CN" : "FACT";
+}
+
+function statusLabel(status: RowStatus) {
+  return status === "IMPORTED" ? "IMPORTADA" : "SKIPPED";
+}
+
+function buildRowKey(r: Row, index: number): string {
+  if (r.invoice_id) {
+    return `invoice-id-${r.invoice_id}`;
+  }
+
+  return [
+    "row",
+    r.invoice_number ?? "null",
+    r.doc_type ?? "null",
+    r.row_status ?? "null",
+    r.invoice_date ?? "null",
+    r.client_name ?? "null",
+    r.skip_reason ?? "null",
+    String(index),
+  ].join("-");
+}
+
 export default function Z2PipelinesLive() {
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +127,6 @@ export default function Z2PipelinesLive() {
   const currentMonth = currentMonthKeyUTC();
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);
 
-  // Drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [drawerError, setDrawerError] = useState<string | null>(null);
@@ -173,8 +202,30 @@ export default function Z2PipelinesLive() {
     return rows
       .filter((r) => r.invoice_month === selectedMonth)
       .slice()
-      .sort((a, b) => String(b.invoice_number ?? "").localeCompare(String(a.invoice_number ?? "")));
+      .sort((a, b) => {
+        const da = String(a.invoice_date ?? "");
+        const db = String(b.invoice_date ?? "");
+        if (da !== db) return db.localeCompare(da);
+        return String(b.invoice_number ?? "").localeCompare(String(a.invoice_number ?? ""));
+      });
   }, [rows, selectedMonth]);
+
+  const counts = useMemo(() => {
+    let invoices = 0;
+    let creditnotes = 0;
+    let imported = 0;
+    let skipped = 0;
+
+    for (const r of visibleRows) {
+      if (r.doc_type === "creditnote") creditnotes++;
+      else invoices++;
+
+      if (r.row_status === "IMPORTED") imported++;
+      else skipped++;
+    }
+
+    return { invoices, creditnotes, imported, skipped, total: visibleRows.length };
+  }, [visibleRows]);
 
   async function openDrawer(invoiceId: string) {
     setDrawerOpen(true);
@@ -215,7 +266,7 @@ export default function Z2PipelinesLive() {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs font-semibold" style={{ color: "var(--viho-muted)" }}>
-          Holded (Z2.1) · Factures (per data factura)
+          Holded (Z2.1) · Documents detectats (factures + CN)
         </div>
 
         <select
@@ -237,33 +288,79 @@ export default function Z2PipelinesLive() {
           {error}
         </div>
       ) : (
-        <div className="text-xs" style={{ color: "var(--viho-muted)" }}>
-          Factures: <span className="font-semibold">{visibleRows.length}</span>
+        <div className="text-xs flex flex-wrap gap-4" style={{ color: "var(--viho-muted)" }}>
+          <div>Total: <span className="font-semibold">{counts.total}</span></div>
+          <div>Factures: <span className="font-semibold">{counts.invoices}</span></div>
+          <div>CN: <span className="font-semibold">{counts.creditnotes}</span></div>
+          <div>Importades: <span className="font-semibold">{counts.imported}</span></div>
+          <div>Skipped: <span className="font-semibold">{counts.skipped}</span></div>
         </div>
       )}
 
       <div className="space-y-1">
-        {visibleRows.map((r) => (
-          <button
-            key={r.invoice_id ?? `${r.invoice_number}-${r.imported_at}`}
-            type="button"
-            onClick={() => r.invoice_id && openDrawer(r.invoice_id)}
-            className="w-full text-left rounded-2xl border px-3 py-2"
-            style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface)" }}
-            disabled={!r.invoice_id}
-          >
-            <div className="text-xs">
-              <span className="font-semibold">{r.invoice_number ?? "—"}</span>
-              {" · "}
-              <span>{r.client_name ?? "—"}</span>
-              {" · "}
-              <span className="font-semibold">{fmtDateHuman(r.invoice_date)}</span>
-            </div>
-          </button>
-        ))}
+        {visibleRows.map((r, index) => {
+          const canOpen = !!r.invoice_id && r.row_status === "IMPORTED";
+          const rowKey = buildRowKey(r, index);
+
+          return (
+            <button
+              key={rowKey}
+              type="button"
+              onClick={() => canOpen && r.invoice_id && openDrawer(r.invoice_id)}
+              className="w-full text-left rounded-2xl border px-3 py-2"
+              style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface)" }}
+              disabled={!canOpen}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs">
+                  <span className="font-semibold">{r.invoice_number ?? "—"}</span>
+                  {" · "}
+                  <span>{r.client_name ?? "—"}</span>
+                  {" · "}
+                  <span className="font-semibold">{fmtDateHuman(r.invoice_date)}</span>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className="text-[10px] font-semibold px-2 py-1 rounded-full"
+                    style={{
+                      border: "1px solid var(--viho-border)",
+                      background: "rgba(0,0,0,0.04)",
+                      color: "var(--viho-muted)",
+                    }}
+                  >
+                    {docTypeLabel(r.doc_type)}
+                  </span>
+
+                  <span
+                    className="text-[10px] font-semibold px-2 py-1 rounded-full"
+                    style={{
+                      border: "1px solid var(--viho-border)",
+                      background:
+                        r.row_status === "IMPORTED"
+                          ? "rgba(0,0,0,0.04)"
+                          : "rgba(255,196,0,0.18)",
+                      color:
+                        r.row_status === "IMPORTED"
+                          ? "var(--viho-muted)"
+                          : "var(--viho-warning)",
+                    }}
+                  >
+                    {statusLabel(r.row_status)}
+                  </span>
+                </div>
+              </div>
+
+              {r.row_status === "SKIPPED" ? (
+                <div className="mt-1 text-[11px]" style={{ color: "var(--viho-warning)" }}>
+                  Motiu: {r.skip_reason ?? "skip"}
+                </div>
+              ) : null}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Drawer */}
       {drawerOpen ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-end"

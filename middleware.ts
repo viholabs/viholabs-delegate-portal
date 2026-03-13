@@ -1,13 +1,11 @@
 // middleware.ts
+
 /**
  * AUDIT TRACE
- * Date: 2026-02-16
- * Reason: Canonical routing guard + API honesty:
- *   - Forbid role portals (/delegate, /client, /kol, /commercial)
- *   - UI routes may redirect to /login (HTML)
- *   - API routes (/api/*) must NEVER redirect to HTML login/callback. They must be consumable as APIs.
- *   - Institutional UI areas require viholabs_mode cookie (mode is state/lens, not portal).
- * Scope: Routing only. No backend/data changes.
+ * Date: 2026-03-09
+ * Actor: CHATGPT
+ * Reason: Canonical auth routing guard for root entry and login flows
+ * Scope: Routing/auth guard only. No business logic, no data mutations.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,27 +13,16 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
 export const runtime = "nodejs";
 
-const MODE_COOKIE = "viholabs_mode";
-
 const PUBLIC_PATHS: string[] = [
   "/login",
-  "/auth/callback",
   "/logout",
+  "/auth/callback",
+  "/auth/callback-page",
+  "/auth/password",
   "/favicon.ico",
   "/robots.txt",
   "/sitemap.xml",
 ];
-
-function isPublicPath(pathname: string) {
-  return (
-    pathname.startsWith("/_next") ||
-    PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))
-  );
-}
-
-function isApiPath(pathname: string) {
-  return pathname === "/api" || pathname.startsWith("/api/");
-}
 
 type CookieToSet = {
   name: string;
@@ -43,8 +30,15 @@ type CookieToSet = {
   options?: CookieOptions;
 };
 
+function isPublicPath(pathname: string) {
+  return (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/public") ||
+    PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  );
+}
+
 function isForbiddenRolePortal(pathname: string) {
-  // Canon: no portals/layouts by role.
   return (
     pathname === "/delegate" ||
     pathname.startsWith("/delegate/") ||
@@ -57,34 +51,16 @@ function isForbiddenRolePortal(pathname: string) {
   );
 }
 
-/**
- * Zones institucionals UI que NO poden operar sense mode cookie.
- * (Mode = estat/lent dins del Shell únic, no portal.)
- */
-function isInstitutionalUiArea(pathname: string) {
-  return (
-    pathname.startsWith("/control-room") ||
-    pathname.startsWith("/portal") ||
-    pathname.startsWith("/commissions")
-  );
-}
-
 export async function middleware(req: NextRequest) {
-  const { pathname, search } = req.nextUrl;
+  const { pathname } = req.nextUrl;
 
-  // 0) Canon guard: hard 404 on forbidden role portals
+  // 0) Canon guard: no portals by role
   if (isForbiddenRolePortal(pathname)) {
     return new NextResponse("Not Found", { status: 404 });
   }
 
-  // 1) Public paths → pass
+  // 1) Public auth/static routes pass through
   if (isPublicPath(pathname)) {
-    return NextResponse.next();
-  }
-
-  // 2) ✅ API honesty: /api/* must never redirect to HTML login/callback.
-  // Let each API route handle auth and return JSON status codes.
-  if (isApiPath(pathname)) {
     return NextResponse.next();
   }
 
@@ -95,48 +71,44 @@ export async function middleware(req: NextRequest) {
     return new NextResponse("Missing Supabase env vars", { status: 500 });
   }
 
-  // 3) Prepare response to allow Supabase to set cookies if needed
   const res = NextResponse.next();
 
-  // 4) SSR client (cookies)
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll: () => req.cookies.getAll(),
-      setAll: (cookiesToSet: CookieToSet[]) => {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          res.cookies.set(name, value, options);
-        });
+  try {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll: () => req.cookies.getAll(),
+        setAll: (cookiesToSet: CookieToSet[]) => {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            res.cookies.set(name, value, options);
+          });
+        },
       },
-    },
-  });
+    });
 
-  // 5) Session (only user; no roles/actor here)
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  if (!user) {
+    if (!user) {
+      const loginUrl = req.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      loginUrl.searchParams.set("error", "unauthorized");
+      loginUrl.searchParams.set("next", pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+
+    return res;
+  } catch {
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = "/login";
-    loginUrl.searchParams.set("error", "unauthorized");
+    loginUrl.searchParams.set("error", "session_check_failed");
+    loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
-
-  // 6) Institutional UI requires mode cookie; if missing, go to auth/callback to resolve actor+mode.
-  if (isInstitutionalUiArea(pathname)) {
-    const mode = req.cookies.get(MODE_COOKIE)?.value;
-
-    if (!mode) {
-      const cb = req.nextUrl.clone();
-      cb.pathname = "/auth/callback";
-      cb.search = `?next=${encodeURIComponent(pathname + search)}`;
-      return NextResponse.redirect(cb);
-    }
-  }
-
-  return res;
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
+  ],
 };

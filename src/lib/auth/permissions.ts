@@ -11,13 +11,17 @@ export type EffectivePermissions = {
 };
 
 /**
- * Permisos efectius (RBAC + overrides) des de la funció SQL:
+ * Permisos efectivos (RBAC + overrides) desde la función SQL:
  * public.effective_permissions(actor_id)
  *
- * IMPORTANT:
- * - Aquesta RPC S'EXECUTA AMB SERVICE ROLE
- * - Mai amb el client de sessió (authenticated)
- * - Evita recursió RLS → stack depth exceeded
+ * IMPORTANTE:
+ * - Esta RPC se ejecuta con SERVICE ROLE
+ * - Nunca con el cliente de sesión (authenticated)
+ * - Evita recursión RLS → stack depth exceeded
+ *
+ * Compatibilidad canónica:
+ * - "*" mantiene el superadmin clásico
+ * - "__MELQUISEDEC__" actúa también como superadmin efectivo
  */
 export async function getEffectivePermissionsByActorId(
   actorId: string
@@ -51,8 +55,11 @@ export async function getEffectivePermissionsByActorId(
     .map((r) => String(r?.perm_code ?? "").trim())
     .filter((x) => x.length > 0);
 
-  const isSuperAdmin = codes.includes("*");
   const perms = new Set<string>(codes);
+
+  const isSuperAdmin =
+    perms.has("*") ||
+    perms.has("__MELQUISEDEC__");
 
   return {
     isSuperAdmin,

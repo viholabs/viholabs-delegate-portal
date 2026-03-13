@@ -1,0 +1,506 @@
+[1mdiff --git a/src/app/api/holded/imported/route.ts b/src/app/api/holded/imported/route.ts[m
+[1mindex 8ea08c5..8ade329 100644[m
+[1m--- a/src/app/api/holded/imported/route.ts[m
+[1m+++ b/src/app/api/holded/imported/route.ts[m
+[36m@@ -1,11 +1,11 @@[m
+ // src/app/api/holded/imported/route.ts[m
+ /**[m
+[31m- * VIHOLABS — HOLDed Imported Invoices (LOCAL TRUTH)[m
+[32m+[m[32m * VIHOLABS — HOLDed Imported Documents (LOCAL TRUTH + LAST SYNC SKIPS)[m
+  *[m
+  * Canon:[m
+  * - READ ONLY[m
+  * - No Holded API calls[m
+[31m- * - Uses DB truth (invoices table)[m
+[32m+[m[32m * - Uses DB truth (invoices table) + last holded_sync_runs payload evidence[m
+  * - SUPER_ADMIN only[m
+  */[m
+ [m
+[36m@@ -45,6 +45,72 @@[m [mfunction getServiceSupabase() {[m
+   return createAdminClient(url, key, { auth: { persistSession: false } });[m
+ }[m
+ [m
+[32m+[m[32mtype DocType = "invoice" | "creditnote";[m
+[32m+[m[32mtype RowStatus = "IMPORTED" | "SKIPPED";[m
+[32m+[m
+[32m+[m[32mtype OutRow = {[m
+[32m+[m[32m  invoice_id: string | null;[m
+[32m+[m[32m  invoice_number: string | null;[m
+[32m+[m[32m  client_name: string | null;[m
+[32m+[m[32m  invoice_date: string | null;[m
+[32m+[m[32m  invoice_month: string | null; // YYYY-MM[m
+[32m+[m[32m  imported_at: string | null;[m
+[32m+[m[32m  doc_type: DocType;[m
+[32m+[m[32m  row_status: RowStatus;[m
+[32m+[m[32m  skip_reason: string | null;[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mfunction monthKey(v: unknown): string | null {[m
+[32m+[m[32m  const s = String(v ?? "").trim();[m
+[32m+[m[32m  if (!s) return null;[m
+[32m+[m[32m  if (/^\d{4}-\d{2}$/.test(s)) return s;[m
+[32m+[m[32m  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0, 7);[m
+[32m+[m[32m  return null;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction normalizeDocType(args: {[m
+[32m+[m[32m  invoiceNumber?: unknown;[m
+[32m+[m[32m  sourceMeta?: any;[m
+[32m+[m[32m  explicit?: unknown;[m
+[32m+[m[32m}): DocType {[m
+[32m+[m[32m  const explicit = String(args.explicit ?? "").trim().toLowerCase();[m
+[32m+[m[32m  if (explicit === "creditnote") return "creditnote";[m
+[32m+[m[32m  if (explicit === "invoice") return "invoice";[m
+[32m+[m
+[32m+[m[32m  const sm = args.sourceMeta ?? {};[m
+[32m+[m[32m  const fromMeta = String(sm?.holded_doc_type ?? "").trim().toLowerCase();[m
+[32m+[m[32m  if (fromMeta === "creditnote") return "creditnote";[m
+[32m+[m[32m  if (fromMeta === "invoice") return "invoice";[m
+[32m+[m
+[32m+[m[32m  const n = String(args.invoiceNumber ?? "").trim().toUpperCase();[m
+[32m+[m[32m  if (n.startsWith("CN")) return "creditnote";[m
+[32m+[m[32m  return "invoice";[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction dedupeRows(rows: OutRow[]): OutRow[] {[m
+[32m+[m[32m  const byKey = new Map<string, OutRow>();[m
+[32m+[m
+[32m+[m[32m  for (const row of rows) {[m
+[32m+[m[32m    const key = String(row.invoice_number ?? "").trim() || `${row.doc_type}:${row.invoice_id ?? row.imported_at ?? Math.random()}`;[m
+[32m+[m
+[32m+[m[32m    const prev = byKey.get(key);[m
+[32m+[m[32m    if (!prev) {[m
+[32m+[m[32m      byKey.set(key, row);[m
+[32m+[m[32m      continue;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    // Imported wins over skipped[m
+[32m+[m[32m    if (prev.row_status === "SKIPPED" && row.row_status === "IMPORTED") {[m
+[32m+[m[32m      byKey.set(key, row);[m
+[32m+[m[32m      continue;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    // Keep first imported if both imported; otherwise keep first[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return Array.from(byKey.values());[m
+[32m+[m[32m}[m
+[32m+[m
+ export async function GET(req: Request) {[m
+   let stage = "init";[m
+ [m
+[36m@@ -68,29 +134,101 @@[m [mexport async function GET(req: Request) {[m
+     const admin = getServiceSupabase();[m
+ [m
+     stage = "query_invoices";[m
+[31m-    // Canonical local truth: invoices table[m
+[31m-    const { data, error } = await admin[m
+[32m+[m[32m    const { data: invoicesData, error: invoicesError } = await admin[m
+       .from("invoices")[m
+[31m-      .select("id, invoice_number, client_name, invoice_date, source_month, created_at")[m
+[32m+[m[32m      .select("id, invoice_number, client_name, invoice_date, source_month, created_at, source_meta")[m
+       .eq("source_provider", "holded")[m
+[31m-      .order("invoice_number", { ascending: false })[m
+[31m-      .limit(500);[m
+[32m+[m[32m      .order("invoice_date", { ascending: false })[m
+[32m+[m[32m      .limit(1000);[m
+ [m
+[31m-    if (error) {[m
+[31m-      return json(500, { ok: false, stage, error: error.message });[m
+[32m+[m[32m    if (invoicesError) {[m
+[32m+[m[32m      return json(500, { ok: false, stage, error: invoicesError.message });[m
+     }[m
+ [m
+[31m-    const rows = (Array.isArray(data) ? data : []).map((r: any) => ({[m
+[32m+[m[32m    const importedRows: OutRow[] = (Array.isArray(invoicesData) ? invoicesData : []).map((r: any) => ({[m
+       invoice_id: r.id ?? null,[m
+       invoice_number: r.invoice_number ?? null,[m
+       client_name: r.client_name ?? null,[m
+       invoice_date: r.invoice_date ?? null,[m
+[31m-      invoice_month: r.source_month ?? null, // YYYY-MM[m
+[32m+[m[32m      invoice_month: r.source_month ?? monthKey(r.invoice_date),[m
+       imported_at: r.created_at ?? null,[m
+[32m+[m[32m      doc_type: normalizeDocType({[m
+[32m+[m[32m        invoiceNumber: r.invoice_number,[m
+[32m+[m[32m        sourceMeta: r.source_meta,[m
+[32m+[m[32m      }),[m
+[32m+[m[32m      row_status: "IMPORTED",[m
+[32m+[m[32m      skip_reason: null,[m
+     }));[m
+ [m
+[31m-    return json(200, { ok: true, stage: "ok", rows });[m
+[32m+[m[32m    stage = "query_last_sync_run";[m
+[32m+[m[32m    const { data: runRow, error: runError } = await admin[m
+[32m+[m[32m      .from("holded_sync_runs")[m
+[32m+[m[32m      .select("id, started_at, payload")[m
+[32m+[m[32m      .eq("job", "holded_invoices_incremental")[m
+[32m+[m[32m      .order("started_at", { ascending: false })[m
+[32m+[m[32m      .limit(1)[m
+[32m+[m[32m      .maybeSingle();[m
+[32m+[m
+[32m+[m[32m    if (runError) {[m
+[32m+[m[32m      return json(500, { ok: false, stage, error: runError.message });[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    const payload = runRow?.payload ?? {};[m
+[32m+[m[32m    const skippedItems = Array.isArray(payload?.skipped_items) ? payload.skipped_items : [];[m
+[32m+[m
+[32m+[m[32m    const skippedRows: OutRow[] = skippedItems.map((r: any) => {[m
+[32m+[m[32m      const invoiceNumber =[m
+[32m+[m[32m        r?.meta?.invoice_number ??[m
+[32m+[m[32m        r?.raw_min?.number ??[m
+[32m+[m[32m        null;[m
+[32m+[m
+[32m+[m[32m      const invoiceDate =[m
+[32m+[m[32m        r?.meta?.invoice_date ??[m
+[32m+[m[32m        (typeof r?.raw_min?.date === "number"[m
+[32m+[m[32m          ? new Date(r.raw_min.date * 1000).toISOString().slice(0, 10)[m
+[32m+[m[32m          : null);[m
+[32m+[m
+[32m+[m[32m      const clientName =[m
+[32m+[m[32m        r?.meta?.client_name ??[m
+[32m+[m[32m        null;[m
+[32m+[m
+[32m+[m[32m      const docType = normalizeDocType({[m
+[32m+[m[32m        invoiceNumber,[m
+[32m+[m[32m        explicit: r?.doc_type ?? r?.meta?.holded_doc_type,[m
+[32m+[m[32m      });[m
+[32m+[m
+[32m+[m[32m      return {[m
+[32m+[m[32m        invoice_id: null,[m
+[32m+[m[32m        invoice_number: invoiceNumber,[m
+[32m+[m[32m        client_name: clientName,[m
+[32m+[m[32m        invoice_date: invoiceDate,[m
+[32m+[m[32m        invoice_month: monthKey(invoiceDate),[m
+[32m+[m[32m        imported_at: null,[m
+[32m+[m[32m        doc_type: docType,[m
+[32m+[m[32m        row_status: "SKIPPED",[m
+[32m+[m[32m        skip_reason: String(r?.step ?? "skip"),[m
+[32m+[m[32m      };[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    const rows = dedupeRows([...importedRows, ...skippedRows]).sort((a, b) => {[m
+[32m+[m[32m      const da = String(a.invoice_date ?? "");[m
+[32m+[m[32m      const db = String(b.invoice_date ?? "");[m
+[32m+[m[32m      if (da !== db) return db.localeCompare(da);[m
+[32m+[m[32m      return String(b.invoice_number ?? "").localeCompare(String(a.invoice_number ?? ""));[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    return json(200, {[m
+[32m+[m[32m      ok: true,[m
+[32m+[m[32m      stage: "ok",[m
+[32m+[m[32m      rows,[m
+[32m+[m[32m      meta: {[m
+[32m+[m[32m        imported_rows: importedRows.length,[m
+[32m+[m[32m        skipped_rows: skippedRows.length,[m
+[32m+[m[32m        merged_rows: rows.length,[m
+[32m+[m[32m        last_sync_started_at: runRow?.started_at ?? null,[m
+[32m+[m[32m      },[m
+[32m+[m[32m    });[m
+   } catch (e: any) {[m
+     return json(500, { ok: false, stage, error: String(e?.message ?? e) });[m
+   }[m
+[31m-}[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/src/components/control-room/technical/blocks/Z2PipelinesLive.tsx b/src/components/control-room/technical/blocks/Z2PipelinesLive.tsx[m
+[1mindex 19fa657..90f8be4 100644[m
+[1m--- a/src/components/control-room/technical/blocks/Z2PipelinesLive.tsx[m
+[1m+++ b/src/components/control-room/technical/blocks/Z2PipelinesLive.tsx[m
+[36m@@ -1,8 +1,7 @@[m
+[31m-//src/components/control-room/technical/blocks/Z2PipelinesLive.tsx <<'TS'[m
+ "use client";[m
+ [m
+ /**[m
+[31m- * VIHOLABS — Z2.1 HOLDed Invoices + Detail Drawer (LOCAL TRUTH + ITEMS)[m
+[32m+[m[32m * VIHOLABS — Z2.1 HOLDed Documents + Detail Drawer (LOCAL TRUTH + LAST SYNC EVIDENCE)[m
+  *[m
+  * Canon:[m
+  * - READ ONLY[m
+[36m@@ -12,6 +11,9 @@[m
+ [m
+ import { useEffect, useMemo, useState } from "react";[m
+ [m
+[32m+[m[32mtype DocType = "invoice" | "creditnote";[m
+[32m+[m[32mtype RowStatus = "IMPORTED" | "SKIPPED";[m
+[32m+[m
+ type Row = {[m
+   invoice_id: string | null;[m
+   invoice_number: string | null;[m
+[36m@@ -19,6 +21,9 @@[m [mtype Row = {[m
+   invoice_date: string | null; // ISO date[m
+   invoice_month: string | null; // YYYY-MM[m
+   imported_at: string | null;[m
+[32m+[m[32m  doc_type: DocType;[m
+[32m+[m[32m  row_status: RowStatus;[m
+[32m+[m[32m  skip_reason: string | null;[m
+ };[m
+ [m
+ type InvoiceDetail = {[m
+[36m@@ -90,6 +95,14 @@[m [mfunction badgeForKind(kind: ItemKind) {[m
+   return { text: "NEUTRAL", subtle: true };[m
+ }[m
+ [m
+[32m+[m[32mfunction docTypeLabel(docType: DocType) {[m
+[32m+[m[32m  return docType === "creditnote" ? "CN" : "FACT";[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction statusLabel(status: RowStatus) {[m
+[32m+[m[32m  return status === "IMPORTED" ? "IMPORTADA" : "SKIPPED";[m
+[32m+[m[32m}[m
+[32m+[m
+ export default function Z2PipelinesLive() {[m
+   const [rows, setRows] = useState<Row[]>([]);[m
+   const [error, setError] = useState<string | null>(null);[m
+[36m@@ -97,7 +110,6 @@[m [mexport default function Z2PipelinesLive() {[m
+   const currentMonth = currentMonthKeyUTC();[m
+   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);[m
+ [m
+[31m-  // Drawer[m
+   const [drawerOpen, setDrawerOpen] = useState(false);[m
+   const [drawerLoading, setDrawerLoading] = useState(false);[m
+   const [drawerError, setDrawerError] = useState<string | null>(null);[m
+[36m@@ -173,9 +185,31 @@[m [mexport default function Z2PipelinesLive() {[m
+     return rows[m
+       .filter((r) => r.invoice_month === selectedMonth)[m
+       .slice()[m
+[31m-      .sort((a, b) => String(b.invoice_number ?? "").localeCompare(String(a.invoice_number ?? "")));[m
+[32m+[m[32m      .sort((a, b) => {[m
+[32m+[m[32m        const da = String(a.invoice_date ?? "");[m
+[32m+[m[32m        const db = String(b.invoice_date ?? "");[m
+[32m+[m[32m        if (da !== db) return db.localeCompare(da);[m
+[32m+[m[32m        return String(b.invoice_number ?? "").localeCompare(String(a.invoice_number ?? ""));[m
+[32m+[m[32m      });[m
+   }, [rows, selectedMonth]);[m
+ [m
+[32m+[m[32m  const counts = useMemo(() => {[m
+[32m+[m[32m    let invoices = 0;[m
+[32m+[m[32m    let creditnotes = 0;[m
+[32m+[m[32m    let imported = 0;[m
+[32m+[m[32m    let skipped = 0;[m
+[32m+[m
+[32m+[m[32m    for (const r of visibleRows) {[m
+[32m+[m[32m      if (r.doc_type === "creditnote") creditnotes++;[m
+[32m+[m[32m      else invoices++;[m
+[32m+[m
+[32m+[m[32m      if (r.row_status === "IMPORTED") imported++;[m
+[32m+[m[32m      else skipped++;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    return { invoices, creditnotes, imported, skipped, total: visibleRows.length };[m
+[32m+[m[32m  }, [visibleRows]);[m
+[32m+[m
+   async function openDrawer(invoiceId: string) {[m
+     setDrawerOpen(true);[m
+     setDrawerLoading(true);[m
+[36m@@ -215,7 +249,7 @@[m [mexport default function Z2PipelinesLive() {[m
+     <div className="space-y-3">[m
+       <div className="flex items-center justify-between gap-3">[m
+         <div className="text-xs font-semibold" style={{ color: "var(--viho-muted)" }}>[m
+[31m-          Holded (Z2.1) · Factures (per data factura)[m
+[32m+[m[32m          Holded (Z2.1) · Documents detectats (factures + CN)[m
+         </div>[m
+ [m
+         <select[m
+[36m@@ -237,33 +271,78 @@[m [mexport default function Z2PipelinesLive() {[m
+           {error}[m
+         </div>[m
+       ) : ([m
+[31m-        <div className="text-xs" style={{ color: "var(--viho-muted)" }}>[m
+[31m-          Factures: <span className="font-semibold">{visibleRows.length}</span>[m
+[32m+[m[32m        <div className="text-xs flex flex-wrap gap-4" style={{ color: "var(--viho-muted)" }}>[m
+[32m+[m[32m          <div>Total: <span className="font-semibold">{counts.total}</span></div>[m
+[32m+[m[32m          <div>Factures: <span className="font-semibold">{counts.invoices}</span></div>[m
+[32m+[m[32m          <div>CN: <span className="font-semibold">{counts.creditnotes}</span></div>[m
+[32m+[m[32m          <div>Importades: <span className="font-semibold">{counts.imported}</span></div>[m
+[32m+[m[32m          <div>Skipped: <span className="font-semibold">{counts.skipped}</span></div>[m
+         </div>[m
+       )}[m
+ [m
+       <div className="space-y-1">[m
+[31m-        {visibleRows.map((r) => ([m
+[31m-          <button[m
+[31m-            key={r.invoice_id ?? `${r.invoice_number}-${r.imported_at}`}[m
+[31m-            type="button"[m
+[31m-            onClick={() => r.invoice_id && openDrawer(r.invoice_id)}[m
+[31m-            className="w-full text-left rounded-2xl border px-3 py-2"[m
+[31m-            style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface)" }}[m
+[31m-            disabled={!r.invoice_id}[m
+[31m-          >[m
+[31m-            <div className="text-xs">[m
+[31m-              <span className="font-semibold">{r.invoice_number ?? "—"}</span>[m
+[31m-              {" · "}[m
+[31m-              <span>{r.client_name ?? "—"}</span>[m
+[31m-              {" · "}[m
+[31m-              <span className="font-semibold">{fmtDateHuman(r.invoice_date)}</span>[m
+[31m-            </div>[m
+[31m-          </button>[m
+[31m-        ))}[m
+[32m+[m[32m        {visibleRows.map((r) => {[m
+[32m+[m[32m          const canOpen = !!r.invoice_id && r.row_status === "IMPORTED";[m
+[32m+[m
+[32m+[m[32m          return ([m
+[32m+[m[32m            <button[m
+[32m+[m[32m              key={r.invoice_id ?? `${r.invoice_number}-${r.doc_type}-${r.row_status}-${r.invoice_date}`}[m
+[32m+[m[32m              type="button"[m
+[32m+[m[32m              onClick={() => canOpen && r.invoice_id && openDrawer(r.invoice_id)}[m
+[32m+[m[32m              className="w-full text-left rounded-2xl border px-3 py-2"[m
+[32m+[m[32m              style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface)" }}[m
+[32m+[m[32m              disabled={!canOpen}[m
+[32m+[m[32m            >[m
+[32m+[m[32m              <div className="flex items-center justify-between gap-3">[m
+[32m+[m[32m                <div className="text-xs">[m
+[32m+[m[32m                  <span className="font-semibold">{r.invoice_number ?? "—"}</span>[m
+[32m+[m[32m                  {" · "}[m
+[32m+[m[32m                  <span>{r.client_name ?? "—"}</span>[m
+[32m+[m[32m                  {" · "}[m
+[32m+[m[32m                  <span className="font-semibold">{fmtDateHuman(r.invoice_date)}</span>[m
+[32m+[m[32m                </div>[m
+[32m+[m
+[32m+[m[32m                <div className="flex items-center gap-2 shrink-0">[m
+[32m+[m[32m                  <span[m
+[32m+[m[32m                    className="text-[10px] font-semibold px-2 py-1 rounded-full"[m
+[32m+[m[32m                    style={{[m
+[32m+[m[32m                      border: "1px solid var(--viho-border)",[m
+[32m+[m[32m                      background: "rgba(0,0,0,0.04)",[m
+[32m+[m[32m                      color: "var(--viho-muted)",[m
+[32m+[m[32m                    }}[m
+[32m+[m[32m                  >[m
+[32m+[m[32m                    {docTypeLabel(r.doc_type)}[m
+[32m+[m[32m                  </span>[m
+[32m+[m
+[32m+[m[32m                  <span[m
+[32m+[m[32m                    className="text-[10px] font-semibold px-2 py-1 rounded-full"[m
+[32m+[m[32m                    style={{[m
+[32m+[m[32m                      border: "1px solid var(--viho-border)",[m
+[32m+[m[32m                      background:[m
+[32m+[m[32m                        r.row_status === "IMPORTED"[m
+[32m+[m[32m                          ? "rgba(0,0,0,0.04)"[m
+[32m+[m[32m                          : "rgba(255,196,0,0.18)",[m
+[32m+[m[32m                      color:[m
+[32m+[m[32m                        r.row_status === "IMPORTED"[m
+[32m+[m[32m                          ? "var(--viho-muted)"[m
+[32m+[m[32m                          : "var(--viho-warning)",[m
+[32m+[m[32m                    }}[m
+[32m+[m[32m                  >[m
+[32m+[m[32m                    {statusLabel(r.row_status)}[m
+[32m+[m[32m                  </span>[m
+[32m+[m[32m                </div>[m
+[32m+[m[32m              </div>[m
+[32m+[m
+[32m+[m[32m              {r.row_status === "SKIPPED" ? ([m
+[32m+[m[32m                <div className="mt-1 text-[11px]" style={{ color: "var(--viho-warning)" }}>[m
+[32m+[m[32m                  Motiu: {r.skip_reason ?? "skip"}[m
+[32m+[m[32m                </div>[m
+[32m+[m[32m              ) : null}[m
+[32m+[m[32m            </button>[m
+[32m+[m[32m          );[m
+[32m+[m[32m        })}[m
+       </div>[m
+ [m
+[31m-      {/* Drawer */}[m
+       {drawerOpen ? ([m
+         <div[m
+           className="fixed inset-0 z-50 flex items-start justify-end"[m
+[1mdiff --git a/src/components/control-room/technical/blocks/Z2_1HoldedInvoicesThisMonth.tsx b/src/components/control-room/technical/blocks/Z2_1HoldedInvoicesThisMonth.tsx[m
+[1mindex 613fdcd..4497c2d 100644[m
+[1m--- a/src/components/control-room/technical/blocks/Z2_1HoldedInvoicesThisMonth.tsx[m
+[1m+++ b/src/components/control-room/technical/blocks/Z2_1HoldedInvoicesThisMonth.tsx[m
+[36m@@ -1,14 +1,17 @@[m
+ "use client";[m
+ [m
+ /**[m
+[31m- * VIHOLABS — Z2.1 HOLDed (LOCAL TRUTH)[m
+[31m- * - Reads from /api/holded/imported (DB truth)[m
+[32m+[m[32m * VIHOLABS — Z2.1 HOLDed (LOCAL TRUTH + LAST SYNC EVIDENCE)[m
+[32m+[m[32m * - Reads from /api/holded/imported[m
+  * - No Holded API calls[m
+  * - SUPER_ADMIN via Bearer token[m
+  */[m
+ [m
+ import { useEffect, useMemo, useState } from "react";[m
+ [m
+[32m+[m[32mtype DocType = "invoice" | "creditnote";[m
+[32m+[m[32mtype RowStatus = "IMPORTED" | "SKIPPED";[m
+[32m+[m
+ type Row = {[m
+   invoice_id: string | null;[m
+   invoice_number: string | null;[m
+[36m@@ -16,6 +19,9 @@[m [mtype Row = {[m
+   invoice_date: string | null;[m
+   invoice_month: string | null; // YYYY-MM[m
+   imported_at: string | null;[m
+[32m+[m[32m  doc_type: DocType;[m
+[32m+[m[32m  row_status: RowStatus;[m
+[32m+[m[32m  skip_reason: string | null;[m
+ };[m
+ [m
+ function currentMonthKeyUTC(): string {[m
+[36m@@ -51,11 +57,31 @@[m [mexport default function Z2_1HoldedInvoicesThisMonth() {[m
+     load();[m
+     const id = setInterval(load, 15000);[m
+     return () => clearInterval(id);[m
+[31m-    // eslint-disable-next-line react-hooks/exhaustive-deps[m
+   }, []);[m
+ [m
+[31m-  const countThisMonth = useMemo(() => {[m
+[31m-    return rows.filter((r) => r.invoice_month === month).length;[m
+[32m+[m[32m  const stats = useMemo(() => {[m
+[32m+[m[32m    const monthRows = rows.filter((r) => r.invoice_month === month);[m
+[32m+[m
+[32m+[m[32m    let invoices = 0;[m
+[32m+[m[32m    let creditnotes = 0;[m
+[32m+[m[32m    let imported = 0;[m
+[32m+[m[32m    let skipped = 0;[m
+[32m+[m
+[32m+[m[32m    for (const r of monthRows) {[m
+[32m+[m[32m      if (r.doc_type === "creditnote") creditnotes++;[m
+[32m+[m[32m      else invoices++;[m
+[32m+[m
+[32m+[m[32m      if (r.row_status === "IMPORTED") imported++;[m
+[32m+[m[32m      else skipped++;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    return {[m
+[32m+[m[32m      total: monthRows.length,[m
+[32m+[m[32m      invoices,[m
+[32m+[m[32m      creditnotes,[m
+[32m+[m[32m      imported,[m
+[32m+[m[32m      skipped,[m
+[32m+[m[32m    };[m
+   }, [rows, month]);[m
+ [m
+   const status: "OK" | "DEGRADAT" = error ? "DEGRADAT" : "OK";[m
+[36m@@ -67,7 +93,7 @@[m [mexport default function Z2_1HoldedInvoicesThisMonth() {[m
+     >[m
+       <div className="flex items-center justify-between gap-3">[m
+         <div className="text-xs font-semibold" style={{ color: "var(--viho-muted)" }}>[m
+[31m-          Holded (Z2.1) · Factures del mes en curs[m
+[32m+[m[32m          Holded (Z2.1) · Documents del mes en curs[m
+         </div>[m
+ [m
+         <div className="text-xs font-semibold">[m
+[36m@@ -86,7 +112,15 @@[m [mexport default function Z2_1HoldedInvoicesThisMonth() {[m
+         </div>[m
+       </div>[m
+ [m
+[31m-      <div className="mt-2 text-4xl font-semibold">{countThisMonth}</div>[m
+[32m+[m[32m      <div className="mt-2 text-4xl font-semibold">{stats.total}</div>[m
+[32m+[m
+[32m+[m[32m      <div className="mt-2 grid grid-cols-2 gap-2 text-xs" style={{ color: "var(--viho-muted)" }}>[m
+[32m+[m[32m        <div>Factures: <span className="font-semibold">{stats.invoices}</span></div>[m
+[32m+[m[32m        <div>CN: <span className="font-semibold">{stats.creditnotes}</span></div>[m
+[32m+[m[32m        <div>Importades: <span className="font-semibold">{stats.imported}</span></div>[m
+[32m+[m[32m        <div>Skipped: <span className="font-semibold">{stats.skipped}</span></div>[m
+[32m+[m[32m      </div>[m
+[32m+[m
+       <div className="mt-1 text-xs" style={{ color: "var(--viho-muted)" }}>[m
+         Mes: <span className="font-semibold">{month}</span>[m
+       </div>[m
+[36m@@ -98,4 +132,4 @@[m [mexport default function Z2_1HoldedInvoicesThisMonth() {[m
+       ) : null}[m
+     </div>[m
+   );[m
+[31m-}[m
+[32m+[m[32m}[m
+\ No newline at end of file[m

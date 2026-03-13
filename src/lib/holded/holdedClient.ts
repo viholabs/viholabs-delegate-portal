@@ -53,7 +53,6 @@ async function holdedFetch<T>(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        // ✅ Canonical auth for this Holded account: Header "key"
         key: apiKey,
         ...(init?.headers || {}),
       } as any,
@@ -88,10 +87,9 @@ async function holdedFetch<T>(
    DOCUMENTS (CANONICAL)
    =========================== */
 
-export async function holdedListDocuments<T = unknown>(
-  docType: string,
+function buildSearchParams(
   query?: Record<string, string | number | boolean | null | undefined>
-): Promise<T> {
+) {
   const qs = new URLSearchParams();
 
   if (query) {
@@ -100,9 +98,81 @@ export async function holdedListDocuments<T = unknown>(
     }
   }
 
-  const suffix = qs.toString() ? `?${qs}` : "";
+  return qs;
+}
 
-  return holdedFetch<T>(`/documents/${encodeURIComponent(docType)}${suffix}`);
+function extractArrayPayload<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+
+  if (payload && typeof payload === "object") {
+    const p = payload as Record<string, unknown>;
+
+    if (Array.isArray(p.items)) return p.items as T[];
+    if (Array.isArray(p.data)) return p.data as T[];
+    if (Array.isArray(p.results)) return p.results as T[];
+    if (Array.isArray(p.documents)) return p.documents as T[];
+  }
+
+  return [];
+}
+
+export async function holdedListDocuments<T = unknown>(
+  docType: string,
+  query?: Record<string, string | number | boolean | null | undefined>
+): Promise<T> {
+  const baseQuery = { ...(query ?? {}) };
+
+  const requestedLimitRaw = Number(baseQuery.limit ?? 0);
+  const requestedLimit =
+    Number.isFinite(requestedLimitRaw) && requestedLimitRaw > 0
+      ? Math.floor(requestedLimitRaw)
+      : null;
+
+  delete (baseQuery as any).page;
+  delete (baseQuery as any).offset;
+
+  const pageSize =
+    requestedLimit && requestedLimit < 100 ? requestedLimit : 100;
+
+  const maxPages = 50;
+  const all: unknown[] = [];
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const qs = buildSearchParams({
+      ...baseQuery,
+      limit: pageSize,
+      page,
+    });
+
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+
+    const payload = await holdedFetch<unknown>(
+      `/documents/${encodeURIComponent(docType)}${suffix}`
+    );
+
+    const rows = extractArrayPayload(payload);
+
+    if (rows.length === 0) {
+      break;
+    }
+
+    all.push(...rows);
+
+    if (rows.length < pageSize) {
+      break;
+    }
+
+    if (requestedLimit && all.length >= requestedLimit) {
+      break;
+    }
+  }
+
+  const finalRows =
+    requestedLimit && all.length > requestedLimit
+      ? all.slice(0, requestedLimit)
+      : all;
+
+  return finalRows as T;
 }
 
 export async function holdedDocumentDetail<T = unknown>(
@@ -143,14 +213,7 @@ export async function holdedContactDetail<T = HoldedContact>(
 export async function holdedListContacts<T = HoldedContact[]>(
   query?: Record<string, string | number | boolean | null | undefined>
 ): Promise<T> {
-  const qs = new URLSearchParams();
-
-  if (query) {
-    for (const [k, v] of Object.entries(query)) {
-      if (v !== null && v !== undefined) qs.set(k, String(v));
-    }
-  }
-
+  const qs = buildSearchParams(query);
   const suffix = qs.toString() ? `?${qs}` : "";
 
   return holdedFetch<T>(`/contacts${suffix}`);

@@ -1,0 +1,15 @@
+client_id,client_name,delegate_name,delegate_id,client_tax_id,old_holded_contact_id,final_holded_contact_id,final_holded_name,action,notes
+0e78040a-8442-4848-9cbe-5b63a0723c33,Anna MONTSALUT SL,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,69ab1033c8146555a10b6234,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+9f4ee41b-9698-49f1-9fbc-9073884436df,Blanca Galofre,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab10335a29f8d912073487,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+70ce2de8-c7b0-4573-98e4-2e8bc4dbe51a,Cliente,,,00000000T,,,,review_invalid_tax_id,Tax ID placeholder o inválido; no se usa para canonización automática
+6f3e214a-80c6-4857-ad0f-8d741756d1b8,Dra Montserrat Florit Juste,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab1033c841de6bcf097d0b,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+669cd64a-9a58-457f-8c77-88592f2c25dd,Dra Silvia Tutusaus,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab1034be5b5cf36e0f025a,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+54e4da83-40dc-4a2c-887e-a7d0e90d2a68,Dra Suni Peirè,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab103438b07e4c110e0a79,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+2ab973bc-2452-467a-b88b-5e1805911318,Gemma Morales,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab10345ddd12336b02285c,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+393648b4-a68a-40bb-a8c1-cd5f7bb88641,Jose Anselmo Serrano,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab1034283982e17102076e,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+af795e9b-e3d4-42bc-9967-574af090e8a9,Lidia Rodriguez Fdez,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab1035c35e569b92076586,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+f925862e-337a-442f-845e-6442c64df21e,Maria Trave,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab103586252b31db01ab82,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+d8f1fa78-91f6-4cd5-a357-bb5149944521,MCarme Pujadas Prims,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,69ab1035a71e8a61ba03fe4c,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+52f65a99-98a2-4b2a-85d7-9bbe2437cfd5,Melania Coronado Catellano,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,69ab10352c9762fc9b0372a0,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+060a9be8-2878-4cf1-ba02-a16d0da8dcab,Nuria Colome,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,69ab103660d02b56cf06f17b,,created_in_holded_and_linked,Creado en Holded y enlazado en clients.holded_contact_id
+e9dcb90a-599f-444a-986a-b7ffc1063f72,Pascual Martínez,,,00000000T,,,,review_invalid_tax_id,Tax ID placeholder o inválido; no se usa para canonización automática

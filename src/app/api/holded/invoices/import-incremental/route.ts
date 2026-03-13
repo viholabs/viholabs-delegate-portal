@@ -1,210 +1,276 @@
-// src/app/api/holded/invoices/import-incremental/route.ts
-/**
- * VIHOLABS — HOLDed Invoices Import (INCREMENTAL, STATEFUL)
- *
- * Canon:
- * - NO UI changes.
- * - Reuse invoice importer (holdedInvoiceImporter.ts) — NO duplication.
- * - Reuse holdedIncremental.ts fetchChangedIds({ docType, since, until }).
- * - Persist cursor in public.holded_sync_state (singleton row id=true):
- *   - last_cursor: ISO timestamp (until.toISOString())
- *   - last_sync_at: timestamptz (until)
- *   - updated_at: timestamptz (now)
- *
- * Cursor advance rule (safe):
- * - If failures > 0, DO NOT advance cursor (avoid skipping failed ids).
- * - If all ok, advance cursor to until.
- */
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { holdedFetch as holdedDocumentDetail, holdedFetchJson as holdedListDocuments } from "@/lib/holded/holdedFetch";
+import { runHoldedInvoicesIncrementalImport } from "@/lib/holded/holdedImportIncrementalRunner";
 
 export const runtime = "nodejs";
 
-import { NextResponse } from "next/server";
+type HoldedListItem = {
+  id?: string;
+  _id?: string;
+  docNumber?: string | null;
+  number?: string | null;
+  date?: number | string | null;
+  docType?: string | null;
+  documentType?: string | null;
+  type?: string | null;
+  status?: string | number | null;
+  draft?: boolean | null;
+  [key: string]: unknown;
+};
 
-import { tryAcquireLock, releaseLock } from "@/lib/infra/processLock";
-import { supabaseAdmin } from "@/lib/supabase/admin";
-
-import { importOneHoldedInvoiceById, type ImportError } from "@/lib/holded/holdedInvoiceImporter";
-import { fetchChangedIds } from "@/lib/holded/holdedIncremental";
-
-const IMPORT_LOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const LOCK_KEY = "holded_invoices_import_incremental";
-
-function json(status: number, body: unknown) {
-  return NextResponse.json(body, { status });
+function requireEnv(name: string): string {
+  const value = (process.env[name] ?? "").trim();
+  if (!value) {
+    throw new Error(`Missing env var: ${name}`);
+  }
+  return value;
 }
 
-function requireInternalBearer(req: Request) {
-  const expected = String(process.env.VIHOLABS_INTERNAL_BEARER ?? "").trim();
-  if (!expected) return { ok: false as const, status: 500, error: "Missing env: VIHOLABS_INTERNAL_BEARER" };
+function createSupabaseAdmin() {
+  const url = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const key = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
-  const h = req.headers.get("authorization") || req.headers.get("Authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  if (!m) return { ok: false as const, status: 401, error: "Missing Bearer token" };
-
-  const got = String(m[1] ?? "").trim();
-  if (got !== expected) return { ok: false as const, status: 403, error: "Forbidden" };
-
-  return { ok: true as const };
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
 }
 
-function parseLimit(v: string | null, fallback: number, max = 300): number {
-  const n = Number(v ?? "");
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.min(Math.floor(n), max);
-}
+function toYmd(raw: unknown): string | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    const ms = raw > 9999999999 ? raw : raw * 1000;
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  }
 
-function parseDateParam(v: string | null): Date | undefined {
-  if (!v) return undefined;
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return undefined;
-  return d;
-}
-
-function safeDateOrUndefined(v: unknown): Date | undefined {
-  if (!v) return undefined;
-  const d = new Date(String(v));
-  if (!Number.isFinite(d.getTime())) return undefined;
-  return d;
-}
-
-async function readHoldedSyncState(supabase: ReturnType<typeof supabaseAdmin>) {
-  const q = await supabase
-    .from("holded_sync_state")
-    .select("id,last_sync_at,last_cursor,updated_at")
-    .eq("id", true)
-    .maybeSingle();
-
-  if (q.error) return { ok: false as const, error: q.error.message };
-  return { ok: true as const, row: q.data };
-}
-
-async function writeHoldedSyncState(
-  supabase: ReturnType<typeof supabaseAdmin>,
-  args: { cursorISO: string; syncAtISO: string }
-) {
-  const upd = await supabase
-    .from("holded_sync_state")
-    .update({
-      last_cursor: args.cursorISO,
-      last_sync_at: args.syncAtISO,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", true);
-
-  if (upd.error) return { ok: false as const, error: upd.error.message };
-  return { ok: true as const };
-}
-
-export async function GET(req: Request) {
-  const auth = requireInternalBearer(req);
-  if (!auth.ok) return json(auth.status, { ok: false, error: auth.error });
-
-  const acquired = tryAcquireLock(IMPORT_LOCK_TTL_MS, LOCK_KEY);
-  if (!acquired) return json(409, { ok: false, stage: "busy", error: "Busy (import already running)" });
-
-  const startedAt = new Date().toISOString();
-
-  try {
-    const url = new URL(req.url);
-    const limit = parseLimit(url.searchParams.get("limit"), 50, 300);
-
-    // Optional overrides for debugging / replay.
-    const sinceOverride = parseDateParam(url.searchParams.get("since"));
-    const untilOverride = parseDateParam(url.searchParams.get("until"));
-
-    const supabase = supabaseAdmin();
-
-    // Read cursor from DB (singleton row id=true)
-    const stateRes = await readHoldedSyncState(supabase);
-    if (!stateRes.ok) return json(500, { ok: false, stage: "read_sync_state", error: stateRes.error });
-
-    const state = stateRes.row ?? null;
-    const cursorDate = safeDateOrUndefined(state?.last_cursor);
-
-    const until = untilOverride ?? new Date();
-    const fallbackSince = new Date(until.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const since = sinceOverride ?? cursorDate ?? fallbackSince;
-
-    const idsAll = await fetchChangedIds({
-      docType: "invoice",
-      since,
-      until,
-    });
-
-    const invoiceIds = idsAll.slice(0, limit);
-
-    let imported = 0;
-    const failures: Array<ImportError & { holded_id: string }> = [];
-    const skipped: Array<{ holded_id: string; reason: string }> = [];
-
-    for (const holdedId of invoiceIds) {
-      const r = await importOneHoldedInvoiceById(supabase, holdedId);
-      if (r.ok) {
-        imported += 1;
-        continue;
-      }
-
-      const msg = String(r?.err?.error ?? "").toLowerCase();
-
-      // Canonical deterministic skip: HOLDed returns docs with empty/null docNumber (number),
-      // which cannot be imported into local truth because invoice_number is required.
-      if (msg.includes("missing invoice_number")) {
-        skipped.push({ holded_id: holdedId, reason: "missing_invoice_number" });
-        continue;
-      }
-
-      failures.push({ ...r.err, holded_id: holdedId });
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number(raw);
+    if (Number.isFinite(n)) {
+      return toYmd(n);
     }
 
-    // Advance cursor only if fully OK.
-    let cursorAdvanced = false;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  }
 
-    if (failures.length === 0) {
-      const w = await writeHoldedSyncState(supabase, {
-        cursorISO: until.toISOString(),
-        syncAtISO: until.toISOString(),
-      });
-      if (!w.ok) {
-        return json(500, {
+  return null;
+}
+
+function inferDocType(item: HoldedListItem): "invoice" | "creditnote" {
+  const rawCandidates = [
+    item.docType,
+    item.documentType,
+    item.type,
+    item.status,
+  ];
+
+  for (const raw of rawCandidates) {
+    if (typeof raw !== "string") continue;
+    const normalized = raw.trim().toLowerCase();
+
+    if (
+      normalized.includes("credit") ||
+      normalized.includes("refund") ||
+      normalized.includes("abon") ||
+      normalized.includes("rectific")
+    ) {
+      return "creditnote";
+    }
+
+    if (normalized.includes("invoice") || normalized.includes("fact")) {
+      return "invoice";
+    }
+  }
+
+  const numberCandidate =
+    (typeof item.docNumber === "string" && item.docNumber.trim()) ||
+    (typeof item.number === "string" && item.number.trim()) ||
+    "";
+
+  if (numberCandidate.toUpperCase().startsWith("CN")) {
+    return "creditnote";
+  }
+
+  return "invoice";
+}
+
+function getExternalId(item: HoldedListItem): string {
+  const id =
+    (typeof item.id === "string" && item.id.trim()) ||
+    (typeof item._id === "string" && item._id.trim()) ||
+    "";
+
+  return id;
+}
+
+function getInvoiceNumberCandidate(item: HoldedListItem): string | null {
+  if (typeof item.docNumber === "string" && item.docNumber.trim()) {
+    return item.docNumber.trim();
+  }
+
+  if (typeof item.number === "string" && item.number.trim()) {
+    return item.number.trim();
+  }
+
+  return null;
+}
+
+function isInsideMonth(item: HoldedListItem, month: string): boolean {
+  const ymd = toYmd(item.date);
+  if (!ymd) return false;
+  return ymd.startsWith(`${month}-`);
+}
+
+function parseLimit(value: string | null, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function sortByDateAscAndNumber(a: HoldedListItem, b: HoldedListItem): number {
+  const da = toYmd(a.date) ?? "";
+  const db = toYmd(b.date) ?? "";
+
+  if (da < db) return -1;
+  if (da > db) return 1;
+
+  const na = getInvoiceNumberCandidate(a) ?? "";
+  const nb = getInvoiceNumberCandidate(b) ?? "";
+
+  return na.localeCompare(nb, "es");
+}
+
+export async function POST(req: NextRequest): Promise<Response> {
+  try {
+    const body = (await req.json().catch(() => ({}))) as {
+      month?: string;
+      limit?: number;
+      preview?: boolean;
+    };
+
+    const url = new URL(req.url);
+    const month =
+      String(body.month ?? url.searchParams.get("month") ?? "").trim() || null;
+
+    if (!month) {
+      return NextResponse.json(
+        {
           ok: false,
-          stage: "write_sync_state",
-          error: w.error,
-          imported,
-          failed: failures.length,
-          failures,
+          error: "month is required",
+        },
+        { status: 400 }
+      );
+    }
+
+    const limit =
+      typeof body.limit === "number"
+        ? body.limit
+        : parseLimit(url.searchParams.get("limit"), 5000);
+
+    const preview =
+      typeof body.preview === "boolean"
+        ? body.preview
+        : (url.searchParams.get("preview") ?? "false").toLowerCase() === "true";
+
+    const supabase = createSupabaseAdmin();
+
+    const invoicesRaw = await holdedListDocuments("invoice");
+    const creditNotesRaw = await holdedListDocuments("creditnote");
+
+    const invoices = Array.isArray(invoicesRaw)
+      ? (invoicesRaw as HoldedListItem[])
+      : [];
+    const creditNotes = Array.isArray(creditNotesRaw)
+      ? (creditNotesRaw as HoldedListItem[])
+      : [];
+
+    const allDocs = [...invoices, ...creditNotes]
+      .filter((item) => isInsideMonth(item, month))
+      .sort(sortByDateAscAndNumber)
+      .slice(0, limit);
+
+    const docsToImport: Array<{
+      summary: Record<string, unknown>;
+      detail: Record<string, unknown>;
+    }> = [];
+
+    const preloadFailures: Array<Record<string, unknown>> = [];
+
+    for (const item of allDocs) {
+      const holdedId = getExternalId(item);
+      const invoiceNumberCandidate = getInvoiceNumberCandidate(item);
+      const docType = inferDocType(item);
+
+      if (!holdedId) {
+        preloadFailures.push({
+          code: "missing_external_invoice_id",
+          message: "Holded list item without id/_id",
+          holded_id: null,
+          invoice_number_candidate: invoiceNumberCandidate,
+          doc_type: docType,
+          list_date: toYmd(item.date),
+        });
+        continue;
+      }
+
+      try {
+        const detail = await (holdedDocumentDetail as any)(docType, holdedId);
+
+        docsToImport.push({
+          summary: item as Record<string, unknown>,
+          detail: (detail ?? {}) as Record<string, unknown>,
+        });
+      } catch (error) {
+        preloadFailures.push({
+          code: "detail_fetch_failed",
+          message: error instanceof Error ? error.message : "Unknown detail fetch error",
+          holded_id: holdedId,
+          invoice_number_candidate: invoiceNumberCandidate,
+          doc_type: docType,
+          list_date: toYmd(item.date),
         });
       }
-      cursorAdvanced = true;
     }
 
-    const finishedAt = new Date().toISOString();
-
-    return json(200, {
-      ok: true,
-      mode: "incremental_stateful",
-      limit,
-      total_ids: invoiceIds.length,
-      imported,
-      skipped: skipped.length,
-      skipped_ids: skipped,
-      failed: failures.length,
-      failures,
-      cursor: {
-        source: sinceOverride ? "override" : cursorDate ? "db" : "fallback_30d",
-        prev_db_cursor: state?.last_cursor ?? null,
-        since: since.toISOString(),
-        until: until.toISOString(),
-        advanced: cursorAdvanced,
-      },
-      at: { started: startedAt, finished: finishedAt },
+    const batchResult = await runHoldedInvoicesIncrementalImport({
+      supabase,
+      docs: docsToImport,
+      preview,
+      logger: console,
     });
-  } catch (e: any) {
-    return json(500, { ok: false, error: String(e?.message ?? e) });
-  } finally {
-    releaseLock(LOCK_KEY);
-  }
-}
 
-export async function POST(req: Request) {
-  return GET(req);
+    return NextResponse.json({
+      ok: true,
+      month,
+      preview,
+      total_seen: allDocs.length,
+      docs_preloaded: docsToImport.length,
+      preload_failures_count: preloadFailures.length,
+      accepted_count: Array.isArray(batchResult?.accepted) ? batchResult.accepted.length : 0,
+      skipped_count: Array.isArray(batchResult?.skipped) ? batchResult.skipped.length : 0,
+      inserted_invoices: Number(batchResult?.insertedInvoices ?? 0),
+      inserted_items: Number(batchResult?.insertedItems ?? 0),
+      existing_invoices: Number(batchResult?.existingInvoices ?? 0),
+      updated_states: Number(batchResult?.updatedStates ?? 0),
+      accepted: batchResult?.accepted ?? [],
+      skipped: batchResult?.skipped ?? [],
+      preload_failures: preloadFailures,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown import incremental error";
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: message,
+      },
+      { status: 500 }
+    );
+  }
 }

@@ -3,91 +3,101 @@
 import { useEffect, useState } from "react";
 
 export type CommunityProfile = {
+  id: string | null;
+  user_id: string | null;
+  actor_id: string | null;
+  actorId: string | null;
+  effective_actor_id: string | null;
+  profile_id: string | null;
+  role: string | null;
   profile_type: string | null;
-  department: string | null;
-  job_title: string | null;
+  is_melquisedec: boolean;
 };
 
-async function safeReadJson(res: Response): Promise<any> {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
+type CommunityProfileResponse =
+  | {
+      ok: true;
+      profile: CommunityProfile;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
 
-function getSupabasePublicEnv() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) return null;
-  return { url, anon };
-}
-
-/**
- * Best-effort: if session is stored client-side (localStorage), obtain access_token and send Bearer.
- * If not available, we still call the endpoint without headers (cookie SSR path).
- */
-async function tryGetAccessToken(): Promise<string> {
-  try {
-    const env = getSupabasePublicEnv();
-    if (!env) return "";
-
-    const mod = await import("@supabase/supabase-js");
-    const supabase = mod.createClient(env.url, env.anon, {
-      auth: { persistSession: true, autoRefreshToken: true },
-    });
-
-    const { data } = await supabase.auth.getSession();
-    return data?.session?.access_token || "";
-  } catch {
-    return "";
-  }
-}
+const EMPTY_PROFILE: CommunityProfile = {
+  id: null,
+  user_id: null,
+  actor_id: null,
+  actorId: null,
+  effective_actor_id: null,
+  profile_id: null,
+  role: null,
+  profile_type: null,
+  is_melquisedec: false,
+};
 
 export function useCommunityProfile() {
+  const [profile, setProfile] = useState<CommunityProfile>(EMPTY_PROFILE);
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<CommunityProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function run() {
+    async function load() {
       setLoading(true);
-      try {
-        const token = await tryGetAccessToken();
+      setError(null);
 
+      try {
         const res = await fetch("/api/community/profile", {
           method: "GET",
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          // Canon: avoid browser caching stale identity
           cache: "no-store",
         });
 
-        const data = await safeReadJson(res);
-        if (!res.ok || !data?.ok) throw new Error("profile_load_failed");
+        const json = (await res.json().catch(() => null)) as
+          | CommunityProfileResponse
+          | null;
 
-        const p = data.profile || {};
-        const next: CommunityProfile = {
-          profile_type: typeof p.profile_type === "string" ? p.profile_type : null,
-          department: typeof p.department === "string" ? p.department : null,
-          job_title: typeof p.job_title === "string" ? p.job_title : null,
-        };
+        if (!res.ok || !json || !json.ok) {
+          throw new Error(
+            !json || json.ok
+              ? `HTTP ${res.status}`
+              : json.error || "No se pudo cargar el perfil"
+          );
+        }
 
-        if (!cancelled) setProfile(next);
-      } catch {
-        if (!cancelled) setProfile(null);
+        if (!cancelled) {
+          setProfile({
+            ...EMPTY_PROFILE,
+            ...json.profile,
+            is_melquisedec: Boolean(json.profile.is_melquisedec),
+          });
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setProfile(EMPTY_PROFILE);
+          setError(e instanceof Error ? e.message : "Error desconocido");
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
-    void run();
+    load();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  return { loading, profile };
+  return {
+    profile,
+    loading,
+    error,
+    isMelquisedec: Boolean(profile.is_melquisedec),
+  };
 }
+
+export default useCommunityProfile;

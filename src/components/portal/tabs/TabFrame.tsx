@@ -2,56 +2,49 @@
 
 import type { ReactNode } from "react";
 
-/**
- * VIHOLABS — TAB FRAME (CANÓNICO)
- * Ley estructural:
- * - EXACTAMENTE 1 zona dominante
- * - 0–3 zonas secundarias
- * - Zona residual extremadamente ligera
- *
- * Este componente NO define estética.
- * Solo jerarquía cognitiva y geometría perceptiva.
- */
+type TabSlotProps = {
+  children: ReactNode;
+};
 
-export function TabFrame({ children }: { children: ReactNode }) {
-  return (
-    <div className="w-full">
-      <div className="mx-auto w-full max-w-[1400px] space-y-10">
-        {children}
-      </div>
-    </div>
-  );
+type TabFrameComponent = ((props: TabSlotProps) => ReactNode) & {
+  Dominant?: typeof TabDominant;
+  Secondary?: typeof TabSecondary;
+  Residual?: typeof TabResidual;
+};
+
+function sectionClassName(extra?: string) {
+  return [
+    "w-full min-w-0",
+    "rounded-[28px]",
+    "border border-[#D6C28A]",
+    "bg-[#FBF6EC]",
+    "p-0",
+    "shadow-none",
+    extra ?? "",
+  ]
+    .join(" ")
+    .trim();
 }
 
-/**
- * ZONA DOMINANTE — Centro de gravedad visual
- */
-export function TabDominant({ children }: { children: ReactNode }) {
-  return (
-    <section className="space-y-3">
-      {children}
-    </section>
-  );
+export function TabFrame({ children }: TabSlotProps) {
+  return <div className="flex w-full min-w-0 flex-col gap-6">{children}</div>;
 }
 
-/**
- * ZONA SECUNDARIA — Complemento cognitivo
- */
-export function TabSecondary({ children }: { children: ReactNode }) {
-  return (
-    <section className="space-y-6">
-      {children}
-    </section>
-  );
+export function TabDominant({ children }: TabSlotProps) {
+  return <section className={sectionClassName()}>{children}</section>;
 }
 
-/**
- * ZONA RESIDUAL — Eventos raros / débiles
- */
-export function TabResidual({ children }: { children: ReactNode }) {
-  return (
-    <section className="opacity-80 space-y-4">
-      {children}
-    </section>
-  );
+export function TabSecondary({ children }: TabSlotProps) {
+  return <section className={sectionClassName()}>{children}</section>;
 }
+
+export function TabResidual({ children }: TabSlotProps) {
+  return <section className={sectionClassName()}>{children}</section>;
+}
+
+const TabFrameNamespace = TabFrame as TabFrameComponent;
+TabFrameNamespace.Dominant = TabDominant;
+TabFrameNamespace.Secondary = TabSecondary;
+TabFrameNamespace.Residual = TabResidual;
+
+export default TabFrameNamespace;

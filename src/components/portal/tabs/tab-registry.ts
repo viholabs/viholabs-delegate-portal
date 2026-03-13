@@ -1,63 +1,114 @@
-/**
- * VIHOLABS — TAB REGISTRY (CANÓNICO V1)
- *
- * Reglas:
- * - tab_code = identidad estable (NO cambiar)
- * - label = texto visible
- * - href = navegación (single screen /control-room/shell?tab=...)
- */
+// src/components/portal/tabs/tab-registry.ts
 
-export type TabCode =
+export type CanonicalTabCode =
   | "situation"
-  | "evolution"
-  | "objectives"
-  | "commissions"
-  | "alerts"
-  | "communications"
-  | "clinical_criteria"
-  | "tech_block"
-  | "consultas"
-  | "casos"
-  | "recursos"
-  | "delegados"
-  | "clientes"
+  | "clients"
+  | "billing"
+  | "resources"
+  | "el_elyon";
+
+export type LegacyTabCode =
+  | "situation"
+  | "clients"
+  | "billing"
+  | "resources"
+  | "el_elyon"
   | "orders"
-  | "knowledge"
-  | "obexperience"
-  | "el_elyon"; // ✅ NUEVO SOBERANO
+  | "orders.new"
+  | "tech_block";
 
 export type TabDefinition = {
-  tab_code: TabCode;
+  tab_code: CanonicalTabCode;
   label: string;
   href: string;
+  melquisedecOnly?: boolean;
 };
 
-function shellHref(tab: TabCode) {
+function shellHref(tab: CanonicalTabCode): string {
   return `/control-room/shell?tab=${encodeURIComponent(tab)}`;
 }
 
 export const TAB_REGISTRY: TabDefinition[] = [
-  { tab_code: "situation", label: "Situation", href: shellHref("situation") },
-  { tab_code: "evolution", label: "Evolución", href: shellHref("evolution") },
-  { tab_code: "objectives", label: "Objetivos", href: shellHref("objectives") },
-  { tab_code: "commissions", label: "Comisiones", href: shellHref("commissions") },
-  { tab_code: "alerts", label: "Alertas", href: shellHref("alerts") },
-  { tab_code: "communications", label: "Comunicaciones", href: shellHref("communications") },
-
-  { tab_code: "clinical_criteria", label: "Criterio Clínico", href: shellHref("clinical_criteria") },
-  { tab_code: "tech_block", label: "Bloc Técnico", href: shellHref("tech_block") },
-
-  { tab_code: "consultas", label: "Consultas", href: shellHref("consultas") },
-  { tab_code: "casos", label: "Casos", href: shellHref("casos") },
-  { tab_code: "recursos", label: "Recursos", href: shellHref("recursos") },
-
-  { tab_code: "delegados", label: "Delegados", href: shellHref("delegados") },
-  { tab_code: "clientes", label: "Clientes", href: shellHref("clientes") },
-  { tab_code: "orders", label: "Pedidos", href: shellHref("orders") },
-
-  { tab_code: "knowledge", label: "Akademia", href: shellHref("knowledge") },
-  { tab_code: "obexperience", label: "Obexperience", href: shellHref("obexperience") },
-
-  // ✅ NUEVO — SOLO MELQUISEDEC
-  { tab_code: "el_elyon", label: "El-Elyon", href: shellHref("el_elyon") },
+  {
+    tab_code: "situation",
+    label: "Situation",
+    href: shellHref("situation"),
+  },
+  {
+    tab_code: "clients",
+    label: "Clients",
+    href: shellHref("clients"),
+  },
+  {
+    tab_code: "billing",
+    label: "Facturación",
+    href: shellHref("billing"),
+  },
+  {
+    tab_code: "resources",
+    label: "Recursos",
+    href: shellHref("resources"),
+  },
+  {
+    tab_code: "el_elyon",
+    label: "El-Elyon",
+    href: shellHref("el_elyon"),
+    melquisedecOnly: true,
+  },
 ];
+
+export function normalizeTabCode(
+  raw: string | null | undefined,
+): CanonicalTabCode {
+  const value = String(raw ?? "").trim().toLowerCase();
+
+  switch (value) {
+    case "situation":
+      return "situation";
+
+    case "clients":
+    case "clientes":
+    case "delegados":
+      return "clients";
+
+    case "billing":
+    case "orders":
+    case "orders.new":
+    case "commissions":
+      return "billing";
+
+    case "resources":
+    case "recursos":
+    case "tech_block":
+    case "knowledge":
+    case "obexperience":
+    case "communications":
+    case "alerts":
+    case "clinical_criteria":
+    case "consultas":
+    case "casos":
+    case "evolution":
+    case "objectives":
+      return "resources";
+
+    case "el_elyon":
+      return "el_elyon";
+
+    default:
+      return "situation";
+  }
+}
+
+export function getCanonicalTabs(params?: {
+  isMelquisedec?: boolean;
+}): TabDefinition[] {
+  const isMelquisedec = params?.isMelquisedec === true;
+
+  return TAB_REGISTRY.filter((tab) => {
+    if (tab.melquisedecOnly && !isMelquisedec) {
+      return false;
+    }
+
+    return true;
+  });
+}

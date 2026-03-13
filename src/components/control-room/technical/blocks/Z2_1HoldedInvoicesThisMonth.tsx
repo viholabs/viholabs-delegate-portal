@@ -1,13 +1,16 @@
 "use client";
 
 /**
- * VIHOLABS — Z2.1 HOLDed (LOCAL TRUTH)
- * - Reads from /api/holded/imported (DB truth)
+ * VIHOLABS — Z2.1 HOLDed (LOCAL TRUTH + LAST SYNC EVIDENCE)
+ * - Reads from /api/holded/imported
  * - No Holded API calls
  * - SUPER_ADMIN via Bearer token
  */
 
 import { useEffect, useMemo, useState } from "react";
+
+type DocType = "invoice" | "creditnote";
+type RowStatus = "IMPORTED" | "SKIPPED";
 
 type Row = {
   invoice_id: string | null;
@@ -16,6 +19,9 @@ type Row = {
   invoice_date: string | null;
   invoice_month: string | null; // YYYY-MM
   imported_at: string | null;
+  doc_type: DocType;
+  row_status: RowStatus;
+  skip_reason: string | null;
 };
 
 function currentMonthKeyUTC(): string {
@@ -51,11 +57,31 @@ export default function Z2_1HoldedInvoicesThisMonth() {
     load();
     const id = setInterval(load, 15000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const countThisMonth = useMemo(() => {
-    return rows.filter((r) => r.invoice_month === month).length;
+  const stats = useMemo(() => {
+    const monthRows = rows.filter((r) => r.invoice_month === month);
+
+    let invoices = 0;
+    let creditnotes = 0;
+    let imported = 0;
+    let skipped = 0;
+
+    for (const r of monthRows) {
+      if (r.doc_type === "creditnote") creditnotes++;
+      else invoices++;
+
+      if (r.row_status === "IMPORTED") imported++;
+      else skipped++;
+    }
+
+    return {
+      total: monthRows.length,
+      invoices,
+      creditnotes,
+      imported,
+      skipped,
+    };
   }, [rows, month]);
 
   const status: "OK" | "DEGRADAT" = error ? "DEGRADAT" : "OK";
@@ -67,7 +93,7 @@ export default function Z2_1HoldedInvoicesThisMonth() {
     >
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs font-semibold" style={{ color: "var(--viho-muted)" }}>
-          Holded (Z2.1) · Factures del mes en curs
+          Holded (Z2.1) · Documents del mes en curs
         </div>
 
         <div className="text-xs font-semibold">
@@ -86,7 +112,15 @@ export default function Z2_1HoldedInvoicesThisMonth() {
         </div>
       </div>
 
-      <div className="mt-2 text-4xl font-semibold">{countThisMonth}</div>
+      <div className="mt-2 text-4xl font-semibold">{stats.total}</div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2 text-xs" style={{ color: "var(--viho-muted)" }}>
+        <div>Factures: <span className="font-semibold">{stats.invoices}</span></div>
+        <div>CN: <span className="font-semibold">{stats.creditnotes}</span></div>
+        <div>Importades: <span className="font-semibold">{stats.imported}</span></div>
+        <div>Skipped: <span className="font-semibold">{stats.skipped}</span></div>
+      </div>
+
       <div className="mt-1 text-xs" style={{ color: "var(--viho-muted)" }}>
         Mes: <span className="font-semibold">{month}</span>
       </div>

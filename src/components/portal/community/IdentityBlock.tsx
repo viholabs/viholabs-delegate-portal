@@ -1,128 +1,49 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type SVGProps } from "react";
 import RobotAvatarSvg from "./RobotAvatarSvg";
 
-/* --- ICONOS NATIVOS (Inline para evitar dependencias) --- */
-
-function IconLoader(props: React.SVGProps<SVGSVGElement>) {
+function IconLoader(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
     </svg>
   );
 }
 
-function IconCamera(props: React.SVGProps<SVGSVGElement>) {
+function IconCamera(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
       <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
       <circle cx="12" cy="13" r="3" />
     </svg>
   );
 }
 
-function IconEdit(props: React.SVGProps<SVGSVGElement>) {
+function IconCopy(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-    </svg>
-  );
-}
-
-function IconCopy(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
+      <rect width="14" height="14" x="8" y="8" rx="2" />
       <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
     </svg>
   );
 }
 
-function IconCheck(props: React.SVGProps<SVGSVGElement>) {
+function IconCheck(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
 }
 
-function IconLock(props: React.SVGProps<SVGSVGElement>) {
+function IconSpark(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M12 2l1.35 4.65L18 8l-4.65 1.35L12 14l-1.35-4.65L6 8l4.65-1.35z" />
     </svg>
   );
 }
-
-/* --- TYPES & UTILS --- */
 
 type Lang = "ca" | "es" | "en" | "fr";
 
@@ -134,7 +55,7 @@ type Profile = {
   effective_name: string | null;
   company: string | null;
   profile_type: string | null;
-  typology: string | null; // (present en dades, però NO es mostra en UI)
+  typology: string | null;
   consent_image_policy: boolean;
   avatar_url: string | null;
   department: string | null;
@@ -151,7 +72,6 @@ type I18n = {
   consent_required: string;
   copy: string;
   saving: string;
-  error: string;
   placeholder_aka: string;
   activate_upload: string;
   aka_hint: string;
@@ -168,7 +88,8 @@ function normalizeLang(raw: unknown): Lang | null {
 }
 
 function resolvePortalLangFallback(): Lang {
-  const htmlLang = typeof document !== "undefined" ? document.documentElement?.lang : "";
+  const htmlLang =
+    typeof document !== "undefined" ? document.documentElement?.lang : "";
   return normalizeLang(htmlLang) || "es";
 }
 
@@ -202,8 +123,19 @@ function fmtDate(dIso: string | null | undefined, lang: Lang): string {
   if (!s) return "—";
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return "—";
-  const loc = lang === "ca" ? "ca-ES" : lang === "es" ? "es-ES" : lang === "fr" ? "fr-FR" : "en-GB";
-  return d.toLocaleDateString(loc, { year: "numeric", month: "2-digit", day: "2-digit" });
+  const loc =
+    lang === "ca"
+      ? "ca-ES"
+      : lang === "es"
+        ? "es-ES"
+        : lang === "fr"
+          ? "fr-FR"
+          : "en-GB";
+  return d.toLocaleDateString(loc, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 }
 
 function tenureCompact(joinedAtIso: string | null | undefined, lang: Lang): string {
@@ -213,21 +145,24 @@ function tenureCompact(joinedAtIso: string | null | undefined, lang: Lang): stri
   if (Number.isNaN(d0.getTime())) return "—";
   const now = new Date();
 
-  let months = (now.getFullYear() - d0.getFullYear()) * 12 + (now.getMonth() - d0.getMonth());
+  let months =
+    (now.getFullYear() - d0.getFullYear()) * 12 +
+    (now.getMonth() - d0.getMonth());
   if (now.getDate() < d0.getDate()) months -= 1;
   if (months < 0) months = 0;
 
   const years = Math.floor(months / 12);
   const rem = months % 12;
 
-  const yLabel = lang === "ca" || lang === "es" ? "a" : "y";
-  const mLabel = "m";
-
   if (years <= 0) {
     if (lang === "fr") return `${months} mois`;
     if (lang === "es" || lang === "ca") return `${months} meses`;
     return `${months} months`;
   }
+
+  const yLabel = lang === "ca" || lang === "es" ? "a" : "y";
+  const mLabel = "m";
+
   if (rem <= 0) return `${years}${yLabel}`;
   return `${years}${yLabel} ${rem}${mLabel}`;
 }
@@ -237,12 +172,11 @@ const I18N: Record<Lang, I18n> = {
     g: { morning: "Bon dia", afternoon: "Bona tarda", night: "Bona nit" },
     joined: "ALTA",
     tenure: "ANTIGUITAT",
-    id_label: "ID:",
+    id_label: "Viholabs ID",
     upload_tooltip: "Canviar foto",
     consent_required: "Sense accés",
     copy: "Copiat",
     saving: "Guardant...",
-    error: "Error",
     placeholder_aka: "Com et diem?",
     activate_upload: "Habilitar foto",
     aka_hint: "Clic per canviar com et diem",
@@ -251,12 +185,11 @@ const I18N: Record<Lang, I18n> = {
     g: { morning: "Buenos días", afternoon: "Buenas tardes", night: "Buenas noches" },
     joined: "ALTA",
     tenure: "ANTIGÜEDAD",
-    id_label: "ID:",
+    id_label: "Viholabs ID",
     upload_tooltip: "Cambiar foto",
     consent_required: "Sin acceso",
     copy: "Copiado",
     saving: "Guardando...",
-    error: "Error",
     placeholder_aka: "¿Cómo te llamamos?",
     activate_upload: "Habilitar foto",
     aka_hint: "Clic para cambiar cómo te llamamos",
@@ -265,12 +198,11 @@ const I18N: Record<Lang, I18n> = {
     g: { morning: "Good morning", afternoon: "Good afternoon", night: "Good evening" },
     joined: "JOINED",
     tenure: "TENURE",
-    id_label: "ID:",
+    id_label: "Viholabs ID",
     upload_tooltip: "Change photo",
     consent_required: "No access",
     copy: "Copied",
     saving: "Saving...",
-    error: "Error",
     placeholder_aka: "Your preferred name?",
     activate_upload: "Enable photo",
     aka_hint: "Click to change your preferred name",
@@ -279,12 +211,11 @@ const I18N: Record<Lang, I18n> = {
     g: { morning: "Bonjour", afternoon: "Bon après-midi", night: "Bonsoir" },
     joined: "ENTRÉE",
     tenure: "ANCIENNETÉ",
-    id_label: "ID:",
+    id_label: "Viholabs ID",
     upload_tooltip: "Changer photo",
     consent_required: "Pas d'accès",
     copy: "Copié",
     saving: "Enregistrement...",
-    error: "Erreur",
     placeholder_aka: "Votre prénom ?",
     activate_upload: "Activer photo",
     aka_hint: "Cliquez pour modifier votre surnom",
@@ -313,20 +244,21 @@ export default function IdentityBlock() {
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       setLoading(true);
       try {
         const res = await fetch("/api/community/profile", {
-  method: "GET",
-  cache: "no-store",
-});
+          method: "GET",
+          cache: "no-store",
+        });
 
-const data = await safeReadJson(res);
+        const data = await safeReadJson(res);
 
-if (!res.ok || !data?.ok) {
-  if (!cancelled) setProfile(null);
-  return;
-}
+        if (!res.ok || !data?.ok) {
+          if (!cancelled) setProfile(null);
+          return;
+        }
 
         const p = data.profile || {};
         if (cancelled) return;
@@ -348,7 +280,13 @@ if (!res.ok || !data?.ok) {
         };
 
         setProfile(nextProfile);
-        setAkaDraft(firstNonEmpty(nextProfile.aka, nextProfile.display_name, nextProfile.effective_name));
+        setAkaDraft(
+          firstNonEmpty(
+            nextProfile.aka,
+            nextProfile.display_name,
+            nextProfile.effective_name,
+          ),
+        );
         setImgError(false);
       } catch (e) {
         console.error(e);
@@ -356,7 +294,9 @@ if (!res.ok || !data?.ok) {
         if (!cancelled) setLoading(false);
       }
     }
+
     void load();
+
     return () => {
       cancelled = true;
     };
@@ -365,14 +305,18 @@ if (!res.ok || !data?.ok) {
   useEffect(() => {
     if (isEditingName && nameInputRef.current) {
       nameInputRef.current.focus();
+      nameInputRef.current.select();
     }
   }, [isEditingName]);
 
   async function saveAka() {
     if (!profile) return;
+
     const finalVal = akaDraft.trim();
     if (!finalVal) {
-      setAkaDraft(firstNonEmpty(profile.aka, profile.display_name, profile.effective_name));
+      setAkaDraft(
+        firstNonEmpty(profile.aka, profile.display_name, profile.effective_name),
+      );
       setIsEditingName(false);
       return;
     }
@@ -384,7 +328,9 @@ if (!res.ok || !data?.ok) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ aka: finalVal }),
       });
+
       const data = await safeReadJson(res);
+
       if (data?.ok) {
         const p = data.profile;
         setProfile((prev) => (prev ? { ...prev, aka: p.aka } : null));
@@ -393,19 +339,29 @@ if (!res.ok || !data?.ok) {
       console.error(e);
     } finally {
       setSaving(false);
+      setIsEditingName(false);
     }
   }
 
   async function uploadPhoto(file: File) {
     if (!profile?.consent_image_policy) return;
+
     setUploading(true);
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch("/api/community/avatar", { method: "POST", body: form });
+
+      const res = await fetch("/api/community/avatar", {
+        method: "POST",
+        body: form,
+      });
+
       const data = await safeReadJson(res);
+
       if (data?.ok && data.avatar_url) {
-        setProfile((prev) => (prev ? { ...prev, avatar_url: data.avatar_url } : null));
+        setProfile((prev) =>
+          prev ? { ...prev, avatar_url: data.avatar_url } : null,
+        );
         setImgError(false);
       }
     } catch (e) {
@@ -418,26 +374,50 @@ if (!res.ok || !data?.ok) {
 
   async function copyId() {
     if (!profile?.viholabs_id) return;
+
     try {
       await navigator.clipboard.writeText(profile.viholabs_id);
       setJustCopied(true);
-      setTimeout(() => setJustCopied(false), 2000);
+      setTimeout(() => setJustCopied(false), 1600);
     } catch {}
+  }
+
+  async function savePatch(patch: Record<string, any>) {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/community/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+
+      if (!res.ok) throw new Error("Save failed");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (loading) {
     return (
-      <div className="w-full h-48 flex items-center justify-center opacity-50">
-        <IconLoader className="w-5 h-5 animate-spin" />
+      <div className="flex h-24 w-full items-center justify-center opacity-50">
+        <IconLoader className="h-5 w-5 animate-spin" />
       </div>
     );
   }
+
   if (!profile) return null;
 
-  const hasAvatar = Boolean(profile.avatar_url && profile.avatar_url.length > 10) && !imgError;
+  const hasAvatar =
+    Boolean(profile.avatar_url && profile.avatar_url.length > 10) && !imgError;
   const canUpload = profile.consent_image_policy;
 
-  const officialName = firstNonEmpty(profile.display_name, profile.effective_name);
+  const officialName = firstNonEmpty(
+    profile.display_name,
+    profile.effective_name,
+    akaDraft,
+  );
   const company = profile.company;
   const jobTitle = profile.job_title;
 
@@ -446,7 +426,7 @@ if (!res.ok || !data?.ok) {
   const greetingTime = t.g[timeKey()];
 
   return (
-    <div className="relative w-full mb-6">
+    <section className="w-full px-0 py-0">
       <input
         ref={fileRef}
         type="file"
@@ -458,195 +438,181 @@ if (!res.ok || !data?.ok) {
         }}
       />
 
-          <div className="mb-3">
-            <div className="mt-2 leading-tight">
-          <span className="text-[18px] font-semibold" style={{ color: "var(--viho-primary)" }}>
+      <div className="min-w-0">
+        <div className="mb-3 flex items-center gap-2">
+          <IconSpark className="h-3.5 w-3.5 shrink-0 text-[#F26A21]" />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#7A5A45]">
+            IDENTIDAD
+          </span>
+          <div className="h-px flex-1 bg-[#D6C28A]" />
+        </div>
+
+        <div className="mb-4 min-w-0 leading-tight">
+          <span className="text-[15px] font-semibold text-[#5A2E3A] sm:text-[16px]">
             {greetingTime},{" "}
           </span>
 
-          <span className="group relative inline-block">
-            {!isEditingName ? (
-              <button
-                type="button"
-                onClick={() => setIsEditingName(true)}
-                className="text-[18px] font-bold text-left hover:text-[var(--viho-primary)] transition-colors relative"
-                style={{ color: "var(--viho-gold, var(--viho-text))" }}
-                title={t.aka_hint}
-              >
-                {akaDraft}
-                <span className="ml-2 inline-flex align-middle opacity-0 group-hover:opacity-100 transition-opacity">
-                  <IconEdit className="w-4 h-4 text-[var(--viho-primary)]" />
-                </span>
-
-                <span className="absolute -bottom-8 left-0 hidden group-hover:block z-20 pointer-events-none">
-                  <span
-                    className="bg-[var(--viho-surface)] border border-[var(--viho-border)] text-[10px] px-2 py-1 rounded shadow-sm whitespace-nowrap"
-                    style={{ color: "var(--viho-muted)" }}
-                  >
-                    {t.aka_hint}
-                  </span>
-                </span>
-              </button>
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void saveAka();
-                }}
-                className="inline-block"
-              >
-                <input
-                  ref={nameInputRef}
-                  type="text"
-                  value={akaDraft}
-                  onChange={(e) => setAkaDraft(e.target.value)}
-                  onBlur={() => void saveAka()}
-                  placeholder={t.placeholder_aka}
-                  className="bg-transparent text-[18px] font-bold outline-none border-b-2 border-[var(--viho-primary)] pb-0 min-w-[120px]"
-                  style={{ color: "var(--viho-gold, var(--viho-text))" }}
-                  autoFocus
-                />
-              </form>
-            )}
-          </span>
+          {!isEditingName ? (
+            <span
+              onClick={() => setIsEditingName(true)}
+              className="cursor-text break-words text-[16px] font-bold sm:text-[17px]"
+              style={{ color: "#F26A21" }}
+              title={t.aka_hint}
+            >
+              {akaDraft}
+            </span>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveAka();
+              }}
+              className="inline-block max-w-full"
+            >
+              <input
+                ref={nameInputRef}
+                type="text"
+                value={akaDraft}
+                onChange={(e) => setAkaDraft(e.target.value)}
+                onBlur={() => void saveAka()}
+                placeholder={t.placeholder_aka}
+                className="max-w-full min-w-0 border-b border-[#F26A21] bg-transparent pb-0 text-[16px] font-bold outline-none sm:text-[17px]"
+                style={{ color: "#F26A21" }}
+                autoFocus
+              />
+            </form>
+          )}
         </div>
-      </div>
 
-      {/* Targeta Canónica de Identidad */}
-      <div
-        className="group relative overflow-hidden rounded-xl border transition-all duration-300"
-        style={{
-          borderColor: "var(--viho-border)",
-          background: "var(--viho-surface)",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.03)",
-        }}
-      >
-        <div className="p-5">
-          {/* Foto arriba */}
-          <div className="flex flex-col items-center">
-            <div className="relative">
-              <div
-                className={`w-24 h-24 overflow-hidden rounded-[22px] border shadow-sm transition-transform duration-300 ${
-                  canUpload ? "cursor-pointer hover:scale-[1.02]" : ""
-                }`}
-                style={{
-                  background: "var(--viho-bg)",
-                  borderColor: "var(--viho-border)",
-                }}
-                onClick={() => canUpload && fileRef.current?.click()}
-                title={canUpload ? t.upload_tooltip : t.consent_required}
-              >
-                {hasAvatar ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={profile.avatar_url!}
-                    alt="Avatar"
-                    className="w-full h-full object-cover"
-                    onError={() => setImgError(true)}
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center opacity-60 grayscale p-2">
-                    <RobotAvatarSvg />
-                  </div>
-                )}
-
-                {canUpload && !uploading && (
-                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                    <IconCamera className="w-6 h-6 text-white drop-shadow-md" />
-                  </div>
-                )}
-                {uploading && (
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                    <IconLoader className="w-6 h-6 text-white animate-spin" />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Identificación debajo */}
-            <div className="mt-4 w-full text-center">
-              <div className="text-[15px] font-semibold leading-tight" style={{ color: "var(--viho-text)" }}>
-                {officialName}
-              </div>
-
-              {/* ✅ UNA SOLA LÍNEA: "CEO · Viholabs Biotech" */}
-              {(jobTitle || company) && (
-                <div className="mt-2 text-[12px] opacity-70 truncate" style={{ color: "var(--viho-text)" }}>
-                  {jobTitle && company ? `${jobTitle} · ${company}` : jobTitle || company}
+        <div className="grid min-w-0 grid-cols-[88px_minmax(0,1fr)] items-start gap-x-4 gap-y-3 sm:grid-cols-[96px_minmax(0,1fr)]">
+          <div className="relative">
+            <div
+              className={`relative h-[88px] w-[88px] overflow-hidden rounded-[22px] border border-[#D6C28A] bg-white/70 shadow-sm sm:h-[96px] sm:w-[96px] ${
+                canUpload ? "cursor-pointer" : ""
+              }`}
+              onClick={() => canUpload && fileRef.current?.click()}
+              title={canUpload ? t.upload_tooltip : t.consent_required}
+            >
+              {hasAvatar ? (
+                <img
+                  src={profile.avatar_url!}
+                  alt="Avatar"
+                  className="h-full w-full object-cover"
+                  onError={() => setImgError(true)}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center p-2 opacity-75">
+                  <RobotAvatarSvg />
                 </div>
               )}
+
+              {uploading ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+                  <IconLoader className="h-5 w-5 animate-spin text-white" />
+                </div>
+              ) : null}
             </div>
+
+            {canUpload ? (
+              <div className="absolute -bottom-1 -right-1 rounded-full border border-[#D6C28A] bg-white p-1.5 shadow-sm">
+                <IconCamera className="h-3.5 w-3.5 text-[#5A2E3A]" />
+              </div>
+            ) : null}
           </div>
 
-          {/* Separador sutil */}
-          <div className="my-5 h-px w-full bg-[var(--viho-border)] opacity-60" />
-
-          {/* Bloque de Datos Técnicos */}
-          <div className="flex flex-col gap-2 font-mono" style={{ fontSize: "10px" }}>
-            <div className="group/copy flex items-baseline gap-2 cursor-pointer" onClick={() => void copyId()} title="Copiar ID">
-              <div className="w-20 font-sans uppercase tracking-wider font-bold opacity-40 shrink-0 text-[10px]" style={{ color: "var(--viho-text)" }}>
-                {t.id_label}
-              </div>
-              <div className="opacity-70 flex-1 leading-tight relative top-[1px] break-all tracking-tight" style={{ color: "var(--viho-text)" }}>
-                {profile.viholabs_id || "—"}
-              </div>
-              <div className="opacity-0 group-hover/copy:opacity-100 transition-opacity shrink-0 w-3">
-                {justCopied ? <IconCheck className="w-3 h-3 text-green-600" /> : <IconCopy className="w-3 h-3 text-[var(--viho-primary)]" />}
-              </div>
+          <div className="min-w-0 self-center">
+            <div
+              className="min-w-0 break-words text-[clamp(14px,2.5vw,18px)] font-bold leading-[1.02] tracking-[-0.02em] text-[#2F251E]"
+              style={{ overflowWrap: "anywhere" }}
+            >
+              {officialName}
             </div>
 
-            <div className="flex items-baseline gap-2">
-              <div className="w-20 font-sans uppercase tracking-wider font-bold opacity-40 shrink-0 text-[10px]" style={{ color: "var(--viho-text)" }}>
-                {t.joined}:
+            {(jobTitle || company) ? (
+              <div
+                className="mt-1.5 text-[12px] leading-[1.45] text-[#6E5B43]"
+                style={{ overflowWrap: "anywhere" }}
+              >
+                {jobTitle && company
+                  ? `${jobTitle} · ${company}`
+                  : jobTitle || company}
               </div>
-              <div className="opacity-70 flex-1 leading-tight tracking-tight" style={{ color: "var(--viho-text)" }}>
+            ) : null}
+          </div>
+
+          <div className="col-span-2 grid min-w-0 grid-cols-2 gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8A775C]">
+                {t.joined}
+              </div>
+              <div className="mt-1 text-[15px] font-medium leading-tight text-[#2F251E]">
                 {joinedDate}
               </div>
             </div>
 
-            <div className="flex items-baseline gap-2">
-              <div className="w-20 font-sans uppercase tracking-wider font-bold opacity-40 shrink-0 text-[10px]" style={{ color: "var(--viho-text)" }}>
-                {t.tenure}:
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8A775C]">
+                {t.tenure}
               </div>
-              <div className="opacity-70 flex-1 leading-tight tracking-tight" style={{ color: "var(--viho-text)" }}>
+              <div
+                className="mt-1 text-[15px] font-medium leading-tight text-[#2F251E]"
+                style={{ overflowWrap: "anywhere" }}
+              >
                 {tenure}
               </div>
             </div>
           </div>
 
-          {!profile.consent_image_policy && (
-            <div className="mt-5">
-              <button
-                onClick={() =>
-                  void savePatch({ consent_image_policy: true }).then(() => setProfile((p) => (p ? { ...p, consent_image_policy: true } : p)))
-                }
-                className="w-full flex items-center justify-center gap-2 text-[10px] font-semibold py-2 px-3 rounded-lg border border-[var(--viho-border)] hover:border-[var(--viho-primary)] bg-[var(--viho-bg)] transition-colors opacity-80 hover:opacity-100"
-                style={{ color: "var(--viho-text)" }}
-                disabled={saving}
-              >
-                <IconLock className="w-3 h-3" />
-                <span>{t.activate_upload}</span>
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+          <div className="col-span-2 min-w-0">
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8A775C]">
+                  {t.id_label}:
+                </div>
+                <div
+                  className="mt-1 font-mono text-[11px] leading-5 text-[#2F251E] sm:text-[12px]"
+                  style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
+                >
+                  {profile.viholabs_id || "—"}
+                </div>
+              </div>
 
-  async function savePatch(patch: Record<string, any>) {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/community/profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) throw new Error("Save failed");
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSaving(false);
-    }
-  }
+              {profile.viholabs_id ? (
+                <button
+                  type="button"
+                  onClick={() => void copyId()}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#D6C28A] bg-white transition hover:scale-[1.03]"
+                  title={t.copy}
+                >
+                  {justCopied ? (
+                    <IconCheck className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <IconCopy className="h-4 w-4 text-[#5A2E3A]" />
+                  )}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        {!profile.consent_image_policy ? (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() =>
+                void savePatch({ consent_image_policy: true }).then(() =>
+                  setProfile((p) =>
+                    p ? { ...p, consent_image_policy: true } : p,
+                  ),
+                )
+              }
+              className="rounded-full border border-[#D6C28A] bg-white/70 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#5A2E3A] transition hover:bg-white"
+            >
+              {saving ? t.saving : t.activate_upload}
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
 }

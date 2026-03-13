@@ -1,22 +1,20 @@
 // src/app/api/holded/invoices/route.ts
-/**
- * VIHOLABS — HOLDed Invoices Import (LEGACY WRAPPER)
- *
- * Canonical incremental ingestion endpoint:
- *   /api/holded/invoices/import-incremental
- *
- * This route exists ONLY for backward compatibility.
- * It forwards GET/POST to the canonical stateful incremental route.
- */
+
+import { NextRequest, NextResponse } from "next/server";
+import { POST as canonicalPOST } from "./import-incremental/route";
 
 export const runtime = "nodejs";
 
-import { GET as canonicalGET, POST as canonicalPOST } from "./import-incremental/route";
-
-export async function GET(req: Request) {
-  return canonicalGET(req);
+export async function POST(req: NextRequest) {
+  return canonicalPOST(req);
 }
 
-export async function POST(req: Request) {
-  return canonicalPOST(req);
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "Method not allowed. Use POST /api/holded/invoices",
+    },
+    { status: 405 },
+  );
 }

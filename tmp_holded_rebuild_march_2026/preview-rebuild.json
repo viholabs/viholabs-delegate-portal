@@ -1,0 +1,308 @@
+[
+  {
+    "doc_type": "invoice",
+    "invoice_number": "",
+    "invoice_date": "2026-03-07",
+    "client_name": "Pilar Fenoy Illacer",
+    "matched_client_id": null,
+    "matched_delegate_id": null,
+    "external_invoice_id": "69ac7c8d760d5776320d64d4",
+    "products_count": 2,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 2,
+        "unit_net_price": 45,
+        "line_net_amount": 90,
+        "line_type": "sale"
+      },
+      {
+        "sku": "0",
+        "description": "Estándar",
+        "units": 1,
+        "unit_net_price": 3.5,
+        "line_net_amount": 3.5,
+        "line_type": "sale"
+      }
+    ]
+  },
+  {
+    "doc_type": "invoice",
+    "invoice_number": "",
+    "invoice_date": "2026-03-07",
+    "client_name": "Esther Reig Camus",
+    "matched_client_id": null,
+    "matched_delegate_id": null,
+    "external_invoice_id": "69ac0a14afd22b23140f3c34",
+    "products_count": 2,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 1,
+        "unit_net_price": 45,
+        "line_net_amount": 45,
+        "line_type": "sale"
+      },
+      {
+        "sku": "0",
+        "description": "Estándar",
+        "units": 1,
+        "unit_net_price": 3.5,
+        "line_net_amount": 3.5,
+        "line_type": "sale"
+      }
+    ]
+  },
+  {
+    "doc_type": "creditnote",
+    "invoice_number": "CN260004",
+    "invoice_date": "2026-03-03",
+    "client_name": "Pilar Busquets Soy",
+    "matched_client_id": null,
+    "matched_delegate_id": null,
+    "external_invoice_id": "69a80ae14d99736aa7021353",
+    "products_count": 2,
+    "bypass_if_needed": true,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 12,
+        "unit_net_price": 45,
+        "line_net_amount": 540,
+        "line_type": "sale"
+      },
+      {
+        "sku": "VIHO-OBE-PROMO-002",
+        "description": "Pack Avanzado (12+3)",
+        "units": 3,
+        "unit_net_price": 45,
+        "line_net_amount": 135,
+        "line_type": "promotion"
+      }
+    ]
+  },
+  {
+    "doc_type": "invoice",
+    "invoice_number": "F260047",
+    "invoice_date": "2026-03-01",
+    "client_name": "Mònica Falla Pérez",
+    "matched_client_id": "fa13b4db-c067-4308-a98e-76dd999f0b47",
+    "matched_delegate_id": null,
+    "external_invoice_id": "69a54c098019a2e8bf0c9946",
+    "products_count": 2,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 12,
+        "unit_net_price": 45,
+        "line_net_amount": 540,
+        "line_type": "sale"
+      },
+      {
+        "sku": "VIHO-OBE-PROMO-002",
+        "description": "Pack Avanzado (12+3)",
+        "units": 1,
+        "unit_net_price": 0,
+        "line_net_amount": 0,
+        "line_type": "promotion"
+      }
+    ]
+  },
+  {
+    "doc_type": "invoice",
+    "invoice_number": "F260048",
+    "invoice_date": "2026-03-01",
+    "client_name": "Encarnacion Martín Ruiz",
+    "matched_client_id": "555ea387-1697-498c-adde-3771263b2811",
+    "matched_delegate_id": null,
+    "external_invoice_id": "69a54c43c44bbfc1a90fc24c",
+    "products_count": 2,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 6,
+        "unit_net_price": 31,
+        "line_net_amount": 186,
+        "line_type": "sale"
+      },
+      {
+        "sku": "VIHO-OBE-PROMO-001",
+        "description": "Pack Esencial (6+1)",
+        "units": 1,
+        "unit_net_price": 0,
+        "line_net_amount": 0,
+        "line_type": "promotion"
+      }
+    ]
+  },
+  {
+    "doc_type": "invoice",
+    "invoice_number": "F260049",
+    "invoice_date": "2026-03-01",
+    "client_name": "Pilar Busquets Soy",
+    "matched_client_id": null,
+    "matched_delegate_id": null,
+    "external_invoice_id": "69a5a2c1f36ae0e58b087130",
+    "products_count": 2,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 12,
+        "unit_net_price": 45,
+        "line_net_amount": 540,
+        "line_type": "sale"
+      },
+      {
+        "sku": "VIHO-OBE-PROMO-002",
+        "description": "Pack Avanzado (12+3)",
+        "units": 3,
+        "unit_net_price": 45,
+        "line_net_amount": 135,
+        "line_type": "promotion"
+      }
+    ]
+  },
+  {
+    "doc_type": "invoice",
+    "invoice_number": "F260050",
+    "invoice_date": "2026-03-01",
+    "client_name": "Pilar Busquets Soy",
+    "matched_client_id": null,
+    "matched_delegate_id": null,
+    "external_invoice_id": "69a5a76f7f1ddf50fc0c8f46",
+    "products_count": 2,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 12,
+        "unit_net_price": 45,
+        "line_net_amount": 540,
+        "line_type": "sale"
+      },
+      {
+        "sku": "VIHO-OBE-PROMO-002",
+        "description": "Pack Avanzado (12+3)",
+        "units": 3,
+        "unit_net_price": 45,
+        "line_net_amount": 135,
+        "line_type": "promotion"
+      }
+    ]
+  },
+  {
+    "doc_type": "invoice",
+    "invoice_number": "F260051",
+    "invoice_date": "2026-03-03",
+    "client_name": "María Jesús Cuartero Moncada",
+    "matched_client_id": null,
+    "matched_delegate_id": null,
+    "external_invoice_id": "69a7ff645cdcb5bbc10b05cb",
+    "products_count": 2,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 6,
+        "unit_net_price": 45,
+        "line_net_amount": 270,
+        "line_type": "sale"
+      },
+      {
+        "sku": "VIHO-OBE-PROMO-001",
+        "description": "Pack Esencial (6+1)",
+        "units": 1,
+        "unit_net_price": 45,
+        "line_net_amount": 45,
+        "line_type": "promotion"
+      }
+    ]
+  },
+  {
+    "doc_type": "invoice",
+    "invoice_number": "F260052",
+    "invoice_date": "2026-03-02",
+    "client_name": "Teresa Luisa Palmeiro Pereiro",
+    "matched_client_id": "d43d54d3-930d-43d5-b95e-fa148d78d040",
+    "matched_delegate_id": null,
+    "external_invoice_id": "69a5a6f3e668b9992a0d9d04",
+    "products_count": 4,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 1,
+        "unit_net_price": 45,
+        "line_net_amount": 45,
+        "line_type": "sale"
+      },
+      {
+        "sku": "0",
+        "description": "Estándar",
+        "units": 1,
+        "unit_net_price": 3.5,
+        "line_net_amount": 3.5,
+        "line_type": "sale"
+      },
+      {
+        "sku": "0",
+        "description": "Shopify corrección de impuestos 1/2",
+        "units": 1,
+        "unit_net_price": -4.090909,
+        "line_net_amount": -4.09,
+        "line_type": "sale"
+      },
+      {
+        "sku": "0",
+        "description": "Shopify corrección de impuestos 2/2",
+        "units": 1,
+        "unit_net_price": 4.090909,
+        "line_net_amount": 4.09,
+        "line_type": "sale"
+      }
+    ]
+  },
+  {
+    "doc_type": "invoice",
+    "invoice_number": "F260053",
+    "invoice_date": "2026-03-03",
+    "client_name": "SATORRE 1938 S.C.P.",
+    "matched_client_id": null,
+    "matched_delegate_id": null,
+    "external_invoice_id": "69a85e3afb73dd093c0358cd",
+    "products_count": 2,
+    "bypass_if_needed": false,
+    "line_preview": [
+      {
+        "sku": "VIHO-OBE-SPRAY-002",
+        "description": "Viho® Obeglutide Spray\nComplemento alimenticio en spray oralApoya el control responsable del peso, la sensación de saciedad y el bienestar metabólico dentro de un estilo de vida saludable.\n💧 Formato práctico y moderno — Spray oral de 30 ml (≈ 30 días de uso).🌿 Fórmula avanzada — Con extractos de plantas, acetil L-carnitina HCl, vitaminas del grupo B y cromo.👩⚕️ Desarrollado por Viholabs Biotech S.L. — Laboratorio español especializado en nutracéuticos de nueva generación.\n\nBeneficios clave\n\n\n🌱 Control del apetito y ayuda a reducir los antojos.\n\n\n⚖️ Sensación de saciedad, favoreciendo rutinas alimentarias equilibradas.\n\n\n🔥 Apoyo metabólico gracias a las vitaminas B que contribuyen al metabolismo energético normal.\n\n\n😊 Bienestar emocional asociado a la regulación del apetito y los hábitos saludables.\n\n\n💼 Ideal para uso profesional en centros de estética, dietéticas y parafarmacias.\n\n\n\nModo de uso\nAgitar antes de usar. Pulverizar directamente en la boca, siguiendo la dosis diaria recomendada.\nIngredientes principales\nAgua, extracto seco de semilla decafé verde(Coffea arabicaL., 45% ácido clorogénico),acetil L-carnitina HCl,vitamina C(ácido L-ascórbico), extracto de semilla degrifonia[Griffonia simplicifolia(DC.) Baill., 20% 5-HTP], aroma, corrector de acidez (citratos de sodio), edulcorante (sucralosa),niacina(nicotinamida),riboflavina,ácido pantoténico(D-pantotenato cálcico), conservadores (benzoato sódico y sorbato potásico),vitamina B12(metilcobalamina),vitamina B6(clorhidrato de piridoxina), estabilizante (goma xantana),picolinato de cromo,biotina(D-biotina).\n\nPresentación\nEnvase de 30 ml — duración aproximada: 30 díasC.N. 221323.4\n\nRecomendado para\nPersonas que buscan una alternativa natural, segura y eficaz para acompañar su plan de control del peso, sin cápsulas ni inyecciones.",
+        "units": 22,
+        "unit_net_price": 31,
+        "line_net_amount": 682,
+        "line_type": "sale"
+      },
+      {
+        "sku": "VIHO-OBE-PROMO-003",
+        "description": "Pack Integral (22+6)",
+        "units": 6,
+        "unit_net_price": 31,
+        "line_net_amount": 186,
+        "line_type": "promotion"
+      }
+    ]
+  }
+]

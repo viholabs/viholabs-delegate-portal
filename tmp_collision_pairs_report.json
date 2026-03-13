@@ -1,0 +1,181 @@
+[
+  {
+    "duplicate_client_id": "f8e46f44-906f-45a9-a6ac-306f6e805add",
+    "canonical_client_id": "51661407-9f1b-450c-aff4-7a0dd6ca4595",
+    "duplicate_client": {
+      "id": "f8e46f44-906f-45a9-a6ac-306f6e805add",
+      "name": "BLANCA GALOFRE MUNNE",
+      "tax_id": "46226775H",
+      "holded_contact_id": null,
+      "delegate_id": "8d0fde62-26b2-43d1-a8a4-7247839250d9"
+    },
+    "canonical_client": {
+      "id": "51661407-9f1b-450c-aff4-7a0dd6ca4595",
+      "name": "BLANCA GALOFRÉ MUNNÉ (HOMEDICAL)",
+      "tax_id": null,
+      "holded_contact_id": "6978c3cd4e82ccf1e405b6e5",
+      "delegate_id": null
+    },
+    "refs": [
+      {
+        "table": "invoices",
+        "column": "client_id",
+        "duplicate_count": 0,
+        "canonical_count": 2
+      },
+      {
+        "table": "client_merge_audit",
+        "column": "target_client_id",
+        "duplicate_count": 4,
+        "canonical_count": 0
+      },
+      {
+        "table": "client_assignments",
+        "column": "client_id",
+        "duplicate_count": 4,
+        "canonical_count": 0
+      }
+    ]
+  },
+  {
+    "duplicate_client_id": "8deeed7c-8236-435b-bc68-848230750a45",
+    "canonical_client_id": "070edcff-ecd1-4516-96cd-2b72abb93299",
+    "duplicate_client": {
+      "id": "8deeed7c-8236-435b-bc68-848230750a45",
+      "name": "Encarnacion Martin Ruiz",
+      "tax_id": null,
+      "holded_contact_id": null,
+      "delegate_id": "d15a25b1-fbc4-49bc-a37a-c340bbc80f5e"
+    },
+    "canonical_client": {
+      "id": "070edcff-ecd1-4516-96cd-2b72abb93299",
+      "name": "Encarnacion Martín Ruiz",
+      "tax_id": "46705395P",
+      "holded_contact_id": "6968f39040364e13b3061233",
+      "delegate_id": "8d0fde62-26b2-43d1-a8a4-7247839250d9"
+    },
+    "refs": [
+      {
+        "table": "invoices",
+        "column": "client_id",
+        "duplicate_count": 0,
+        "canonical_count": 8
+      },
+      {
+        "table": "client_merge_audit",
+        "column": "target_client_id",
+        "duplicate_count": 0,
+        "canonical_count": 1
+      },
+      {
+        "table": "client_assignments",
+        "column": "client_id",
+        "duplicate_count": 0,
+        "canonical_count": 7
+      }
+    ]
+  },
+  {
+    "duplicate_client_id": "ae9c7cd1-9918-452b-b7d5-d6e77a5006ed",
+    "canonical_client_id": "cb130d88-7ca6-4084-b892-bdd44eae8970",
+    "duplicate_client": {
+      "id": "ae9c7cd1-9918-452b-b7d5-d6e77a5006ed",
+      "name": "Ivette Fernández Tornero",
+      "tax_id": "47971402A",
+      "holded_contact_id": null,
+      "delegate_id": "8d0fde62-26b2-43d1-a8a4-7247839250d9"
+    },
+    "canonical_client": {
+      "id": "cb130d88-7ca6-4084-b892-bdd44eae8970",
+      "name": "Ivette Fernandez Tornero",
+      "tax_id": null,
+      "holded_contact_id": "695b763a3857a4886a00c390",
+      "delegate_id": "d15a25b1-fbc4-49bc-a37a-c340bbc80f5e"
+    },
+    "refs": [
+      {
+        "table": "invoices",
+        "column": "client_id",
+        "duplicate_count": 1,
+        "canonical_count": 0
+      },
+      {
+        "table": "client_assignments",
+        "column": "client_id",
+        "duplicate_count": 1,
+        "canonical_count": 0
+      }
+    ]
+  },
+  {
+    "duplicate_client_id": "c69b3ea0-4889-44f9-8205-7fad303c823f",
+    "canonical_client_id": "85c9287e-2ba9-4336-a5b9-70c8f217b2f7",
+    "duplicate_client": {
+      "id": "c69b3ea0-4889-44f9-8205-7fad303c823f",
+      "name": "Monica Falla Pérez",
+      "tax_id": null,
+      "holded_contact_id": null,
+      "delegate_id": "82bfda6d-8c29-4e04-9ecb-44447ac7bff1"
+    },
+    "canonical_client": {
+      "id": "85c9287e-2ba9-4336-a5b9-70c8f217b2f7",
+      "name": "Mònica Falla Pérez",
+      "tax_id": null,
+      "holded_contact_id": "69a53f5f1a4196fb5507c793",
+      "delegate_id": null
+    },
+    "refs": []
+  },
+  {
+    "duplicate_client_id": "08ffcd0e-54ee-4e35-9b16-8cac2d0f3188",
+    "canonical_client_id": "609be93a-3f39-4289-8e6d-a010163af9af",
+    "duplicate_client": {
+      "id": "08ffcd0e-54ee-4e35-9b16-8cac2d0f3188",
+      "name": "Monica Ramirez Guirao",
+      "tax_id": null,
+      "holded_contact_id": null,
+      "delegate_id": "14265ceb-2852-4149-9f62-f083f2e76230"
+    },
+    "canonical_client": {
+      "id": "609be93a-3f39-4289-8e6d-a010163af9af",
+      "name": "Mónica Ramírez Guirao",
+      "tax_id": null,
+      "holded_contact_id": "698b4c36941538e1b70b8059",
+      "delegate_id": null
+    },
+    "refs": [
+      {
+        "table": "invoices",
+        "column": "client_id",
+        "duplicate_count": 0,
+        "canonical_count": 3
+      }
+    ]
+  },
+  {
+    "duplicate_client_id": "3efabc7c-f3f4-43f5-a974-7c4360afea4c",
+    "canonical_client_id": "dd0effca-6a28-464c-9a54-98fc393a33dd",
+    "duplicate_client": {
+      "id": "3efabc7c-f3f4-43f5-a974-7c4360afea4c",
+      "name": "Silvina Flavia Sanchez",
+      "tax_id": null,
+      "holded_contact_id": null,
+      "delegate_id": "14265ceb-2852-4149-9f62-f083f2e76230"
+    },
+    "canonical_client": {
+      "id": "dd0effca-6a28-464c-9a54-98fc393a33dd",
+      "name": "Silvina Flavia Sánchez",
+      "tax_id": null,
+      "holded_contact_id": "699c9b77d58e33e9ec0ca425",
+      "delegate_id": null
+    },
+    "refs": [
+      {
+        "table": "invoices",
+        "column": "client_id",
+        "duplicate_count": 0,
+        "canonical_count": 4
+      }
+    ]
+  }
+]

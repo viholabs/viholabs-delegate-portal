@@ -21,7 +21,7 @@ type ActorLite = {
 type ActorFromRequestOk = {
   ok: true;
   actor: ActorLite;
-  supaRls: any;
+  supaService: any;
 };
 
 type ActorFromRequestFail = {
@@ -31,7 +31,7 @@ type ActorFromRequestFail = {
 };
 
 function isOk(ar: any): ar is ActorFromRequestOk {
-  return !!ar && ar.ok === true && !!ar.actor && !!ar.supaRls;
+  return !!ar && ar.ok === true && !!ar.actor && !!ar.supaService;
 }
 
 async function handle(req: Request) {
@@ -40,6 +40,7 @@ async function handle(req: Request) {
   try {
     stage = "actor_from_request";
     const ar = (await getActorFromRequest(req)) as ActorFromRequestOk | ActorFromRequestFail | any;
+
     if (!isOk(ar)) {
       return json((ar?.status as number) ?? 401, {
         ok: false,
@@ -49,7 +50,7 @@ async function handle(req: Request) {
     }
 
     const actor = ar.actor;
-    const supaRls = ar.supaRls;
+    const supaService = ar.supaService;
 
     stage = "effective_permissions";
     const eff = await getEffectivePermissionsByActorId(String(actor.id));
@@ -68,17 +69,18 @@ async function handle(req: Request) {
       });
     }
 
-    // ✅ Fuente canónica real: public.actors con role=delegate y status=active
     stage = "delegates_select";
-    const { data: delegates, error: dErr } = await supaRls
-      .from("actors")
-      .select("id, name, email, role, status")
-      .eq("role", "delegate")
-      .eq("status", "active")
-      .order("name", { ascending: true });
+    const { data, error } = await supaService
+      .from("v_control_room_delegates_active")
+      .select("delegate_actor_id, delegate_name, delegate_email")
+      .order("delegate_name", { ascending: true });
 
-    if (dErr) {
-      return json(500, { ok: false, stage, error: dErr.message });
+    if (error) {
+      return json(500, {
+        ok: false,
+        stage,
+        error: error.message,
+      });
     }
 
     return json(200, {
@@ -88,11 +90,11 @@ async function handle(req: Request) {
         role: actor.role ?? null,
         name: actor.name ?? actor.email ?? null,
       },
-      delegates: Array.isArray(delegates)
-        ? delegates.map((d: any) => ({
-            id: String(d.id),
-            name: d?.name ?? null,
-            email: d?.email ?? null,
+      delegates: Array.isArray(data)
+        ? data.map((d: any) => ({
+            id: String(d?.delegate_actor_id ?? ""),
+            name: d?.delegate_name ?? null,
+            email: d?.delegate_email ?? null,
           }))
         : [],
     });

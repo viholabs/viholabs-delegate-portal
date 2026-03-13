@@ -10,7 +10,6 @@ function json(status: number, body: any) {
   return NextResponse.json(body, {
     status,
     headers: {
-      // Canon: never cache identity/profile payloads
       "Cache-Control": "no-store, max-age=0",
     },
   });
@@ -26,13 +25,21 @@ async function safeRead(req: NextRequest) {
 
 function getSupabaseUrl() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  if (!url) throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL)");
+  if (!url) {
+    throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL)");
+  }
   return url;
 }
 
 function getAnonKey() {
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!key) throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_ANON_KEY (or SUPABASE_ANON_KEY)");
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY;
+  if (!key) {
+    throw new Error(
+      "Missing env: NEXT_PUBLIC_SUPABASE_ANON_KEY (or SUPABASE_ANON_KEY)"
+    );
+  }
   return key;
 }
 
@@ -43,31 +50,36 @@ function readBearerToken(req: NextRequest): string {
   return authHeader.slice("bearer ".length).trim();
 }
 
-/**
- * Canonical auth resolver:
- * 1) Try SSR cookie-based client (preferred).
- * 2) If no user, try Authorization: Bearer <access_token> (fallback for client-localStorage sessions).
- */
 async function getAuthedClient(req: NextRequest): Promise<{
   supabase: any;
   userId: string | null;
   authMode: "cookie" | "bearer" | "none";
   authError?: string;
 }> {
-  // 1) Cookie SSR
   try {
     const supabaseCookie = await createSsrClient();
     const { data, error } = await supabaseCookie.auth.getUser();
+
     if (!error && data?.user?.id) {
-      return { supabase: supabaseCookie, userId: data.user.id, authMode: "cookie" };
+      return {
+        supabase: supabaseCookie,
+        userId: data.user.id,
+        authMode: "cookie",
+      };
     }
   } catch {
-    // ignore; fallback to bearer
+    // fallback to bearer
   }
 
-  // 2) Bearer fallback
   const token = readBearerToken(req);
-  if (!token) return { supabase: null, userId: null, authMode: "none", authError: "missing_session" };
+  if (!token) {
+    return {
+      supabase: null,
+      userId: null,
+      authMode: "none",
+      authError: "missing_session",
+    };
+  }
 
   const supabaseBearer = createJsClient(getSupabaseUrl(), getAnonKey(), {
     global: { headers: { Authorization: `Bearer ${token}` } },
@@ -75,16 +87,29 @@ async function getAuthedClient(req: NextRequest): Promise<{
   });
 
   const { data, error } = await supabaseBearer.auth.getUser();
+
   if (error || !data?.user?.id) {
-    return { supabase: supabaseBearer, userId: null, authMode: "none", authError: "invalid_token" };
+    return {
+      supabase: supabaseBearer,
+      userId: null,
+      authMode: "none",
+      authError: "invalid_token",
+    };
   }
 
-  return { supabase: supabaseBearer, userId: data.user.id, authMode: "bearer" };
+  return {
+    supabase: supabaseBearer,
+    userId: data.user.id,
+    authMode: "bearer",
+  };
 }
 
 export async function GET(req: NextRequest) {
   const a = await getAuthedClient(req);
-  if (!a.userId) return json(401, { ok: false, error: "unauthorized" });
+
+  if (!a.userId) {
+    return json(401, { ok: false, error: "unauthorized" });
+  }
 
   const { data, error } = await a.supabase
     .from("v_community_identity_card_v1")
@@ -109,8 +134,29 @@ export async function GET(req: NextRequest) {
     .limit(1)
     .maybeSingle();
 
-  if (error) return json(500, { ok: false, error: error.message });
-  if (!data) return json(404, { ok: false, error: "profile_not_found" });
+  if (error) {
+    return json(500, { ok: false, error: error.message });
+  }
+
+  const { data: actorRow, error: actorError } = await a.supabase
+    .from("actors")
+    .select("id, role, status")
+    .eq("auth_user_id", a.userId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  if (actorError) {
+    return json(500, { ok: false, error: actorError.message });
+  }
+
+  if (!data) {
+    return json(404, { ok: false, error: "profile_not_found" });
+  }
+
+  const role = String(actorRow?.role ?? "").trim().toLowerCase();
+  const effectiveActorId =
+    actorRow?.id != null ? String(actorRow.id) : null;
 
   return json(200, {
     ok: true,
@@ -130,19 +176,27 @@ export async function GET(req: NextRequest) {
 
       viholabs_id: data.viholabs_id,
       joined_at: data.joined_at,
+
+      effective_actor_id: effectiveActorId,
+      actor_id: effectiveActorId,
+      role,
+      is_melquisedec: role === "melquisedec",
     },
   });
 }
 
 export async function POST(req: NextRequest) {
   const a = await getAuthedClient(req);
-  if (!a.userId) return json(401, { ok: false, error: "unauthorized" });
+
+  if (!a.userId) {
+    return json(401, { ok: false, error: "unauthorized" });
+  }
 
   const body = await safeRead(req);
 
   const nextAka = typeof body?.aka === "string" ? body.aka.trim() : null;
-  const nextDisplayName = typeof body?.display_name === "string" ? body.display_name.trim() : null;
-
+  const nextDisplayName =
+    typeof body?.display_name === "string" ? body.display_name.trim() : null;
   const wantsConsentTrue = body?.consent_image_policy === true;
 
   if (nextAka === null && nextDisplayName === null && !wantsConsentTrue) {
@@ -155,7 +209,9 @@ export async function POST(req: NextRequest) {
       .update({ display_name: nextDisplayName })
       .eq("user_id", a.userId);
 
-    if (error) return json(500, { ok: false, error: error.message });
+    if (error) {
+      return json(500, { ok: false, error: error.message });
+    }
   }
 
   if (nextAka !== null || wantsConsentTrue) {
@@ -167,7 +223,9 @@ export async function POST(req: NextRequest) {
       .from("user_profile_private")
       .upsert({ user_id: a.userId, ...patch }, { onConflict: "user_id" });
 
-    if (error) return json(500, { ok: false, error: error.message });
+    if (error) {
+      return json(500, { ok: false, error: error.message });
+    }
   }
 
   return await GET(req);

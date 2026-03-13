@@ -1,115 +1,114 @@
 "use client";
 
+import { useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 
-import { TabFrame, TabDominant, TabSecondary, TabResidual } from "@/components/portal/tabs/TabFrame";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import useCommunityProfile from "@/components/portal/community/useCommunityProfile";
 
 import TechnicalTab from "@/components/control-room/technical/TechnicalTab";
-import OrdersConsoleTab from "@/components/control-room/orders/OrdersConsoleTab";
+import ElElyonControlBlock from "@/components/control-room/resources/ElElyonControlBlock";
+import ResourcesHubBlock from "@/components/control-room/resources/ResourcesHubBlock";
+import HoldedDocumentsTable from "@/components/control-room/invoices/HoldedDocumentsTable";
 
-function ShellDemoPage() {
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+type ShellTabId =
+  | "situation"
+  | "clients"
+  | "facturacion"
+  | "recursos"
+  | "el-elyon";
+
+function SituationPanel() {
   return (
-    <TabFrame>
-      <TabDominant>
-        <Card>
-          <CardHeader>
-            <CardTitle>Estado del entorno</CardTitle>
-          </CardHeader>
-          <CardContent>La situación actual se mantiene estable.</CardContent>
-        </Card>
-      </TabDominant>
-
-      <TabSecondary>
-        <Card>
-          <CardHeader>
-            <CardTitle>Señales relevantes</CardTitle>
-          </CardHeader>
-          <CardContent>No se registran variaciones críticas.</CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Dirección</CardTitle>
-          </CardHeader>
-          <CardContent>Ritmo operativo dentro de parámetros normales.</CardContent>
-        </Card>
-      </TabSecondary>
-
-      <TabResidual>
-        <Card>
-          <CardHeader>
-            <CardTitle>Observación</CardTitle>
-          </CardHeader>
-          <CardContent>Semana sin tensiones destacables.</CardContent>
-        </Card>
-      </TabResidual>
-    </TabFrame>
+    <Card>
+      <CardHeader>
+        <CardTitle>Situation</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm" style={{ color: "var(--viho-muted)" }}>
+        Dashboard principal del actor.
+      </CardContent>
+    </Card>
   );
 }
 
-function ShellTechBlockPage() {
+function ClientsPanel() {
   return (
-    <TabFrame>
-      <TabDominant>
-        <TechnicalTab />
-      </TabDominant>
-
-      <TabSecondary>
-        <Card>
-          <CardHeader>
-            <CardTitle>Señales relevantes</CardTitle>
-          </CardHeader>
-          <CardContent>Vista técnica en construcción (bloques Z1..Z6).</CardContent>
-        </Card>
-      </TabSecondary>
-
-      <TabResidual>
-        <Card>
-          <CardHeader>
-            <CardTitle>Observación</CardTitle>
-          </CardHeader>
-          <CardContent>Acceso reservado a Melquisedec.</CardContent>
-        </Card>
-      </TabResidual>
-    </TabFrame>
+    <Card>
+      <CardHeader>
+        <CardTitle>Clients</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm" style={{ color: "var(--viho-muted)" }}>
+        Dominio relacional y comercial del actor.
+      </CardContent>
+    </Card>
   );
 }
 
-function ShellOrdersPage() {
+function FacturacionPanel() {
+  return <HoldedDocumentsTable />;
+}
+
+function RecursosPanel() {
   return (
-    <TabFrame>
-      <TabDominant>
-        <OrdersConsoleTab />
-      </TabDominant>
+    <div className="space-y-4">
+      <ResourcesHubBlock />
 
-      <TabSecondary>
-        <Card>
-          <CardHeader>
-            <CardTitle>Señales relevantes</CardTitle>
-          </CardHeader>
-          <CardContent>Creación de pedido borrador en Holded desde portal.</CardContent>
-        </Card>
-      </TabSecondary>
-
-      <TabResidual>
-        <Card>
-          <CardHeader>
-            <CardTitle>Observación</CardTitle>
-          </CardHeader>
-          <CardContent>Uso interno Control Room.</CardContent>
-        </Card>
-      </TabResidual>
-    </TabFrame>
+      <Card>
+        <CardHeader>
+          <CardTitle>Recursos</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm" style={{ color: "var(--viho-muted)" }}>
+          Recursos contiene formación, documentación, materiales y soportes del
+          actor.
+        </CardContent>
+      </Card>
+    </div>
   );
+}
+
+function ElElyonPanel() {
+  return (
+    <div className="space-y-4">
+      <ElElyonControlBlock />
+      <TechnicalTab />
+    </div>
+  );
+}
+
+function normalizeTab(value: string | null, isMelquisedec: boolean): ShellTabId {
+  if (value === "situation") return "situation";
+  if (value === "clients") return "clients";
+  if (value === "facturacion") return "facturacion";
+  if (value === "recursos") return "recursos";
+  if (value === "el-elyon" && isMelquisedec) return "el-elyon";
+  return "situation";
 }
 
 export default function ShellPageClient() {
-  const sp = useSearchParams();
-  const tab = (sp?.get("tab") || "").trim();
+  const searchParams = useSearchParams();
+  const { isMelquisedec } = useCommunityProfile();
 
-  if (tab === "tech_block") return <ShellTechBlockPage />;
-  if (tab === "orders") return <ShellOrdersPage />;
+  const activeTab = useMemo(
+    () => normalizeTab(searchParams.get("tab"), isMelquisedec),
+    [searchParams, isMelquisedec]
+  );
 
-  return <ShellDemoPage />;
+  switch (activeTab) {
+    case "clients":
+      return <ClientsPanel />;
+
+    case "facturacion":
+      return <FacturacionPanel />;
+
+    case "recursos":
+      return <RecursosPanel />;
+
+    case "el-elyon":
+      return <ElElyonPanel />;
+
+    case "situation":
+    default:
+      return <SituationPanel />;
+  }
 }
