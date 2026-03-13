@@ -777,6 +777,124 @@ async function resolveByContactNamePreviewFromSupabase(
   };
 }
 
+function inferIsCompany(name: string | null): boolean | null {
+  if (!name) return null;
+
+  const upper = name.toUpperCase();
+
+  if (
+    upper.includes(" S.L.") ||
+    upper.includes(" SL ") ||
+    upper.endsWith(" SL") ||
+    upper.includes(" S.A.") ||
+    upper.endsWith(" SA") ||
+    upper.includes(" S.C.P.") ||
+    upper.endsWith(" SCP") ||
+    upper.includes(" SLL") ||
+    upper.includes(" S.L.L.") ||
+    upper.includes(" S.COOP.") ||
+    upper.includes(" COOP")
+  ) {
+    return true;
+  }
+
+  return null;
+}
+
+async function createClientInClientsOnly(args: {
+  supabase: SupabaseLike;
+  holdedContactId: string;
+  clientName: string;
+  logger?: Pick<Console, "info" | "warn" | "error">;
+}): Promise<{ clientId: string | null; delegateId: string | null } | null> {
+  const { supabase, holdedContactId, clientName, logger = console } = args;
+
+  const existing = await resolveByHoldedContactIdFromSupabase(
+    supabase,
+    holdedContactId
+  );
+
+  if (existing?.clientId) {
+    return existing;
+  }
+
+  const isCompany = inferIsCompany(clientName);
+
+  const clientInsertPayload = {
+    name: clientName,
+    name_raw: clientName,
+    legal_name: clientName,
+    holded_contact_id: holdedContactId,
+    status: "active",
+    state_code: "ACTIVE",
+    is_company: isCompany,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data: insertedClient, error: insertClientError } = await supabase
+    .from("clients")
+    .insert(clientInsertPayload)
+    .select("id, delegate_id")
+    .single();
+
+  if (insertClientError) throw insertClientError;
+
+  logger.info(
+    `[HOLDED][CLIENT_CREATED][ONE] ${clientName} :: ${holdedContactId} :: ${insertedClient.id}`
+  );
+
+  return {
+    clientId: insertedClient.id ?? null,
+    delegateId: insertedClient.delegate_id ?? null,
+  };
+}
+
+async function ensureAcceptedDecisionHasClient(args: {
+  supabase: SupabaseLike;
+  decision: Extract<HoldedImportDecision, { status: "accept" }>;
+  logger?: Pick<Console, "info" | "warn" | "error">;
+}): Promise<Extract<HoldedImportDecision, { status: "accept" }>> {
+  const { supabase, decision, logger = console } = args;
+
+  if (decision.invoice.client_id) {
+    return decision;
+  }
+
+  const holdedContactId = decision.invoice.holded_contact_id;
+  const clientName = decision.invoice.client_name;
+
+  if (!holdedContactId || !clientName) {
+    return decision;
+  }
+
+  const resolution = await createClientInClientsOnly({
+    supabase,
+    holdedContactId,
+    clientName,
+    logger,
+  });
+
+  if (!resolution?.clientId) {
+    return decision;
+  }
+
+  return {
+    ...decision,
+    invoice: {
+      ...decision.invoice,
+      client_id: resolution.clientId,
+      delegate_id: resolution.delegateId,
+    },
+    diagnostics: {
+      ...(decision.diagnostics ?? {}),
+      auto_created_client_from_holded: true,
+      client_id_preview: resolution.clientId,
+      delegate_id_preview: resolution.delegateId,
+      missing_client_mapping_soft: false,
+    },
+  };
+}
+
 async function getExistingHoldedInvoice(args: {
   supabase: SupabaseLike;
   externalInvoiceId: string;
@@ -962,8 +1080,16 @@ export async function importOneHoldedInvoiceById(...args: any[]): Promise<{
       };
     }
 
-    const acceptedDecision: Extract<HoldedImportDecision, { status: "accept" }> =
+    let acceptedDecision: Extract<HoldedImportDecision, { status: "accept" }> =
       decision;
+
+    if (!parsed.preview) {
+      acceptedDecision = await ensureAcceptedDecisionHasClient({
+        supabase: parsed.supabase,
+        decision: acceptedDecision,
+        logger: parsed.logger,
+      });
+    }
 
     if (!parsed.preview) {
       const existingInvoice = await getExistingHoldedInvoice({
