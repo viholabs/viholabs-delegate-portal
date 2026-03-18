@@ -11,8 +11,11 @@ type IncrementalDocInput = {
 };
 
 type ClientResolution = {
+  holdedContactExists: boolean;
   clientId: string | null;
   delegateId: string | null;
+  mappingExists: boolean;
+  clientExists: boolean;
 };
 
 function toNullableString(raw: unknown): string | null {
@@ -87,7 +90,10 @@ function normalizeInvoiceItemLineType(row: any): "sale" | "promotion" {
 
   const units = toNumber(row?.units ?? row?.quantity ?? 0, 0);
   const unitNetPrice = toNumber(row?.unit_net_price ?? row?.unit_price ?? 0, 0);
-  const lineNetAmount = toNumber(row?.line_net_amount ?? row?.line_subtotal ?? 0, 0);
+  const lineNetAmount = toNumber(
+    row?.line_net_amount ?? row?.line_subtotal ?? 0,
+    0
+  );
   const vatRate = toNumber(row?.vat_rate ?? row?.tax_rate ?? 0, 0);
   const lineVatAmount = toNumber(row?.line_vat_amount ?? row?.vat_amount ?? 0, 0);
   const lineGrossAmount = toNumber(
@@ -279,86 +285,50 @@ function sanitizeInvoiceRowForCurrentSchema(
   };
 }
 
-function inferIsCompany(name: string | null): boolean | null {
-  if (!name) return null;
-
-  const upper = name.toUpperCase();
-
-  if (
-    upper.includes(" S.L.") ||
-    upper.includes(" SL ") ||
-    upper.endsWith(" SL") ||
-    upper.includes(" S.A.") ||
-    upper.endsWith(" SA") ||
-    upper.includes(" S.C.P.") ||
-    upper.endsWith(" SCP") ||
-    upper.includes(" SLL") ||
-    upper.includes(" S.L.L.") ||
-    upper.includes(" S.COOP.") ||
-    upper.includes(" COOP")
-  ) {
-    return true;
-  }
-
-  return null;
-}
-
-function looksLikeMissingClientMapping(reason: unknown): boolean {
-  const s = toNullableString(reason)?.toLowerCase() ?? "";
-  if (!s) return false;
-
-  return (
-    s.includes("no client mapping") ||
-    s.includes("missing client mapping") ||
-    s.includes("g1 strict")
-  );
-}
-
-function extractHoldedContactIdFromDocOrDecision(doc: IncrementalDocInput, decision: any): string | null {
-  return (
-    toNullableString(decision?.invoice?.holded_contact_id) ??
-    toNullableString(decision?.diagnostics?.holded_contact_id) ??
-    toNullableString(decision?.detail?.holded_contact_id) ??
-    toNullableString(doc?.detail?.holded_contact_id) ??
-    toNullableString(doc?.detail?.contactId) ??
-    toNullableString(doc?.detail?.contact_id) ??
-    toNullableString(doc?.summary?.holded_contact_id) ??
-    toNullableString(doc?.summary?.contactId) ??
-    toNullableString(doc?.summary?.contact_id) ??
-    null
-  );
-}
-
-function extractClientNameFromDocOrDecision(doc: IncrementalDocInput, decision: any): string | null {
-  return (
-    toNullableString(decision?.invoice?.client_name) ??
-    toNullableString(decision?.invoice?.client_name_raw) ??
-    toNullableString(decision?.diagnostics?.client_name) ??
-    toNullableString(decision?.diagnostics?.contact_name) ??
-    toNullableString(doc?.detail?.client_name) ??
-    toNullableString(doc?.detail?.clientName) ??
-    toNullableString(doc?.detail?.contact_name) ??
-    toNullableString(doc?.detail?.name) ??
-    toNullableString(doc?.summary?.client_name) ??
-    toNullableString(doc?.summary?.clientName) ??
-    toNullableString(doc?.summary?.contact_name) ??
-    toNullableString(doc?.summary?.name) ??
-    null
-  );
-}
-
 async function findClientByHoldedContactId(
   supabase: SupabaseLike,
   holdedContactId: string
 ): Promise<ClientResolution | null> {
+  const normalizedHoldedContactId = toNullableString(holdedContactId);
+  if (!normalizedHoldedContactId) {
+    return null;
+  }
+
+  const { data: holdedContactRow, error: holdedContactError } = await supabase
+    .from("holded_contacts")
+    .select("holded_id")
+    .eq("holded_id", normalizedHoldedContactId)
+    .maybeSingle();
+
+  if (holdedContactError) throw holdedContactError;
+
+  if (!holdedContactRow?.holded_id) {
+    return {
+      holdedContactExists: false,
+      clientId: null,
+      delegateId: null,
+      mappingExists: false,
+      clientExists: false,
+    };
+  }
+
   const { data: mapRow, error: mapError } = await supabase
     .from("holded_contact_client_map_g1")
     .select("client_id")
-    .eq("holded_contact_id", holdedContactId)
+    .eq("holded_contact_id", normalizedHoldedContactId)
     .maybeSingle();
 
   if (mapError) throw mapError;
-  if (!mapRow?.client_id) return null;
+
+  if (!mapRow?.client_id) {
+    return {
+      holdedContactExists: true,
+      clientId: null,
+      delegateId: null,
+      mappingExists: false,
+      clientExists: false,
+    };
+  }
 
   const { data: clientRow, error: clientError } = await supabase
     .from("clients")
@@ -368,230 +338,23 @@ async function findClientByHoldedContactId(
 
   if (clientError) throw clientError;
 
-  if (!clientRow) {
+  if (!clientRow?.id) {
     return {
+      holdedContactExists: true,
       clientId: mapRow.client_id ?? null,
       delegateId: null,
+      mappingExists: true,
+      clientExists: false,
     };
   }
 
   return {
-    clientId: clientRow.id ?? mapRow.client_id ?? null,
+    holdedContactExists: true,
+    clientId: clientRow.id ?? null,
     delegateId: clientRow.delegate_id ?? null,
+    mappingExists: true,
+    clientExists: true,
   };
-}
-
-async function createClientFromHoldedIfMissing(args: {
-  supabase: SupabaseLike;
-  holdedContactId: string;
-  clientName: string;
-  logger?: Pick<Console, "info" | "warn" | "error">;
-}): Promise<ClientResolution | null> {
-  const { supabase, holdedContactId, clientName, logger = console } = args;
-
-  const existingByMap = await findClientByHoldedContactId(supabase, holdedContactId);
-  if (existingByMap?.clientId) {
-    return existingByMap;
-  }
-
-  const { data: existingClient, error: existingClientError } = await supabase
-    .from("clients")
-    .select("id, delegate_id, holded_contact_id")
-    .eq("holded_contact_id", holdedContactId)
-    .maybeSingle();
-
-  if (existingClientError) throw existingClientError;
-
-  if (existingClient?.id) {
-    const { data: existingMap, error: existingMapError } = await supabase
-      .from("holded_contact_client_map_g1")
-      .select("client_id")
-      .eq("holded_contact_id", holdedContactId)
-      .maybeSingle();
-
-    if (existingMapError) throw existingMapError;
-
-    if (!existingMap?.client_id) {
-      const { error: insertMapError } = await supabase
-        .from("holded_contact_client_map_g1")
-        .insert({
-          holded_contact_id: holdedContactId,
-          client_id: existingClient.id,
-          notes: "Auto-created mapping from Holded incremental import",
-        });
-
-      if (insertMapError) throw insertMapError;
-    }
-
-    return {
-      clientId: existingClient.id ?? null,
-      delegateId: existingClient.delegate_id ?? null,
-    };
-  }
-
-  const isCompany = inferIsCompany(clientName);
-
-  const clientInsertPayload = {
-    name: clientName,
-    name_raw: clientName,
-    legal_name: clientName,
-    holded_contact_id: holdedContactId,
-    status: "active",
-    state_code: "OPEN",
-    is_company: isCompany,
-    updated_at: new Date().toISOString(),
-  };
-
-  const { data: insertedClient, error: insertClientError } = await supabase
-    .from("clients")
-    .insert(clientInsertPayload)
-    .select("id, delegate_id")
-    .single();
-
-  if (insertClientError) throw insertClientError;
-
-  const { error: insertMapError } = await supabase
-    .from("holded_contact_client_map_g1")
-    .insert({
-      holded_contact_id: holdedContactId,
-      client_id: insertedClient.id,
-      notes: "Auto-created from Holded because client did not exist in portal",
-    });
-
-  if (insertMapError) throw insertMapError;
-
-  logger.info(
-    `[HOLDED][CLIENT_CREATED] ${clientName} :: ${holdedContactId} :: ${insertedClient.id}`
-  );
-
-  return {
-    clientId: insertedClient.id ?? null,
-    delegateId: insertedClient.delegate_id ?? null,
-  };
-}
-
-async function ensureAcceptedDecisionHasClient(args: {
-  supabase: SupabaseLike;
-  decision: any;
-  logger?: Pick<Console, "info" | "warn" | "error">;
-}): Promise<any> {
-  const { supabase, decision, logger = console } = args;
-
-  if (decision?.status !== "accept") {
-    return decision;
-  }
-
-  const currentClientId = toNullableString(decision?.invoice?.client_id);
-  if (currentClientId) {
-    return decision;
-  }
-
-  const holdedContactId = toNullableString(decision?.invoice?.holded_contact_id);
-  const clientName =
-    toNullableString(decision?.invoice?.client_name) ??
-    toNullableString(decision?.invoice?.client_name_raw);
-
-  if (!holdedContactId || !clientName) {
-    return decision;
-  }
-
-  const resolution = await createClientFromHoldedIfMissing({
-    supabase,
-    holdedContactId,
-    clientName,
-    logger,
-  });
-
-  if (!resolution?.clientId) {
-    return decision;
-  }
-
-  return {
-    ...decision,
-    invoice: {
-      ...decision.invoice,
-      client_id: resolution.clientId,
-      delegate_id: resolution.delegateId,
-    },
-    diagnostics: {
-      ...(decision.diagnostics ?? {}),
-      auto_created_client_from_holded: true,
-      client_id_preview: resolution.clientId,
-      delegate_id_preview: resolution.delegateId,
-    },
-  };
-}
-
-async function tryRecoverSkipByAutoCreatingClient(args: {
-  supabase: SupabaseLike;
-  doc: IncrementalDocInput;
-  decision: any;
-  preview: boolean;
-  resolveByHoldedContactId: (holdedContactId: string) => Promise<ClientResolution | null>;
-  resolveByContactNamePreviewOnly: (contactName: string) => Promise<ClientResolution | null>;
-  logger?: Pick<Console, "info" | "warn" | "error">;
-}): Promise<any> {
-  const {
-    supabase,
-    doc,
-    decision,
-    preview,
-    resolveByHoldedContactId,
-    resolveByContactNamePreviewOnly,
-    logger = console,
-  } = args;
-
-  if (preview) {
-    return decision;
-  }
-
-  if (decision?.status !== "skip") {
-    return decision;
-  }
-
-  if (!looksLikeMissingClientMapping(decision?.reason)) {
-    return decision;
-  }
-
-  const holdedContactId = extractHoldedContactIdFromDocOrDecision(doc, decision);
-  const clientName = extractClientNameFromDocOrDecision(doc, decision);
-
-  if (!holdedContactId || !clientName) {
-    return decision;
-  }
-
-  await createClientFromHoldedIfMissing({
-    supabase,
-    holdedContactId,
-    clientName,
-    logger,
-  });
-
-  const rebuiltDecision = await buildHoldedImportDecision({
-    summary: doc.summary,
-    detail: doc.detail,
-    resolveByHoldedContactId,
-    resolveByContactNamePreviewOnly,
-    enableNameFallbackInPreview: preview,
-  });
-
-  if (rebuiltDecision?.status === "accept") {
-    const ensuredDecision = await ensureAcceptedDecisionHasClient({
-      supabase,
-      decision: rebuiltDecision,
-      logger,
-    });
-
-    return {
-      ...ensuredDecision,
-      diagnostics: {
-        ...(ensuredDecision?.diagnostics ?? {}),
-        recovered_from_missing_client_mapping: true,
-      },
-    };
-  }
-
-  return rebuiltDecision;
 }
 
 async function loadExistingInvoicesByExternalId(args: {
@@ -612,7 +375,9 @@ async function loadExistingInvoicesByExternalId(args: {
 
   const { data, error } = await args.supabase
     .from("invoices")
-    .select("id, external_invoice_id, source_provider, state_code")
+    .select(
+      "id, external_invoice_id, source_provider, state_code, is_paid, paid_date, external_modified_at"
+    )
     .eq("source_provider", "holded")
     .in("external_invoice_id", ids);
 
@@ -630,29 +395,68 @@ async function loadExistingInvoicesByExternalId(args: {
   return map;
 }
 
-async function updateExistingInvoiceStateCodeIfNeeded(args: {
+async function updateExistingInvoiceFieldsIfNeeded(args: {
   supabase: SupabaseLike;
   invoiceId: string;
   currentStateCode: string | null;
   nextStateCode: string | null;
+  currentIsPaid: boolean | null;
+  nextIsPaid: boolean | null;
+  currentPaidDate: string | null;
+  nextPaidDate: string | null;
+  currentExternalModifiedAt: string | null;
+  nextExternalModifiedAt: string | null;
 }) {
   const currentStateCode = toNullableString(args.currentStateCode);
   const nextStateCode = toNullableString(args.nextStateCode);
+
+  const currentPaidDate = toNullableString(args.currentPaidDate);
+  const nextPaidDate = toNullableString(args.nextPaidDate);
+
+  const currentExternalModifiedAt = toNullableString(args.currentExternalModifiedAt);
+  const nextExternalModifiedAt = toNullableString(args.nextExternalModifiedAt);
+
+  const currentIsPaid =
+    typeof args.currentIsPaid === "boolean" ? args.currentIsPaid : null;
+  const nextIsPaid =
+    typeof args.nextIsPaid === "boolean" ? args.nextIsPaid : null;
 
   if (!args.invoiceId) {
     return { updated: false };
   }
 
-  if (!nextStateCode || nextStateCode === currentStateCode) {
+  const patch: Record<string, unknown> = {};
+  let changed = false;
+
+  if (nextStateCode && nextStateCode !== currentStateCode) {
+    patch.state_code = nextStateCode;
+    changed = true;
+  }
+
+  if (nextIsPaid !== currentIsPaid) {
+    patch.is_paid = nextIsPaid;
+    changed = true;
+  }
+
+  if (nextPaidDate !== currentPaidDate) {
+    patch.paid_date = nextPaidDate;
+    changed = true;
+  }
+
+  if (nextExternalModifiedAt !== currentExternalModifiedAt) {
+    patch.external_modified_at = nextExternalModifiedAt;
+    changed = true;
+  }
+
+  if (!changed) {
     return { updated: false };
   }
 
+  patch.updated_at = new Date().toISOString();
+
   const { error } = await args.supabase
     .from("invoices")
-    .update({
-      state_code: nextStateCode,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("id", args.invoiceId);
 
   if (error) throw error;
@@ -666,24 +470,6 @@ export async function resolveByHoldedContactIdFactory(supabase: SupabaseLike) {
   };
 }
 
-export async function resolveByContactNamePreviewFactory(supabase: SupabaseLike) {
-  return async (contactName: string) => {
-    const { data, error } = await supabase
-      .from("clients")
-      .select("id, delegate_id, name")
-      .ilike("name", contactName)
-      .maybeSingle();
-
-    if (error) throw error;
-    if (!data) return null;
-
-    return {
-      clientId: data.id ?? null,
-      delegateId: data.delegate_id ?? null,
-    };
-  };
-}
-
 export async function importHoldedDocumentsIncremental(args: {
   supabase: SupabaseLike;
   docs: IncrementalDocInput[];
@@ -692,39 +478,19 @@ export async function importHoldedDocumentsIncremental(args: {
 }) {
   const { supabase, docs, preview = false, logger = console } = args;
 
-  const resolveByHoldedContactId = await resolveByHoldedContactIdFactory(supabase);
-  const resolveByContactNamePreviewOnly =
-    await resolveByContactNamePreviewFactory(supabase);
+  const resolveByHoldedContactId = await resolveByHoldedContactIdFactory(
+    supabase
+  );
 
   const accepted: any[] = [];
   const skipped: any[] = [];
 
   for (const doc of docs) {
-    let decision = await buildHoldedImportDecision({
+    const decision = await buildHoldedImportDecision({
       summary: doc.summary,
       detail: doc.detail,
       resolveByHoldedContactId,
-      resolveByContactNamePreviewOnly,
-      enableNameFallbackInPreview: preview,
     });
-
-    decision = await tryRecoverSkipByAutoCreatingClient({
-      supabase,
-      doc,
-      decision,
-      preview,
-      resolveByHoldedContactId,
-      resolveByContactNamePreviewOnly,
-      logger,
-    });
-
-    if (decision.status === "accept" && !preview) {
-      decision = await ensureAcceptedDecisionHasClient({
-        supabase,
-        decision,
-        logger,
-      });
-    }
 
     if (decision.status === "skip") {
       skipped.push({
@@ -750,7 +516,7 @@ export async function importHoldedDocumentsIncremental(args: {
       insertedInvoices: 0,
       insertedItems: 0,
       existingInvoices: 0,
-      updatedStates: 0,
+      updatedInvoices: 0,
     };
   }
 
@@ -761,12 +527,14 @@ export async function importHoldedDocumentsIncremental(args: {
       insertedInvoices: 0,
       insertedItems: 0,
       existingInvoices: 0,
-      updatedStates: 0,
+      updatedInvoices: 0,
     };
   }
 
   const normalizedAccepted = accepted.map((acceptedDoc: any) => {
-    const rawItems: any[] = Array.isArray(acceptedDoc.items) ? acceptedDoc.items : [];
+    const rawItems: any[] = Array.isArray(acceptedDoc.items)
+      ? acceptedDoc.items
+      : [];
     const forceCreditNoteNegative = isCreditNoteDocument(acceptedDoc.invoice);
 
     const sanitizedItems = rawItems.map((rawItem: any) =>
@@ -786,20 +554,26 @@ export async function importHoldedDocumentsIncremental(args: {
     };
   });
 
-  const allInvoiceRows = normalizedAccepted.map((x: any) => x.sanitizedInvoice);
+  const allInvoiceRows = normalizedAccepted.map(
+    (x: any) => x.sanitizedInvoice
+  );
 
   const existingInvoicesByExternalId = await loadExistingInvoicesByExternalId({
     supabase,
-    externalInvoiceIds: allInvoiceRows.map((row: any) => row.external_invoice_id),
+    externalInvoiceIds: allInvoiceRows.map(
+      (row: any) => row.external_invoice_id
+    ),
   });
 
   const invoiceRowsToInsert: any[] = [];
   const existingAcceptedDocs: any[] = [];
-  let updatedStates = 0;
+  let updatedInvoices = 0;
 
   for (const acceptedDoc of normalizedAccepted) {
     const sanitizedInvoice = acceptedDoc.sanitizedInvoice;
-    const externalInvoiceId = toNullableString(sanitizedInvoice?.external_invoice_id);
+    const externalInvoiceId = toNullableString(
+      sanitizedInvoice?.external_invoice_id
+    );
 
     if (!externalInvoiceId) {
       invoiceRowsToInsert.push(sanitizedInvoice);
@@ -813,14 +587,26 @@ export async function importHoldedDocumentsIncremental(args: {
       continue;
     }
 
-    await updateExistingInvoiceStateCodeIfNeeded({
+    await updateExistingInvoiceFieldsIfNeeded({
       supabase,
       invoiceId: existingInvoice.id,
       currentStateCode: existingInvoice.state_code ?? null,
       nextStateCode: sanitizedInvoice.state_code ?? null,
+      currentIsPaid:
+        typeof existingInvoice.is_paid === "boolean"
+          ? existingInvoice.is_paid
+          : null,
+      nextIsPaid:
+        typeof sanitizedInvoice.is_paid === "boolean"
+          ? sanitizedInvoice.is_paid
+          : null,
+      currentPaidDate: existingInvoice.paid_date ?? null,
+      nextPaidDate: sanitizedInvoice.paid_date ?? null,
+      currentExternalModifiedAt: existingInvoice.external_modified_at ?? null,
+      nextExternalModifiedAt: sanitizedInvoice.external_modified_at ?? null,
     }).then((result) => {
       if (result.updated) {
-        updatedStates += 1;
+        updatedInvoices += 1;
       }
     });
 
@@ -893,7 +679,7 @@ export async function importHoldedDocumentsIncremental(args: {
   }
 
   logger.info(
-    `[HOLDED][OK] inserted_invoices=${invoiceRowsToInsert.length} existing_invoices=${existingAcceptedDocs.length} updated_states=${updatedStates} items=${itemRows.length} skipped=${skipped.length}`
+    `[HOLDED][OK] inserted_invoices=${invoiceRowsToInsert.length} existing_invoices=${existingAcceptedDocs.length} updated_invoices=${updatedInvoices} items=${itemRows.length} skipped=${skipped.length}`
   );
 
   return {
@@ -902,11 +688,13 @@ export async function importHoldedDocumentsIncremental(args: {
     insertedInvoices: invoiceRowsToInsert.length,
     insertedItems: itemRows.length,
     existingInvoices: existingAcceptedDocs.length,
-    updatedStates,
+    updatedInvoices,
   };
 }
 
-export async function runHoldedInvoicesIncrementalImport(...args: any[]): Promise<any> {
+export async function runHoldedInvoicesIncrementalImport(
+  ...args: any[]
+): Promise<any> {
   const first = args[0];
 
   if (first && typeof first === "object" && !Array.isArray(first)) {
