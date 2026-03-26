@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { randomUUID } from "node:crypto";
+import { holdedFetchJson } from "./holdedFetch";
 import { buildHoldedImportDecision } from "./holdedInvoiceImporter";
 
 type SupabaseLike = {
@@ -42,6 +44,24 @@ function normalizeCurrencyValue(raw: unknown): string | null {
   if (s.toLowerCase() === "euro") return "EUR";
 
   return s.toUpperCase();
+}
+
+function normalizeInvoiceStateCode(raw: unknown): string {
+  const s = toNullableString(raw)?.toUpperCase() ?? "";
+
+  if (!s) return "OPEN";
+
+  if (s === "PENDING") return "OPEN";
+
+  if (s === "OPEN") return "OPEN";
+  if (s === "PENDING_REVIEW") return "PENDING_REVIEW";
+  if (s === "VALID") return "VALID";
+  if (s === "INVALID") return "INVALID";
+  if (s === "LOCKED") return "LOCKED";
+  if (s === "SETTLED") return "SETTLED";
+  if (s === "FAILED") return "FAILED";
+
+  return "OPEN";
 }
 
 function isCreditNoteDocument(row: any): boolean {
@@ -95,7 +115,10 @@ function normalizeInvoiceItemLineType(row: any): "sale" | "promotion" {
     0
   );
   const vatRate = toNumber(row?.vat_rate ?? row?.tax_rate ?? 0, 0);
-  const lineVatAmount = toNumber(row?.line_vat_amount ?? row?.vat_amount ?? 0, 0);
+  const lineVatAmount = toNumber(
+    row?.line_vat_amount ?? row?.vat_amount ?? 0,
+    0
+  );
   const lineGrossAmount = toNumber(
     row?.line_gross_amount ?? (lineNetAmount + lineVatAmount),
     0
@@ -179,7 +202,7 @@ function sanitizeItemRowForCurrentSchema(
     line_gross_amount: lineGrossAmount,
     line_type: normalizeInvoiceItemLineType(row),
     created_at: row.created_at ?? new Date().toISOString(),
-    state_code: row.state_code ?? "OPEN",
+    state_code: normalizeInvoiceStateCode(row.state_code),
     holded_product_id: row.holded_product_id ?? row.productId ?? null,
     sku: toNullableString(row.sku),
     holded_variant_id: row.holded_variant_id ?? row.variantId ?? null,
@@ -280,9 +303,399 @@ function sanitizeInvoiceRowForCurrentSchema(
     reviewed_at: row.reviewed_at ?? null,
     reviewed_by_actor_id: row.reviewed_by_actor_id ?? null,
     ops_owner_actor_id: row.ops_owner_actor_id ?? null,
-    state_code: row.state_code ?? "OPEN",
+    state_code: normalizeInvoiceStateCode(row.state_code),
     external_modified_at: row.external_modified_at ?? null,
   };
+}
+
+function pickFirstNonEmpty(...values: unknown[]): string | null {
+  for (const value of values) {
+    const normalized = toNullableString(value);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+async function loadHoldedContactSnapshot(
+  supabase: SupabaseLike,
+  holdedContactId: string
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabase
+    .from("holded_contacts")
+    .select("*")
+    .eq("holded_id", holdedContactId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data as Record<string, unknown> | null) ?? null;
+}
+
+function buildHoldedContactUpsertPayload(
+  holdedContactId: string,
+  rawContact: Record<string, unknown>
+) {
+  const now = new Date().toISOString();
+
+  const billingAddress =
+    rawContact["billAddress"] && typeof rawContact["billAddress"] === "object"
+      ? (rawContact["billAddress"] as Record<string, unknown>)
+      : null;
+
+  const shippingAddress =
+    rawContact["shippingAddress"] && typeof rawContact["shippingAddress"] === "object"
+      ? (rawContact["shippingAddress"] as Record<string, unknown>)
+      : null;
+
+  const customFields = Array.isArray(rawContact["customFields"])
+    ? rawContact["customFields"]
+    : [];
+
+  const legalName = pickFirstNonEmpty(
+    rawContact["legalName"],
+    rawContact["legal_name"],
+    rawContact["name"],
+    rawContact["tradeName"],
+    rawContact["trade_name"]
+  );
+
+  const tradeName = pickFirstNonEmpty(
+    rawContact["tradeName"],
+    rawContact["trade_name"],
+    rawContact["name"],
+    rawContact["legalName"],
+    rawContact["legal_name"]
+  );
+
+  const email = pickFirstNonEmpty(
+    rawContact["email"],
+    rawContact["contactEmail"],
+    rawContact["billingEmail"]
+  );
+
+  const phone = pickFirstNonEmpty(
+    rawContact["phone"],
+    rawContact["mobile"],
+    rawContact["contactPhone"]
+  );
+
+  const vatNumber = pickFirstNonEmpty(
+    rawContact["vatNumber"],
+    rawContact["vat_number"],
+    rawContact["taxId"],
+    rawContact["tax_id"],
+    rawContact["code"]
+  );
+
+  const entityTypeRaw = pickFirstNonEmpty(
+    rawContact["entityType"],
+    rawContact["entity_type"],
+    rawContact["type"]
+  );
+
+  const entityType =
+    entityTypeRaw?.toLowerCase() === "company" ? "company" : "person";
+
+  return {
+    holded_id: holdedContactId,
+    updated_at: now,
+    created_at: now,
+    name: pickFirstNonEmpty(rawContact["name"], legalName, tradeName),
+    legal_name: legalName,
+    trade_name: tradeName,
+    full_name: pickFirstNonEmpty(rawContact["name"], legalName, tradeName),
+    company_name: pickFirstNonEmpty(tradeName, legalName),
+    contact_name: pickFirstNonEmpty(rawContact["contactName"], rawContact["name"]),
+    contact_email: email,
+    billing_email: email,
+    email,
+    contact_phone: phone,
+    phone,
+    mobile: pickFirstNonEmpty(rawContact["mobile"], phone),
+    vat_number: vatNumber,
+    tax_id: vatNumber,
+    fiscal_address_line1: pickFirstNonEmpty(
+      billingAddress?.["address"],
+      rawContact["address"]
+    ),
+    fiscal_address_line2: pickFirstNonEmpty(
+      billingAddress?.["address2"],
+      rawContact["address2"]
+    ),
+    fiscal_city: pickFirstNonEmpty(billingAddress?.["city"], rawContact["city"]),
+    fiscal_region: pickFirstNonEmpty(
+      billingAddress?.["province"],
+      billingAddress?.["state"],
+      rawContact["province"],
+      rawContact["state"],
+      rawContact["region"]
+    ),
+    fiscal_postal_code: pickFirstNonEmpty(
+      billingAddress?.["postalCode"],
+      billingAddress?.["zip"],
+      rawContact["postalCode"],
+      rawContact["zip"]
+    ),
+    fiscal_country: pickFirstNonEmpty(
+      billingAddress?.["country"],
+      rawContact["country"]
+    ),
+    bill_address_line1: pickFirstNonEmpty(
+      billingAddress?.["address"],
+      rawContact["address"]
+    ),
+    bill_address_line2: pickFirstNonEmpty(
+      billingAddress?.["address2"],
+      rawContact["address2"]
+    ),
+    billing_address_line1: pickFirstNonEmpty(
+      billingAddress?.["address"],
+      rawContact["address"]
+    ),
+    billing_address_line2: pickFirstNonEmpty(
+      billingAddress?.["address2"],
+      rawContact["address2"]
+    ),
+    entity_type: entityType,
+    raw_json: rawContact,
+    raw_payload: rawContact,
+    raw: rawContact,
+    shipping_address_line1: pickFirstNonEmpty(
+      shippingAddress?.["address"],
+      rawContact["shippingAddress1"]
+    ),
+    shipping_address_line2: pickFirstNonEmpty(
+      shippingAddress?.["address2"],
+      rawContact["shippingAddress2"]
+    ),
+    shipping_city: pickFirstNonEmpty(
+      shippingAddress?.["city"],
+      rawContact["shippingCity"]
+    ),
+    shipping_region: pickFirstNonEmpty(
+      shippingAddress?.["province"],
+      shippingAddress?.["state"],
+      rawContact["shippingProvince"],
+      rawContact["shippingState"]
+    ),
+    shipping_postal_code: pickFirstNonEmpty(
+      shippingAddress?.["postalCode"],
+      shippingAddress?.["zip"],
+      rawContact["shippingPostalCode"]
+    ),
+    shipping_country: pickFirstNonEmpty(
+      shippingAddress?.["country"],
+      rawContact["shippingCountry"]
+    ),
+    custom_fields: customFields,
+  };
+}
+
+async function syncHoldedContactIntoLocalSnapshot(args: {
+  supabase: SupabaseLike;
+  holdedContactId: string;
+}): Promise<boolean> {
+  const { supabase, holdedContactId } = args;
+
+  const normalizedId = toNullableString(holdedContactId);
+  if (!normalizedId) {
+    return false;
+  }
+
+  const existing = await loadHoldedContactSnapshot(supabase, normalizedId);
+  if (existing) {
+    return true;
+  }
+
+  let remoteContact: Record<string, unknown> | null = null;
+
+  try {
+    const fetched = await holdedFetchJson(`/contacts/${normalizedId}`);
+    if (fetched && typeof fetched === "object" && !Array.isArray(fetched)) {
+      remoteContact = fetched as Record<string, unknown>;
+    }
+  } catch {
+    remoteContact = null;
+  }
+
+  if (!remoteContact) {
+    return false;
+  }
+
+  const payload = buildHoldedContactUpsertPayload(normalizedId, remoteContact);
+
+  const { error } = await supabase
+    .from("holded_contacts")
+    .upsert(payload, { onConflict: "holded_id" });
+
+  if (error) throw error;
+
+  const reloaded = await loadHoldedContactSnapshot(supabase, normalizedId);
+  return Boolean(reloaded);
+}
+
+function buildClientInsertFromHoldedContact(
+  holdedContactId: string,
+  holdedContactRow: Record<string, unknown>
+) {
+  const now = new Date().toISOString();
+
+  const name = pickFirstNonEmpty(
+    holdedContactRow["legal_name"],
+    holdedContactRow["trade_name"],
+    holdedContactRow["name"],
+    holdedContactRow["full_name"],
+    holdedContactRow["contact_name"],
+    holdedContactRow["company_name"]
+  );
+
+  const email = pickFirstNonEmpty(
+    holdedContactRow["contact_email"],
+    holdedContactRow["billing_email"],
+    holdedContactRow["email"]
+  );
+
+  const phone = pickFirstNonEmpty(
+    holdedContactRow["contact_phone"],
+    holdedContactRow["mobile"],
+    holdedContactRow["phone"]
+  );
+
+  const legalName = pickFirstNonEmpty(
+    holdedContactRow["legal_name"],
+    holdedContactRow["name"],
+    holdedContactRow["full_name"]
+  );
+
+  const vatNumber = pickFirstNonEmpty(
+    holdedContactRow["vat_number"],
+    holdedContactRow["tax_id"],
+    holdedContactRow["vat"]
+  );
+
+  const fiscalAddressLine1 = pickFirstNonEmpty(
+    holdedContactRow["fiscal_address_line1"],
+    holdedContactRow["address"],
+    holdedContactRow["bill_address_line1"],
+    holdedContactRow["billing_address_line1"]
+  );
+
+  const fiscalAddressLine2 = pickFirstNonEmpty(
+    holdedContactRow["fiscal_address_line2"],
+    holdedContactRow["address2"],
+    holdedContactRow["bill_address_line2"],
+    holdedContactRow["billing_address_line2"]
+  );
+
+  const fiscalCity = pickFirstNonEmpty(
+    holdedContactRow["fiscal_city"],
+    holdedContactRow["city"]
+  );
+
+  const fiscalRegion = pickFirstNonEmpty(
+    holdedContactRow["fiscal_region"],
+    holdedContactRow["province"],
+    holdedContactRow["region"],
+    holdedContactRow["state"]
+  );
+
+  const fiscalPostalCode = pickFirstNonEmpty(
+    holdedContactRow["fiscal_postal_code"],
+    holdedContactRow["postal_code"],
+    holdedContactRow["zip"],
+    holdedContactRow["zipcode"]
+  );
+
+  const fiscalCountry = pickFirstNonEmpty(
+    holdedContactRow["fiscal_country"],
+    holdedContactRow["country"]
+  );
+
+  const isCompanyRaw = holdedContactRow["entity_type"];
+  const isCompany =
+    typeof isCompanyRaw === "string"
+      ? isCompanyRaw.trim().toLowerCase() === "company"
+      : null;
+
+  return {
+    id: randomUUID(),
+    created_at: now,
+    updated_at: now,
+    state_code: "OPEN",
+    status: "active",
+    holded_contact_id: holdedContactId,
+    name,
+    name_raw: name,
+    legal_name: legalName,
+    contact_email: email,
+    billing_email: email,
+    contact_phone: phone,
+    vat_number: vatNumber,
+    tax_id: vatNumber,
+    fiscal_address_line1: fiscalAddressLine1,
+    fiscal_address_line2: fiscalAddressLine2,
+    fiscal_city: fiscalCity,
+    fiscal_region: fiscalRegion,
+    fiscal_postal_code: fiscalPostalCode,
+    fiscal_country: fiscalCountry,
+    is_company: isCompany,
+    profile_type: isCompany === true ? "company" : "person",
+  };
+}
+
+async function createCanonicalClientFromHoldedContact(args: {
+  supabase: SupabaseLike;
+  holdedContactId: string;
+}): Promise<{ clientId: string | null; delegateId: string | null }> {
+  const { supabase, holdedContactId } = args;
+
+  const holdedContactRow = await loadHoldedContactSnapshot(
+    supabase,
+    holdedContactId
+  );
+
+  if (!holdedContactRow) {
+    return { clientId: null, delegateId: null };
+  }
+
+  const payload = buildClientInsertFromHoldedContact(
+    holdedContactId,
+    holdedContactRow
+  );
+
+  const { data, error } = await supabase
+    .from("clients")
+    .insert(payload)
+    .select("id, delegate_id")
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return {
+    clientId: toNullableString(data?.id),
+    delegateId: toNullableString(data?.delegate_id),
+  };
+}
+
+async function ensureHoldedContactClientMapping(args: {
+  supabase: SupabaseLike;
+  holdedContactId: string;
+  clientId: string;
+}) {
+  const { supabase, holdedContactId, clientId } = args;
+
+  const { error } = await supabase
+    .from("holded_contact_client_map_g1")
+    .upsert(
+      {
+        holded_contact_id: holdedContactId,
+        client_id: clientId,
+      },
+      {
+        onConflict: "holded_contact_id",
+      }
+    );
+
+  if (error) throw error;
 }
 
 async function findClientByHoldedContactId(
@@ -294,15 +707,34 @@ async function findClientByHoldedContactId(
     return null;
   }
 
-  const { data: holdedContactRow, error: holdedContactError } = await supabase
-    .from("holded_contacts")
-    .select("holded_id")
-    .eq("holded_id", normalizedHoldedContactId)
-    .maybeSingle();
+  let holdedContactRow = await loadHoldedContactSnapshot(
+    supabase,
+    normalizedHoldedContactId
+  );
 
-  if (holdedContactError) throw holdedContactError;
+  if (!holdedContactRow) {
+    const synced = await syncHoldedContactIntoLocalSnapshot({
+      supabase,
+      holdedContactId: normalizedHoldedContactId,
+    });
 
-  if (!holdedContactRow?.holded_id) {
+    if (!synced) {
+      return {
+        holdedContactExists: false,
+        clientId: null,
+        delegateId: null,
+        mappingExists: false,
+        clientExists: false,
+      };
+    }
+
+    holdedContactRow = await loadHoldedContactSnapshot(
+      supabase,
+      normalizedHoldedContactId
+    );
+  }
+
+  if (!holdedContactRow) {
     return {
       holdedContactExists: false,
       clientId: null,
@@ -320,7 +752,74 @@ async function findClientByHoldedContactId(
 
   if (mapError) throw mapError;
 
-  if (!mapRow?.client_id) {
+  if (mapRow?.client_id) {
+    const { data: clientRow, error: clientError } = await supabase
+      .from("clients")
+      .select("id, delegate_id")
+      .eq("id", mapRow.client_id)
+      .maybeSingle();
+
+    if (clientError) throw clientError;
+
+    if (!clientRow?.id) {
+      return {
+        holdedContactExists: true,
+        clientId: toNullableString(mapRow.client_id),
+        delegateId: null,
+        mappingExists: true,
+        clientExists: false,
+      };
+    }
+
+    return {
+      holdedContactExists: true,
+      clientId: toNullableString(clientRow.id),
+      delegateId: toNullableString(clientRow.delegate_id),
+      mappingExists: true,
+      clientExists: true,
+    };
+  }
+
+  const { data: candidateClients, error: candidateClientsError } = await supabase
+    .from("clients")
+    .select("id, delegate_id")
+    .eq("holded_contact_id", normalizedHoldedContactId)
+    .limit(2);
+
+  if (candidateClientsError) throw candidateClientsError;
+
+  const candidates = Array.isArray(candidateClients) ? candidateClients : [];
+
+  if (candidates.length === 1 && candidates[0]?.id) {
+    const resolvedClientId = toNullableString(candidates[0].id);
+    const resolvedDelegateId = toNullableString(candidates[0].delegate_id);
+
+    if (!resolvedClientId) {
+      return {
+        holdedContactExists: true,
+        clientId: null,
+        delegateId: null,
+        mappingExists: false,
+        clientExists: false,
+      };
+    }
+
+    await ensureHoldedContactClientMapping({
+      supabase,
+      holdedContactId: normalizedHoldedContactId,
+      clientId: resolvedClientId,
+    });
+
+    return {
+      holdedContactExists: true,
+      clientId: resolvedClientId,
+      delegateId: resolvedDelegateId,
+      mappingExists: true,
+      clientExists: true,
+    };
+  }
+
+  if (candidates.length > 1) {
     return {
       holdedContactExists: true,
       clientId: null,
@@ -330,28 +829,31 @@ async function findClientByHoldedContactId(
     };
   }
 
-  const { data: clientRow, error: clientError } = await supabase
-    .from("clients")
-    .select("id, delegate_id")
-    .eq("id", mapRow.client_id)
-    .maybeSingle();
+  const created = await createCanonicalClientFromHoldedContact({
+    supabase,
+    holdedContactId: normalizedHoldedContactId,
+  });
 
-  if (clientError) throw clientError;
-
-  if (!clientRow?.id) {
+  if (!created.clientId) {
     return {
       holdedContactExists: true,
-      clientId: mapRow.client_id ?? null,
+      clientId: null,
       delegateId: null,
-      mappingExists: true,
+      mappingExists: false,
       clientExists: false,
     };
   }
 
+  await ensureHoldedContactClientMapping({
+    supabase,
+    holdedContactId: normalizedHoldedContactId,
+    clientId: created.clientId,
+  });
+
   return {
     holdedContactExists: true,
-    clientId: clientRow.id ?? null,
-    delegateId: clientRow.delegate_id ?? null,
+    clientId: created.clientId,
+    delegateId: created.delegateId,
     mappingExists: true,
     clientExists: true,
   };
@@ -407,13 +909,15 @@ async function updateExistingInvoiceFieldsIfNeeded(args: {
   currentExternalModifiedAt: string | null;
   nextExternalModifiedAt: string | null;
 }) {
-  const currentStateCode = toNullableString(args.currentStateCode);
-  const nextStateCode = toNullableString(args.nextStateCode);
+  const currentStateCode = normalizeInvoiceStateCode(args.currentStateCode);
+  const nextStateCode = normalizeInvoiceStateCode(args.nextStateCode);
 
   const currentPaidDate = toNullableString(args.currentPaidDate);
   const nextPaidDate = toNullableString(args.nextPaidDate);
 
-  const currentExternalModifiedAt = toNullableString(args.currentExternalModifiedAt);
+  const currentExternalModifiedAt = toNullableString(
+    args.currentExternalModifiedAt
+  );
   const nextExternalModifiedAt = toNullableString(args.nextExternalModifiedAt);
 
   const currentIsPaid =
@@ -428,7 +932,7 @@ async function updateExistingInvoiceFieldsIfNeeded(args: {
   const patch: Record<string, unknown> = {};
   let changed = false;
 
-  if (nextStateCode && nextStateCode !== currentStateCode) {
+  if (nextStateCode !== currentStateCode) {
     patch.state_code = nextStateCode;
     changed = true;
   }
