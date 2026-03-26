@@ -490,19 +490,19 @@ function normalizeExplicitHoldedStatus(
   const value = raw.trim().toLowerCase();
 
   if (value === "paid" || value === "pagado" || value === "cobrado") {
-    return "PAID";
+    return "SETTLED";
   }
 
   if (value === "pending" || value === "pendiente") {
-    return "PENDING";
+    return "OPEN";
   }
 
   if (value === "overdue" || value === "vencido") {
-    return "OVERDUE";
+    return "OPEN";
   }
 
   if (value === "cancelled" || value === "canceled" || value === "anulado") {
-    return "CANCELLED";
+    return "INVALID";
   }
 
   return null;
@@ -520,10 +520,6 @@ function extractDueDate(detail: HoldedDetailDoc): string | null {
   );
 }
 
-function todayYmdUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function computeDesiredStateCode(args: {
   detail: HoldedDetailDoc;
   summary: HoldedSummaryDoc;
@@ -535,34 +531,15 @@ function computeDesiredStateCode(args: {
 }): string {
   const explicit = normalizeExplicitHoldedStatus(args.detail, args.summary);
 
-  if (explicit === "CANCELLED") {
-    return "CANCELLED";
+  if (explicit === "INVALID") {
+    return "INVALID";
   }
 
-  if (args.paidState.is_paid === true || explicit === "PAID") {
-    return "PAID";
+  if (args.paidState.is_paid === true || explicit === "SETTLED") {
+    return "SETTLED";
   }
 
-  const dueDate = extractDueDate(args.detail);
-  const today = todayYmdUtc();
-
-  if (
-    (args.paymentsPending ?? 0) > 0 &&
-    dueDate !== null &&
-    dueDate < today
-  ) {
-    return "OVERDUE";
-  }
-
-  if (explicit === "OVERDUE") {
-    return "OVERDUE";
-  }
-
-  if (explicit === "PENDING") {
-    return "PENDING";
-  }
-
-  return "PENDING";
+  return "OPEN";
 }
 
 function extractTotals(detail: HoldedDetailDoc): {
@@ -1310,12 +1287,12 @@ export async function importOneHoldedInvoiceById(...args: any[]): Promise<{
 
       if (existingInvoice) {
         const nextStateCode =
-          acceptedDecision.invoice.state_code?.trim() || "PENDING";
+          acceptedDecision.invoice.state_code?.trim() || "OPEN";
 
         const currentStateCode =
           typeof existingInvoice.state_code === "string"
             ? existingInvoice.state_code
-            : "PENDING";
+            : "OPEN";
 
         const nextIsPaid = acceptedDecision.invoice.is_paid ?? false;
         const currentIsPaid =
