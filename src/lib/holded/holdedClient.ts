@@ -34,7 +34,7 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-async function holdedFetch<T>(
+async function rawHoldedFetch<T>(
   path: string,
   init?: RequestInit & { timeoutMs?: number }
 ): Promise<T> {
@@ -81,6 +81,25 @@ async function holdedFetch<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// Generic raw-path JSON fetch.
+// Use this only when you really want to hit an arbitrary Holded invoicing path.
+export async function holdedFetchJson<T = unknown>(
+  path: string,
+  init?: RequestInit & { timeoutMs?: number }
+): Promise<T> {
+  const normalizedPath = String(path ?? "").trim();
+
+  if (!normalizedPath) {
+    throw new HoldedClientError("Missing Holded path", null);
+  }
+
+  const safePath = normalizedPath.startsWith("/")
+    ? normalizedPath
+    : `/${normalizedPath}`;
+
+  return rawHoldedFetch<T>(safePath, init);
 }
 
 /* ===========================
@@ -146,7 +165,7 @@ export async function holdedListDocuments<T = unknown>(
 
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
 
-    const payload = await holdedFetch<unknown>(
+    const payload = await rawHoldedFetch<unknown>(
       `/documents/${encodeURIComponent(docType)}${suffix}`
     );
 
@@ -181,7 +200,7 @@ export async function holdedDocumentDetail<T = unknown>(
 ): Promise<T> {
   if (!id) throw new HoldedClientError("Missing Holded document id", null);
 
-  return holdedFetch<T>(
+  return rawHoldedFetch<T>(
     `/documents/${encodeURIComponent(docType)}/${encodeURIComponent(id)}`
   );
 }
@@ -207,7 +226,7 @@ export async function holdedContactDetail<T = HoldedContact>(
   const id = String(contactId ?? "").trim();
   if (!id) throw new HoldedClientError("Missing Holded contact id", null);
 
-  return holdedFetch<T>(`/contacts/${encodeURIComponent(id)}`);
+  return rawHoldedFetch<T>(`/contacts/${encodeURIComponent(id)}`);
 }
 
 export async function holdedListContacts<T = HoldedContact[]>(
@@ -216,5 +235,5 @@ export async function holdedListContacts<T = HoldedContact[]>(
   const qs = buildSearchParams(query);
   const suffix = qs.toString() ? `?${qs}` : "";
 
-  return holdedFetch<T>(`/contacts${suffix}`);
+  return rawHoldedFetch<T>(`/contacts${suffix}`);
 }

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { randomUUID } from "node:crypto";
-import { holdedFetchJson } from "./holdedFetch";
+import { holdedContactDetail } from "./holdedFetch";
 import { buildHoldedImportDecision } from "./holdedInvoiceImporter";
 
 type SupabaseLike = {
@@ -534,7 +534,7 @@ async function syncHoldedContactIntoLocalSnapshot(args: {
       endpoint: `/contacts/${normalizedId}`,
     });
 
-    const fetched = await holdedFetchJson(`/contacts/${normalizedId}`);
+    const fetched = await holdedContactDetail(normalizedId);
 
     console.info("[HOLDED][CONTACT_SYNC][FETCH_RESULT]", {
       holdedContactId: normalizedId,

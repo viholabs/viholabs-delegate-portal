@@ -1,10 +1,16 @@
 // VIHOLABS — HOLDed Fetch (CANONICAL FAÇADE)
-// Historical client removed.
-// Canonical client lives in holdedClient.ts
+// Canonical façade over holdedClient.ts
+// IMPORTANT:
+// - holdedFetchJson = generic raw path fetch
+// - holdedFetch = canonical document detail fetch
+// - do NOT alias holdedListDocuments as generic fetch
 
 export { HoldedClientError as HoldedError } from "./holdedClient";
 
 export {
-  holdedListDocuments as holdedFetchJson,
+  holdedFetchJson,
+  holdedListDocuments,
   holdedDocumentDetail as holdedFetch,
+  holdedContactDetail,
+  holdedListContacts,
 } from "./holdedClient";
