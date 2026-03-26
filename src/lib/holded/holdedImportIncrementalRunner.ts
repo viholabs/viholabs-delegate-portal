@@ -316,6 +316,20 @@ function pickFirstNonEmpty(...values: unknown[]): string | null {
   return null;
 }
 
+function summarizeUnknown(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") {
+    return value.length > 280 ? value.slice(0, 280) : value;
+  }
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized.length > 280 ? serialized.slice(0, 280) : serialized;
+  } catch {
+    return String(value);
+  }
+}
+
 async function loadHoldedContactSnapshot(
   supabase: SupabaseLike,
   holdedContactId: string
@@ -498,26 +512,74 @@ async function syncHoldedContactIntoLocalSnapshot(args: {
 
   const normalizedId = toNullableString(holdedContactId);
   if (!normalizedId) {
+    console.error("[HOLDED][CONTACT_SYNC][INVALID_ID]", {
+      holdedContactId,
+    });
     return false;
   }
 
   const existing = await loadHoldedContactSnapshot(supabase, normalizedId);
   if (existing) {
+    console.info("[HOLDED][CONTACT_SYNC][ALREADY_LOCAL]", {
+      holdedContactId: normalizedId,
+    });
     return true;
   }
 
   let remoteContact: Record<string, unknown> | null = null;
 
   try {
+    console.info("[HOLDED][CONTACT_SYNC][FETCH_START]", {
+      holdedContactId: normalizedId,
+      endpoint: `/contacts/${normalizedId}`,
+    });
+
     const fetched = await holdedFetchJson(`/contacts/${normalizedId}`);
+
+    console.info("[HOLDED][CONTACT_SYNC][FETCH_RESULT]", {
+      holdedContactId: normalizedId,
+      resultType: Array.isArray(fetched) ? "array" : typeof fetched,
+      hasId:
+        fetched &&
+        typeof fetched === "object" &&
+        !Array.isArray(fetched) &&
+        Boolean((fetched as Record<string, unknown>)["id"]),
+      preview: summarizeUnknown(fetched),
+    });
+
     if (fetched && typeof fetched === "object" && !Array.isArray(fetched)) {
       remoteContact = fetched as Record<string, unknown>;
     }
-  } catch {
+  } catch (error) {
+    console.error("[HOLDED][CONTACT_SYNC][FETCH_ERROR]", {
+      holdedContactId: normalizedId,
+      endpoint: `/contacts/${normalizedId}`,
+      message:
+        error instanceof Error ? error.message : summarizeUnknown(error),
+      name: error instanceof Error ? error.name : null,
+      stack:
+        error instanceof Error && typeof error.stack === "string"
+          ? error.stack.split("\n").slice(0, 4).join(" | ")
+          : null,
+    });
     remoteContact = null;
   }
 
   if (!remoteContact) {
+    console.error("[HOLDED][CONTACT_SYNC][REMOTE_NOT_RECOVERED]", {
+      holdedContactId: normalizedId,
+      endpoint: `/contacts/${normalizedId}`,
+    });
+    return false;
+  }
+
+  const remoteId = toNullableString(remoteContact["id"]);
+  if (!remoteId) {
+    console.error("[HOLDED][CONTACT_SYNC][REMOTE_WITHOUT_ID]", {
+      holdedContactId: normalizedId,
+      endpoint: `/contacts/${normalizedId}`,
+      preview: summarizeUnknown(remoteContact),
+    });
     return false;
   }
 
@@ -527,10 +589,27 @@ async function syncHoldedContactIntoLocalSnapshot(args: {
     .from("holded_contacts")
     .upsert(payload, { onConflict: "holded_id" });
 
-  if (error) throw error;
+  if (error) {
+    console.error("[HOLDED][CONTACT_SYNC][UPSERT_ERROR]", {
+      holdedContactId: normalizedId,
+      message: error.message ?? null,
+      details: "details" in error ? (error as any).details ?? null : null,
+      hint: "hint" in error ? (error as any).hint ?? null : null,
+      code: "code" in error ? (error as any).code ?? null : null,
+    });
+    throw error;
+  }
 
   const reloaded = await loadHoldedContactSnapshot(supabase, normalizedId);
-  return Boolean(reloaded);
+  const ok = Boolean(reloaded);
+
+  console.info("[HOLDED][CONTACT_SYNC][UPSERT_DONE]", {
+    holdedContactId: normalizedId,
+    reloaded: ok,
+    resolvedName: toNullableString(reloaded?.["name"]),
+  });
+
+  return ok;
 }
 
 function buildClientInsertFromHoldedContact(
@@ -654,6 +733,9 @@ async function createCanonicalClientFromHoldedContact(args: {
   );
 
   if (!holdedContactRow) {
+    console.error("[HOLDED][CLIENT_CREATE][MISSING_LOCAL_CONTACT]", {
+      holdedContactId,
+    });
     return { clientId: null, delegateId: null };
   }
 
@@ -669,6 +751,11 @@ async function createCanonicalClientFromHoldedContact(args: {
     .maybeSingle();
 
   if (error) throw error;
+
+  console.info("[HOLDED][CLIENT_CREATE][OK]", {
+    holdedContactId,
+    clientId: toNullableString(data?.id),
+  });
 
   return {
     clientId: toNullableString(data?.id),
@@ -696,6 +783,11 @@ async function ensureHoldedContactClientMapping(args: {
     );
 
   if (error) throw error;
+
+  console.info("[HOLDED][CONTACT_MAP][UPSERT_OK]", {
+    holdedContactId,
+    clientId,
+  });
 }
 
 async function findClientByHoldedContactId(
@@ -704,6 +796,9 @@ async function findClientByHoldedContactId(
 ): Promise<ClientResolution | null> {
   const normalizedHoldedContactId = toNullableString(holdedContactId);
   if (!normalizedHoldedContactId) {
+    console.error("[HOLDED][RESOLVE][INVALID_CONTACT_ID]", {
+      holdedContactId,
+    });
     return null;
   }
 
@@ -713,12 +808,20 @@ async function findClientByHoldedContactId(
   );
 
   if (!holdedContactRow) {
+    console.warn("[HOLDED][RESOLVE][LOCAL_CONTACT_MISSING]", {
+      holdedContactId: normalizedHoldedContactId,
+    });
+
     const synced = await syncHoldedContactIntoLocalSnapshot({
       supabase,
       holdedContactId: normalizedHoldedContactId,
     });
 
     if (!synced) {
+      console.error("[HOLDED][RESOLVE][REMOTE_CONTACT_UNAVAILABLE]", {
+        holdedContactId: normalizedHoldedContactId,
+      });
+
       return {
         holdedContactExists: false,
         clientId: null,
@@ -735,6 +838,10 @@ async function findClientByHoldedContactId(
   }
 
   if (!holdedContactRow) {
+    console.error("[HOLDED][RESOLVE][CONTACT_STILL_MISSING_AFTER_SYNC]", {
+      holdedContactId: normalizedHoldedContactId,
+    });
+
     return {
       holdedContactExists: false,
       clientId: null,
@@ -762,6 +869,11 @@ async function findClientByHoldedContactId(
     if (clientError) throw clientError;
 
     if (!clientRow?.id) {
+      console.error("[HOLDED][RESOLVE][MAPPED_CLIENT_NOT_FOUND]", {
+        holdedContactId: normalizedHoldedContactId,
+        mappedClientId: toNullableString(mapRow.client_id),
+      });
+
       return {
         holdedContactExists: true,
         clientId: toNullableString(mapRow.client_id),
@@ -770,6 +882,11 @@ async function findClientByHoldedContactId(
         clientExists: false,
       };
     }
+
+    console.info("[HOLDED][RESOLVE][MAPPING_OK]", {
+      holdedContactId: normalizedHoldedContactId,
+      clientId: toNullableString(clientRow.id),
+    });
 
     return {
       holdedContactExists: true,
@@ -795,6 +912,10 @@ async function findClientByHoldedContactId(
     const resolvedDelegateId = toNullableString(candidates[0].delegate_id);
 
     if (!resolvedClientId) {
+      console.error("[HOLDED][RESOLVE][CANDIDATE_WITHOUT_ID]", {
+        holdedContactId: normalizedHoldedContactId,
+      });
+
       return {
         holdedContactExists: true,
         clientId: null,
@@ -810,6 +931,11 @@ async function findClientByHoldedContactId(
       clientId: resolvedClientId,
     });
 
+    console.info("[HOLDED][RESOLVE][MAPPING_CREATED_FROM_CLIENT]", {
+      holdedContactId: normalizedHoldedContactId,
+      clientId: resolvedClientId,
+    });
+
     return {
       holdedContactExists: true,
       clientId: resolvedClientId,
@@ -820,6 +946,11 @@ async function findClientByHoldedContactId(
   }
 
   if (candidates.length > 1) {
+    console.error("[HOLDED][RESOLVE][MULTIPLE_CLIENT_CANDIDATES]", {
+      holdedContactId: normalizedHoldedContactId,
+      candidateCount: candidates.length,
+    });
+
     return {
       holdedContactExists: true,
       clientId: null,
@@ -835,6 +966,10 @@ async function findClientByHoldedContactId(
   });
 
   if (!created.clientId) {
+    console.error("[HOLDED][RESOLVE][CLIENT_CREATE_FAILED]", {
+      holdedContactId: normalizedHoldedContactId,
+    });
+
     return {
       holdedContactExists: true,
       clientId: null,
@@ -846,6 +981,11 @@ async function findClientByHoldedContactId(
 
   await ensureHoldedContactClientMapping({
     supabase,
+    holdedContactId: normalizedHoldedContactId,
+    clientId: created.clientId,
+  });
+
+  console.info("[HOLDED][RESOLVE][CLIENT_CREATED_AND_MAPPED]", {
     holdedContactId: normalizedHoldedContactId,
     clientId: created.clientId,
   });
