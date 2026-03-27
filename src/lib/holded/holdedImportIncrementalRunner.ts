@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { randomUUID } from "node:crypto";
-import { holdedContactDetail } from "./holdedFetch";
+
 import { buildHoldedImportDecision } from "./holdedInvoiceImporter";
 
 type SupabaseLike = {
@@ -308,35 +307,13 @@ function sanitizeInvoiceRowForCurrentSchema(
   };
 }
 
-function pickFirstNonEmpty(...values: unknown[]): string | null {
-  for (const value of values) {
-    const normalized = toNullableString(value);
-    if (normalized) return normalized;
-  }
-  return null;
-}
-
-function summarizeUnknown(value: unknown): string {
-  if (value === null) return "null";
-  if (value === undefined) return "undefined";
-  if (typeof value === "string") {
-    return value.length > 280 ? value.slice(0, 280) : value;
-  }
-  try {
-    const serialized = JSON.stringify(value);
-    return serialized.length > 280 ? serialized.slice(0, 280) : serialized;
-  } catch {
-    return String(value);
-  }
-}
-
 async function loadHoldedContactSnapshot(
   supabase: SupabaseLike,
   holdedContactId: string
 ): Promise<Record<string, unknown> | null> {
   const { data, error } = await supabase
     .from("holded_contacts")
-    .select("*")
+    .select("holded_id")
     .eq("holded_id", holdedContactId)
     .maybeSingle();
 
@@ -344,504 +321,22 @@ async function loadHoldedContactSnapshot(
   return (data as Record<string, unknown> | null) ?? null;
 }
 
-function buildHoldedContactUpsertPayload(
-  holdedContactId: string,
-  rawContact: Record<string, unknown>
-) {
-  const now = new Date().toISOString();
-
-  const billingAddress =
-    rawContact["billAddress"] && typeof rawContact["billAddress"] === "object"
-      ? (rawContact["billAddress"] as Record<string, unknown>)
-      : null;
-
-  const shippingAddress =
-    rawContact["shippingAddress"] && typeof rawContact["shippingAddress"] === "object"
-      ? (rawContact["shippingAddress"] as Record<string, unknown>)
-      : null;
-
-  const customFields = Array.isArray(rawContact["customFields"])
-    ? rawContact["customFields"]
-    : [];
-
-  const legalName = pickFirstNonEmpty(
-    rawContact["legalName"],
-    rawContact["legal_name"],
-    rawContact["name"],
-    rawContact["tradeName"],
-    rawContact["trade_name"]
-  );
-
-  const tradeName = pickFirstNonEmpty(
-    rawContact["tradeName"],
-    rawContact["trade_name"],
-    rawContact["name"],
-    rawContact["legalName"],
-    rawContact["legal_name"]
-  );
-
-  const email = pickFirstNonEmpty(
-    rawContact["email"],
-    rawContact["contactEmail"],
-    rawContact["billingEmail"]
-  );
-
-  const phone = pickFirstNonEmpty(
-    rawContact["phone"],
-    rawContact["mobile"],
-    rawContact["contactPhone"]
-  );
-
-  const vatNumber = pickFirstNonEmpty(
-    rawContact["vatNumber"],
-    rawContact["vat_number"],
-    rawContact["taxId"],
-    rawContact["tax_id"],
-    rawContact["code"]
-  );
-
-  const entityTypeRaw = pickFirstNonEmpty(
-    rawContact["entityType"],
-    rawContact["entity_type"],
-    rawContact["type"]
-  );
-
-  const entityType =
-    entityTypeRaw?.toLowerCase() === "company" ? "company" : "person";
-
-  return {
-    holded_id: holdedContactId,
-    updated_at: now,
-    created_at: now,
-    name: pickFirstNonEmpty(rawContact["name"], legalName, tradeName),
-    legal_name: legalName,
-    trade_name: tradeName,
-    full_name: pickFirstNonEmpty(rawContact["name"], legalName, tradeName),
-    company_name: pickFirstNonEmpty(tradeName, legalName),
-    contact_name: pickFirstNonEmpty(rawContact["contactName"], rawContact["name"]),
-    contact_email: email,
-    billing_email: email,
-    email,
-    contact_phone: phone,
-    phone,
-    mobile: pickFirstNonEmpty(rawContact["mobile"], phone),
-    vat_number: vatNumber,
-    tax_id: vatNumber,
-    fiscal_address_line1: pickFirstNonEmpty(
-      billingAddress?.["address"],
-      rawContact["address"]
-    ),
-    fiscal_address_line2: pickFirstNonEmpty(
-      billingAddress?.["address2"],
-      rawContact["address2"]
-    ),
-    fiscal_city: pickFirstNonEmpty(billingAddress?.["city"], rawContact["city"]),
-    fiscal_region: pickFirstNonEmpty(
-      billingAddress?.["province"],
-      billingAddress?.["state"],
-      rawContact["province"],
-      rawContact["state"],
-      rawContact["region"]
-    ),
-    fiscal_postal_code: pickFirstNonEmpty(
-      billingAddress?.["postalCode"],
-      billingAddress?.["zip"],
-      rawContact["postalCode"],
-      rawContact["zip"]
-    ),
-    fiscal_country: pickFirstNonEmpty(
-      billingAddress?.["country"],
-      rawContact["country"]
-    ),
-    bill_address_line1: pickFirstNonEmpty(
-      billingAddress?.["address"],
-      rawContact["address"]
-    ),
-    bill_address_line2: pickFirstNonEmpty(
-      billingAddress?.["address2"],
-      rawContact["address2"]
-    ),
-    billing_address_line1: pickFirstNonEmpty(
-      billingAddress?.["address"],
-      rawContact["address"]
-    ),
-    billing_address_line2: pickFirstNonEmpty(
-      billingAddress?.["address2"],
-      rawContact["address2"]
-    ),
-    entity_type: entityType,
-    raw_json: rawContact,
-    raw_payload: rawContact,
-    raw: rawContact,
-    shipping_address_line1: pickFirstNonEmpty(
-      shippingAddress?.["address"],
-      rawContact["shippingAddress1"]
-    ),
-    shipping_address_line2: pickFirstNonEmpty(
-      shippingAddress?.["address2"],
-      rawContact["shippingAddress2"]
-    ),
-    shipping_city: pickFirstNonEmpty(
-      shippingAddress?.["city"],
-      rawContact["shippingCity"]
-    ),
-    shipping_region: pickFirstNonEmpty(
-      shippingAddress?.["province"],
-      shippingAddress?.["state"],
-      rawContact["shippingProvince"],
-      rawContact["shippingState"]
-    ),
-    shipping_postal_code: pickFirstNonEmpty(
-      shippingAddress?.["postalCode"],
-      shippingAddress?.["zip"],
-      rawContact["shippingPostalCode"]
-    ),
-    shipping_country: pickFirstNonEmpty(
-      shippingAddress?.["country"],
-      rawContact["shippingCountry"]
-    ),
-    custom_fields: customFields,
-  };
-}
-
-async function syncHoldedContactIntoLocalSnapshot(args: {
-  supabase: SupabaseLike;
-  holdedContactId: string;
-}): Promise<boolean> {
-  const { supabase, holdedContactId } = args;
-
-  const normalizedId = toNullableString(holdedContactId);
-  if (!normalizedId) {
-    console.error("[HOLDED][CONTACT_SYNC][INVALID_ID]", {
-      holdedContactId,
-    });
-    return false;
-  }
-
-  const existing = await loadHoldedContactSnapshot(supabase, normalizedId);
-  if (existing) {
-    console.info("[HOLDED][CONTACT_SYNC][ALREADY_LOCAL]", {
-      holdedContactId: normalizedId,
-    });
-    return true;
-  }
-
-  let remoteContact: Record<string, unknown> | null = null;
-
-  try {
-    console.info("[HOLDED][CONTACT_SYNC][FETCH_START]", {
-      holdedContactId: normalizedId,
-      endpoint: `/contacts/${normalizedId}`,
-    });
-
-    const fetched = await holdedContactDetail(normalizedId);
-
-    console.info("[HOLDED][CONTACT_SYNC][FETCH_RESULT]", {
-      holdedContactId: normalizedId,
-      resultType: Array.isArray(fetched) ? "array" : typeof fetched,
-      hasId:
-        fetched &&
-        typeof fetched === "object" &&
-        !Array.isArray(fetched) &&
-        Boolean((fetched as Record<string, unknown>)["id"]),
-      preview: summarizeUnknown(fetched),
-    });
-
-    if (fetched && typeof fetched === "object" && !Array.isArray(fetched)) {
-      remoteContact = fetched as Record<string, unknown>;
-    }
-  } catch (error) {
-    console.error("[HOLDED][CONTACT_SYNC][FETCH_ERROR]", {
-      holdedContactId: normalizedId,
-      endpoint: `/contacts/${normalizedId}`,
-      message:
-        error instanceof Error ? error.message : summarizeUnknown(error),
-      name: error instanceof Error ? error.name : null,
-      stack:
-        error instanceof Error && typeof error.stack === "string"
-          ? error.stack.split("\n").slice(0, 4).join(" | ")
-          : null,
-    });
-    remoteContact = null;
-  }
-
-  if (!remoteContact) {
-    console.error("[HOLDED][CONTACT_SYNC][REMOTE_NOT_RECOVERED]", {
-      holdedContactId: normalizedId,
-      endpoint: `/contacts/${normalizedId}`,
-    });
-    return false;
-  }
-
-  const remoteId = toNullableString(remoteContact["id"]);
-  if (!remoteId) {
-    console.error("[HOLDED][CONTACT_SYNC][REMOTE_WITHOUT_ID]", {
-      holdedContactId: normalizedId,
-      endpoint: `/contacts/${normalizedId}`,
-      preview: summarizeUnknown(remoteContact),
-    });
-    return false;
-  }
-
-  const payload = buildHoldedContactUpsertPayload(normalizedId, remoteContact);
-
-  const { error } = await supabase
-    .from("holded_contacts")
-    .upsert(payload, { onConflict: "holded_id" });
-
-  if (error) {
-    console.error("[HOLDED][CONTACT_SYNC][UPSERT_ERROR]", {
-      holdedContactId: normalizedId,
-      message: error.message ?? null,
-      details: "details" in error ? (error as any).details ?? null : null,
-      hint: "hint" in error ? (error as any).hint ?? null : null,
-      code: "code" in error ? (error as any).code ?? null : null,
-    });
-    throw error;
-  }
-
-  const reloaded = await loadHoldedContactSnapshot(supabase, normalizedId);
-  const ok = Boolean(reloaded);
-
-  console.info("[HOLDED][CONTACT_SYNC][UPSERT_DONE]", {
-    holdedContactId: normalizedId,
-    reloaded: ok,
-    resolvedName: toNullableString(reloaded?.["name"]),
-  });
-
-  return ok;
-}
-
-function buildClientInsertFromHoldedContact(
-  holdedContactId: string,
-  holdedContactRow: Record<string, unknown>
-) {
-  const now = new Date().toISOString();
-
-  const name = pickFirstNonEmpty(
-    holdedContactRow["legal_name"],
-    holdedContactRow["trade_name"],
-    holdedContactRow["name"],
-    holdedContactRow["full_name"],
-    holdedContactRow["contact_name"],
-    holdedContactRow["company_name"]
-  );
-
-  const email = pickFirstNonEmpty(
-    holdedContactRow["contact_email"],
-    holdedContactRow["billing_email"],
-    holdedContactRow["email"]
-  );
-
-  const phone = pickFirstNonEmpty(
-    holdedContactRow["contact_phone"],
-    holdedContactRow["mobile"],
-    holdedContactRow["phone"]
-  );
-
-  const legalName = pickFirstNonEmpty(
-    holdedContactRow["legal_name"],
-    holdedContactRow["name"],
-    holdedContactRow["full_name"]
-  );
-
-  const vatNumber = pickFirstNonEmpty(
-    holdedContactRow["vat_number"],
-    holdedContactRow["tax_id"],
-    holdedContactRow["vat"]
-  );
-
-  const fiscalAddressLine1 = pickFirstNonEmpty(
-    holdedContactRow["fiscal_address_line1"],
-    holdedContactRow["address"],
-    holdedContactRow["bill_address_line1"],
-    holdedContactRow["billing_address_line1"]
-  );
-
-  const fiscalAddressLine2 = pickFirstNonEmpty(
-    holdedContactRow["fiscal_address_line2"],
-    holdedContactRow["address2"],
-    holdedContactRow["bill_address_line2"],
-    holdedContactRow["billing_address_line2"]
-  );
-
-  const fiscalCity = pickFirstNonEmpty(
-    holdedContactRow["fiscal_city"],
-    holdedContactRow["city"]
-  );
-
-  const fiscalRegion = pickFirstNonEmpty(
-    holdedContactRow["fiscal_region"],
-    holdedContactRow["province"],
-    holdedContactRow["region"],
-    holdedContactRow["state"]
-  );
-
-  const fiscalPostalCode = pickFirstNonEmpty(
-    holdedContactRow["fiscal_postal_code"],
-    holdedContactRow["postal_code"],
-    holdedContactRow["zip"],
-    holdedContactRow["zipcode"]
-  );
-
-  const fiscalCountry = pickFirstNonEmpty(
-    holdedContactRow["fiscal_country"],
-    holdedContactRow["country"]
-  );
-
-  const isCompanyRaw = holdedContactRow["entity_type"];
-  const isCompany =
-    typeof isCompanyRaw === "string"
-      ? isCompanyRaw.trim().toLowerCase() === "company"
-      : null;
-
-  return {
-    id: randomUUID(),
-    created_at: now,
-    updated_at: now,
-    state_code: "OPEN",
-    status: "active",
-    holded_contact_id: holdedContactId,
-    name,
-    name_raw: name,
-    legal_name: legalName,
-    contact_email: email,
-    billing_email: email,
-    contact_phone: phone,
-    vat_number: vatNumber,
-    tax_id: vatNumber,
-    fiscal_address_line1: fiscalAddressLine1,
-    fiscal_address_line2: fiscalAddressLine2,
-    fiscal_city: fiscalCity,
-    fiscal_region: fiscalRegion,
-    fiscal_postal_code: fiscalPostalCode,
-    fiscal_country: fiscalCountry,
-    is_company: isCompany,
-    profile_type: isCompany === true ? "company" : "person",
-  };
-}
-
-async function createCanonicalClientFromHoldedContact(args: {
-  supabase: SupabaseLike;
-  holdedContactId: string;
-}): Promise<{ clientId: string | null; delegateId: string | null }> {
-  const { supabase, holdedContactId } = args;
-
-  const holdedContactRow = await loadHoldedContactSnapshot(
-    supabase,
-    holdedContactId
-  );
-
-  if (!holdedContactRow) {
-    console.error("[HOLDED][CLIENT_CREATE][MISSING_LOCAL_CONTACT]", {
-      holdedContactId,
-    });
-    return { clientId: null, delegateId: null };
-  }
-
-  const payload = buildClientInsertFromHoldedContact(
-    holdedContactId,
-    holdedContactRow
-  );
-
-  const { data, error } = await supabase
-    .from("clients")
-    .insert(payload)
-    .select("id, delegate_id")
-    .maybeSingle();
-
-  if (error) throw error;
-
-  console.info("[HOLDED][CLIENT_CREATE][OK]", {
-    holdedContactId,
-    clientId: toNullableString(data?.id),
-  });
-
-  return {
-    clientId: toNullableString(data?.id),
-    delegateId: toNullableString(data?.delegate_id),
-  };
-}
-
-async function ensureHoldedContactClientMapping(args: {
-  supabase: SupabaseLike;
-  holdedContactId: string;
-  clientId: string;
-}) {
-  const { supabase, holdedContactId, clientId } = args;
-
-  const { error } = await supabase
-    .from("holded_contact_client_map_g1")
-    .upsert(
-      {
-        holded_contact_id: holdedContactId,
-        client_id: clientId,
-      },
-      {
-        onConflict: "holded_contact_id",
-      }
-    );
-
-  if (error) throw error;
-
-  console.info("[HOLDED][CONTACT_MAP][UPSERT_OK]", {
-    holdedContactId,
-    clientId,
-  });
-}
-
 async function findClientByHoldedContactId(
   supabase: SupabaseLike,
   holdedContactId: string
 ): Promise<ClientResolution | null> {
   const normalizedHoldedContactId = toNullableString(holdedContactId);
+
   if (!normalizedHoldedContactId) {
-    console.error("[HOLDED][RESOLVE][INVALID_CONTACT_ID]", {
-      holdedContactId,
-    });
     return null;
   }
 
-  let holdedContactRow = await loadHoldedContactSnapshot(
+  const holdedContactRow = await loadHoldedContactSnapshot(
     supabase,
     normalizedHoldedContactId
   );
 
   if (!holdedContactRow) {
-    console.warn("[HOLDED][RESOLVE][LOCAL_CONTACT_MISSING]", {
-      holdedContactId: normalizedHoldedContactId,
-    });
-
-    const synced = await syncHoldedContactIntoLocalSnapshot({
-      supabase,
-      holdedContactId: normalizedHoldedContactId,
-    });
-
-    if (!synced) {
-      console.error("[HOLDED][RESOLVE][REMOTE_CONTACT_UNAVAILABLE]", {
-        holdedContactId: normalizedHoldedContactId,
-      });
-
-      return {
-        holdedContactExists: false,
-        clientId: null,
-        delegateId: null,
-        mappingExists: false,
-        clientExists: false,
-      };
-    }
-
-    holdedContactRow = await loadHoldedContactSnapshot(
-      supabase,
-      normalizedHoldedContactId
-    );
-  }
-
-  if (!holdedContactRow) {
-    console.error("[HOLDED][RESOLVE][CONTACT_STILL_MISSING_AFTER_SYNC]", {
-      holdedContactId: normalizedHoldedContactId,
-    });
-
     return {
       holdedContactExists: false,
       clientId: null,
@@ -859,141 +354,40 @@ async function findClientByHoldedContactId(
 
   if (mapError) throw mapError;
 
-  if (mapRow?.client_id) {
-    const { data: clientRow, error: clientError } = await supabase
-      .from("clients")
-      .select("id, delegate_id")
-      .eq("id", mapRow.client_id)
-      .maybeSingle();
+  const mappedClientId = toNullableString(mapRow?.client_id);
 
-    if (clientError) throw clientError;
-
-    if (!clientRow?.id) {
-      console.error("[HOLDED][RESOLVE][MAPPED_CLIENT_NOT_FOUND]", {
-        holdedContactId: normalizedHoldedContactId,
-        mappedClientId: toNullableString(mapRow.client_id),
-      });
-
-      return {
-        holdedContactExists: true,
-        clientId: toNullableString(mapRow.client_id),
-        delegateId: null,
-        mappingExists: true,
-        clientExists: false,
-      };
-    }
-
-    console.info("[HOLDED][RESOLVE][MAPPING_OK]", {
-      holdedContactId: normalizedHoldedContactId,
-      clientId: toNullableString(clientRow.id),
-    });
-
+  if (!mappedClientId) {
     return {
       holdedContactExists: true,
-      clientId: toNullableString(clientRow.id),
-      delegateId: toNullableString(clientRow.delegate_id),
-      mappingExists: true,
-      clientExists: true,
+      clientId: null,
+      delegateId: null,
+      mappingExists: false,
+      clientExists: false,
     };
   }
 
-  const { data: candidateClients, error: candidateClientsError } = await supabase
+  const { data: clientRow, error: clientError } = await supabase
     .from("clients")
     .select("id, delegate_id")
-    .eq("holded_contact_id", normalizedHoldedContactId)
-    .limit(2);
+    .eq("id", mappedClientId)
+    .maybeSingle();
 
-  if (candidateClientsError) throw candidateClientsError;
+  if (clientError) throw clientError;
 
-  const candidates = Array.isArray(candidateClients) ? candidateClients : [];
-
-  if (candidates.length === 1 && candidates[0]?.id) {
-    const resolvedClientId = toNullableString(candidates[0].id);
-    const resolvedDelegateId = toNullableString(candidates[0].delegate_id);
-
-    if (!resolvedClientId) {
-      console.error("[HOLDED][RESOLVE][CANDIDATE_WITHOUT_ID]", {
-        holdedContactId: normalizedHoldedContactId,
-      });
-
-      return {
-        holdedContactExists: true,
-        clientId: null,
-        delegateId: null,
-        mappingExists: false,
-        clientExists: false,
-      };
-    }
-
-    await ensureHoldedContactClientMapping({
-      supabase,
-      holdedContactId: normalizedHoldedContactId,
-      clientId: resolvedClientId,
-    });
-
-    console.info("[HOLDED][RESOLVE][MAPPING_CREATED_FROM_CLIENT]", {
-      holdedContactId: normalizedHoldedContactId,
-      clientId: resolvedClientId,
-    });
-
+  if (!clientRow?.id) {
     return {
       holdedContactExists: true,
-      clientId: resolvedClientId,
-      delegateId: resolvedDelegateId,
+      clientId: mappedClientId,
+      delegateId: null,
       mappingExists: true,
-      clientExists: true,
-    };
-  }
-
-  if (candidates.length > 1) {
-    console.error("[HOLDED][RESOLVE][MULTIPLE_CLIENT_CANDIDATES]", {
-      holdedContactId: normalizedHoldedContactId,
-      candidateCount: candidates.length,
-    });
-
-    return {
-      holdedContactExists: true,
-      clientId: null,
-      delegateId: null,
-      mappingExists: false,
       clientExists: false,
     };
   }
-
-  const created = await createCanonicalClientFromHoldedContact({
-    supabase,
-    holdedContactId: normalizedHoldedContactId,
-  });
-
-  if (!created.clientId) {
-    console.error("[HOLDED][RESOLVE][CLIENT_CREATE_FAILED]", {
-      holdedContactId: normalizedHoldedContactId,
-    });
-
-    return {
-      holdedContactExists: true,
-      clientId: null,
-      delegateId: null,
-      mappingExists: false,
-      clientExists: false,
-    };
-  }
-
-  await ensureHoldedContactClientMapping({
-    supabase,
-    holdedContactId: normalizedHoldedContactId,
-    clientId: created.clientId,
-  });
-
-  console.info("[HOLDED][RESOLVE][CLIENT_CREATED_AND_MAPPED]", {
-    holdedContactId: normalizedHoldedContactId,
-    clientId: created.clientId,
-  });
 
   return {
     holdedContactExists: true,
-    clientId: created.clientId,
-    delegateId: created.delegateId,
+    clientId: toNullableString(clientRow.id),
+    delegateId: toNullableString(clientRow.delegate_id),
     mappingExists: true,
     clientExists: true,
   };
@@ -1231,7 +625,7 @@ export async function importHoldedDocumentsIncremental(args: {
       continue;
     }
 
-    await updateExistingInvoiceFieldsIfNeeded({
+    const result = await updateExistingInvoiceFieldsIfNeeded({
       supabase,
       invoiceId: existingInvoice.id,
       currentStateCode: existingInvoice.state_code ?? null,
@@ -1248,11 +642,11 @@ export async function importHoldedDocumentsIncremental(args: {
       nextPaidDate: sanitizedInvoice.paid_date ?? null,
       currentExternalModifiedAt: existingInvoice.external_modified_at ?? null,
       nextExternalModifiedAt: sanitizedInvoice.external_modified_at ?? null,
-    }).then((result) => {
-      if (result.updated) {
-        updatedInvoices += 1;
-      }
     });
+
+    if (result.updated) {
+      updatedInvoices += 1;
+    }
 
     existingAcceptedDocs.push({
       ...acceptedDoc,
