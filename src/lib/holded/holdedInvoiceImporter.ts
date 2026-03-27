@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {
-  holdedFetch as holdedDocumentDetail,
-} from "./holdedFetch";
+
+import { holdedFetch } from "./holdedFetch";
 import { computeCanonicalPaidState } from "./holdedPaidState";
 
 export type HoldedSummaryDoc = {
@@ -164,7 +163,9 @@ function asNumber(v: unknown): number | null {
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const set = new Set<string>();
   for (const v of values) {
-    if (typeof v === "string" && v.trim()) set.add(v.trim());
+    if (typeof v === "string" && v.trim()) {
+      set.add(v.trim());
+    }
   }
   return [...set];
 }
@@ -230,9 +231,9 @@ function buildSafeSummaryFromDetail(detail: HoldedDetailDoc): HoldedSummaryDoc {
     date: (detail["date"] as number | string | null | undefined) ?? null,
     currency: asString(detail["currency"]),
     status:
-      (typeof detail["status"] === "string" || typeof detail["status"] === "number"
+      typeof detail["status"] === "string" || typeof detail["status"] === "number"
         ? (detail["status"] as string | number)
-        : null),
+        : null,
     draft: detail["draft"] === true,
     contact: detailContactRecord ?? detailContactRaw ?? undefined,
     contactId: asString(detail["contactId"]),
@@ -242,7 +243,10 @@ function buildSafeSummaryFromDetail(detail: HoldedDetailDoc): HoldedSummaryDoc {
   };
 }
 
-function isLikelyDraft(summary: HoldedSummaryDoc, detail: HoldedDetailDoc): {
+function isLikelyDraft(
+  summary: HoldedSummaryDoc,
+  detail: HoldedDetailDoc
+): {
   isDraft: boolean;
   reason: "draft_missing_docnumber" | "draft_flag_true" | "draft_status" | null;
 } {
@@ -286,14 +290,23 @@ function isLikelyDraft(summary: HoldedSummaryDoc, detail: HoldedDetailDoc): {
   return { isDraft: false, reason: null };
 }
 
-export function extractHoldedContactIdentity(detail: HoldedDetailDoc): {
+export function extractHoldedContactIdentity(args: {
+  summary: HoldedSummaryDoc;
+  detail: HoldedDetailDoc;
+}): {
   holdedContactId: string | null;
   contactName: string | null;
   extractionSource: string | null;
 } {
+  const { summary, detail } = args;
+
   const detailContact = asRecord(detail["contact"]);
   const detailClient = asRecord(detail["client"]);
   const detailCustomer = asRecord(detail["customer"]);
+
+  const summaryContact = asRecord(summary.contact);
+  const summaryClient = asRecord(summary.client);
+  const summaryCustomer = asRecord(summary.customer);
 
   const idCandidates: Array<{ value: string | null; source: string }> = [
     { value: asString(detail["contact"]), source: "detail.contact" },
@@ -311,6 +324,18 @@ export function extractHoldedContactIdentity(detail: HoldedDetailDoc): {
     { value: asString(detailCustomer?.["_id"]), source: "detail.customer._id" },
     { value: asString(detail["customerId"]), source: "detail.customerId" },
     { value: asString(detail["customer_id"]), source: "detail.customer_id" },
+
+    { value: asString(summary.contact), source: "summary.contact" },
+    { value: asString(summaryContact?.["id"]), source: "summary.contact.id" },
+    { value: asString(summaryContact?.["_id"]), source: "summary.contact._id" },
+    { value: asString(summary.contactId), source: "summary.contactId" },
+    { value: asString(summary.contact_id), source: "summary.contact_id" },
+
+    { value: asString(summaryClient?.["id"]), source: "summary.client.id" },
+    { value: asString(summaryClient?.["_id"]), source: "summary.client._id" },
+
+    { value: asString(summaryCustomer?.["id"]), source: "summary.customer.id" },
+    { value: asString(summaryCustomer?.["_id"]), source: "summary.customer._id" },
   ];
 
   let holdedContactId: string | null = null;
@@ -331,7 +356,14 @@ export function extractHoldedContactIdentity(detail: HoldedDetailDoc): {
     detail["clientName"],
     detailCustomer?.["name"],
     detail["customerName"],
-    detail["name"]
+    summaryContact?.["name"],
+    summary["contactName"],
+    summaryClient?.["name"],
+    summary["clientName"],
+    summaryCustomer?.["name"],
+    summary["customerName"],
+    detail["name"],
+    summary["name"]
   );
 
   return {
@@ -520,6 +552,20 @@ function extractDueDate(detail: HoldedDetailDoc): string | null {
   );
 }
 
+function extractExternalModifiedAt(
+  summary: HoldedSummaryDoc,
+  detail: HoldedDetailDoc
+): string | null {
+  return (
+    unixToDateYmd(detail["updatedAt"]) ??
+    unixToDateYmd(detail["modifiedAt"]) ??
+    unixToDateYmd(detail["lastUpdate"]) ??
+    unixToDateYmd(summary["updatedAt"]) ??
+    unixToDateYmd(summary["modifiedAt"]) ??
+    null
+  );
+}
+
 function computeDesiredStateCode(args: {
   detail: HoldedDetailDoc;
   summary: HoldedSummaryDoc;
@@ -642,6 +688,7 @@ function buildSourceMeta(params: {
   holdedContactExists: boolean;
   mappingExists: boolean;
   clientExists: boolean;
+  externalModifiedAt: string | null;
 }): Record<string, unknown> {
   const { summary, detail } = params;
 
@@ -677,6 +724,7 @@ function buildSourceMeta(params: {
     computed_paid_reason: params.paidRuleReason,
     computed_paid_date: params.paidDate,
     desired_state_code: params.desiredStateCode,
+    external_modified_at_candidate: params.externalModifiedAt,
     g1_strict_mode: true,
     holded_contact_exists: params.holdedContactExists,
     holded_contact_client_mapping_exists: params.mappingExists,
@@ -697,10 +745,7 @@ export async function resolveClientForHoldedDocument(args: {
     clientExists: boolean;
   }
 > {
-  const {
-    holdedContactId,
-    resolveByHoldedContactId,
-  } = args;
+  const { holdedContactId, resolveByHoldedContactId } = args;
 
   if (!holdedContactId || !resolveByHoldedContactId) {
     return {
@@ -829,7 +874,7 @@ export async function buildHoldedImportDecision(args: {
   }
 
   const { holdedContactId, contactName, extractionSource } =
-    extractHoldedContactIdentity(detail);
+    extractHoldedContactIdentity({ summary, detail });
 
   if (!holdedContactId) {
     return {
@@ -842,6 +887,12 @@ export async function buildHoldedImportDecision(args: {
         invoice_number: invoiceNumber,
         extraction_source: extractionSource,
         summary_source: summarySource,
+        summary_contact: summary.contact ?? null,
+        summary_contactId: summary.contactId ?? null,
+        summary_contact_id: summary.contact_id ?? null,
+        detail_contact: detail["contact"] ?? null,
+        detail_contactId: detail["contactId"] ?? null,
+        detail_contact_id: detail["contact_id"] ?? null,
       },
     };
   }
@@ -863,6 +914,12 @@ export async function buildHoldedImportDecision(args: {
         holded_contact_id: holdedContactId,
         extraction_source: extractionSource,
         summary_source: summarySource,
+        summary_contact: summary.contact ?? null,
+        summary_contactId: summary.contactId ?? null,
+        summary_contact_id: summary.contact_id ?? null,
+        detail_contact: detail["contact"] ?? null,
+        detail_contactId: detail["contactId"] ?? null,
+        detail_contact_id: detail["contact_id"] ?? null,
       },
     };
   }
@@ -959,6 +1016,8 @@ export async function buildHoldedImportDecision(args: {
     paymentsPending: payments.payments_pending,
   });
 
+  const externalModifiedAt = extractExternalModifiedAt(summary, detail);
+
   const sourceMeta = buildSourceMeta({
     summary,
     detail,
@@ -982,6 +1041,7 @@ export async function buildHoldedImportDecision(args: {
     holdedContactExists: clientMatch.holdedContactExists,
     mappingExists: clientMatch.mappingExists,
     clientExists: clientMatch.clientExists,
+    externalModifiedAt,
   });
 
   const invoice: CanonicalInvoiceRow = {
@@ -1000,7 +1060,7 @@ export async function buildHoldedImportDecision(args: {
     is_paid: paidState.is_paid,
     paid_date: paidState.is_paid === true ? payments.paid_date : null,
     state_code: desiredStateCode,
-    external_modified_at: null,
+    external_modified_at: externalModifiedAt,
     source_meta: sourceMeta,
   };
 
@@ -1031,6 +1091,7 @@ export async function buildHoldedImportDecision(args: {
       payments_refunds: payments.payments_refunds,
       paid_date: paidState.is_paid === true ? payments.paid_date : null,
       due_date: extractDueDate(detail),
+      external_modified_at: externalModifiedAt,
     },
   };
 }
@@ -1121,7 +1182,9 @@ async function getExistingHoldedInvoice(args: {
 
   const { data, error } = await supabase
     .from("invoices")
-    .select("id, state_code, is_paid, paid_date, external_invoice_id, source_provider")
+    .select(
+      "id, state_code, is_paid, paid_date, external_invoice_id, source_provider"
+    )
     .eq("source_provider", "holded")
     .eq("external_invoice_id", externalInvoiceId)
     .maybeSingle();
@@ -1137,7 +1200,8 @@ async function updateExistingHoldedInvoiceFields(args: {
   nextIsPaid: boolean | null;
   nextPaidDate: string | null;
 }) {
-  const { supabase, externalInvoiceId, nextStateCode, nextIsPaid, nextPaidDate } = args;
+  const { supabase, externalInvoiceId, nextStateCode, nextIsPaid, nextPaidDate } =
+    args;
 
   const { error } = await supabase
     .from("invoices")
@@ -1182,14 +1246,13 @@ function parseImportOneArgs(args: any[]): {
   if (first && typeof first === "object" && !Array.isArray(first)) {
     return {
       supabase: first.supabase as SupabaseLike,
-      externalInvoiceId:
-        String(
-          first.externalInvoiceId ??
-            first.invoiceId ??
-            first.holdedId ??
-            first.id ??
-            ""
-        ).trim(),
+      externalInvoiceId: String(
+        first.externalInvoiceId ??
+          first.invoiceId ??
+          first.holdedId ??
+          first.id ??
+          ""
+      ).trim(),
       docType: normalizeDocType(first.docType ?? first.type),
       preview: Boolean(first.preview),
       logger: (first.logger ?? console) as Pick<Console, "info" | "warn" | "error">,
@@ -1207,7 +1270,9 @@ function parseImportOneArgs(args: any[]): {
   };
 }
 
-export async function importOneHoldedInvoiceById(...args: any[]): Promise<{
+export async function importOneHoldedInvoiceById(
+  ...args: any[]
+): Promise<{
   ok: boolean;
   status: "accepted" | "skipped" | "error";
   invoice?: CanonicalInvoiceRow;
@@ -1240,7 +1305,7 @@ export async function importOneHoldedInvoiceById(...args: any[]): Promise<{
       };
     }
 
-    const detail = await (holdedDocumentDetail as any)(
+    const detail = await (holdedFetch as any)(
       parsed.docType,
       parsed.externalInvoiceId
     );
