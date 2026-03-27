@@ -1,146 +1,218 @@
-import "dotenv/config";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-import {
-  holdedDocumentDetail,
-  holdedListDocuments,
-} from "../src/lib/holded/holdedFetch";
+import fs from "node:fs";
+import path from "node:path";
+import dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
+
+import { holdedFetch } from "../src/lib/holded/holdedFetch";
+import { fetchChangedIds } from "../src/lib/holded/holdedIncremental";
 import { runHoldedInvoicesIncrementalImport } from "../src/lib/holded/holdedImportIncrementalRunner";
+
+const envLocalPath = path.resolve(process.cwd(), ".env.local");
+
+if (fs.existsSync(envLocalPath)) {
+  dotenv.config({ path: envLocalPath });
+} else {
+  dotenv.config();
+}
 
 type HoldedDocType = "invoice" | "creditnote";
 
-type HoldedSummary = {
-  id?: string;
-  _id?: string;
-  docNumber?: string | null;
-  desc?: string | null;
-  contact?: string | null;
-  contactName?: string | null;
-  date?: number | string | null;
-  dueDate?: number | string | null;
-  status?: string | null;
-  draft?: boolean | null;
-  [key: string]: unknown;
+type HoldedDocRef = {
+  id: string;
+  docType: HoldedDocType;
 };
 
-type HoldedDocBundle = {
-  summary: HoldedSummary & { docType: HoldedDocType };
-  detail: unknown;
-};
-
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = String(process.env[name] ?? "").trim();
-  const value = Number(raw);
-
-  if (Number.isFinite(value) && value > 0) {
-    return Math.floor(value);
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value || !value.trim()) {
+    throw new Error(`Missing env var: ${name}`);
   }
-
-  return fallback;
+  return value.trim();
 }
 
-function pickDocId(doc: HoldedSummary): string | null {
-  const id =
-    (typeof doc.id === "string" && doc.id.trim() ? doc.id.trim() : null) ||
-    (typeof doc._id === "string" && doc._id.trim() ? doc._id.trim() : null);
-
-  return id;
+function requireSupabaseUrl(): string {
+  return (
+    process.env.SUPABASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+    ""
+  );
 }
 
-function normalizeStatus(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
 }
 
-function isDraftDocument(doc: HoldedSummary): boolean {
-  if (doc.draft === true) {
-    return true;
-  }
-
-  const status = normalizeStatus(doc.status);
-
-  if (status === "draft") {
-    return true;
-  }
-
-  return false;
+function getDateNDaysAgo(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
 }
 
-async function fetchHoldedDocumentsByType(
-  docType: HoldedDocType,
-  limit: number
-): Promise<HoldedSummary[]> {
-  const rows = await holdedListDocuments<HoldedSummary[]>(docType, { limit });
+function normalizeYmd(raw: string | undefined, fallback: string): string {
+  const value = (raw ?? "").trim();
+  if (!value) return fallback;
 
-  if (!Array.isArray(rows)) {
-    throw new Error(`Holded list for ${docType} did not return an array`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
   }
 
-  return rows;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Invalid date format: ${value}`);
+  }
+
+  return parsed.toISOString().slice(0, 10);
 }
 
-async function fetchDetailForCandidate(
-  docType: HoldedDocType,
-  summary: HoldedSummary
-): Promise<HoldedDocBundle | null> {
-  const docId = pickDocId(summary);
+function dedupeDocRefs(items: HoldedDocRef[]): HoldedDocRef[] {
+  const seen = new Set<string>();
+  const out: HoldedDocRef[] = [];
 
-  if (!docId) {
-    return null;
+  for (const item of items) {
+    const key = `${item.docType}:${item.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
   }
 
-  const detail = await holdedDocumentDetail<unknown>(docType, docId);
+  return out;
+}
 
-  return {
-    summary: {
-      ...summary,
+async function fetchAllChangedDocRefsByType(args: {
+  docType: HoldedDocType;
+  since: string;
+  until: string;
+  pageSize: number;
+}): Promise<HoldedDocRef[]> {
+  const { docType, since, until, pageSize } = args;
+
+  const collected: HoldedDocRef[] = [];
+  let page = 1;
+
+  while (true) {
+    const ids = await fetchChangedIds({
       docType,
-    },
-    detail,
-  };
+      since,
+      until,
+      page,
+      pageSize,
+    });
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      break;
+    }
+
+    for (const id of ids) {
+      if (typeof id === "string" && id.trim()) {
+        collected.push({
+          id: id.trim(),
+          docType,
+        });
+      }
+    }
+
+    if (ids.length < pageSize) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return collected;
 }
 
-function printHeader(title: string) {
-  console.log(title);
+async function fetchHoldedDocumentDetailById(
+  docType: HoldedDocType,
+  externalId: string
+): Promise<Record<string, unknown>> {
+  const detail = await holdedFetch(docType, externalId);
+
+  if (!detail || typeof detail !== "object") {
+    throw new Error(
+      `Holded detail for ${docType}/${externalId} is empty or invalid`
+    );
+  }
+
+  return detail as Record<string, unknown>;
 }
 
-function printKeyValue(label: string, value: unknown) {
-  const key = `${label}:`.padEnd(26, " ");
-  console.log(`   ${key} ${value}`);
-}
+async function main(): Promise<void> {
+  const supabaseUrl = requireSupabaseUrl();
+  const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
-async function main() {
-  const limit = readPositiveIntEnv("LIMIT", 50);
+  if (!supabaseUrl) {
+    throw new Error(
+      "Missing env var: SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL"
+    );
+  }
 
-  printHeader("1) Listando Holded...");
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
 
-  const invoices = await fetchHoldedDocumentsByType("invoice", limit);
-  const creditNotes = await fetchHoldedDocumentsByType("creditnote", limit);
+  const lookbackDays = parsePositiveInt(process.env.LOOKBACK_DAYS, 30);
+  const since = normalizeYmd(
+    process.env.SINCE,
+    getDateNDaysAgo(lookbackDays)
+  );
+  const until = normalizeYmd(
+    process.env.UNTIL,
+    new Date().toISOString().slice(0, 10)
+  );
+  const pageSize = parsePositiveInt(process.env.PAGE_SIZE, 100);
+  const preview =
+    String(process.env.PREVIEW ?? "").trim().toLowerCase() === "true";
 
-  const invoiceCandidates = invoices
-    .filter((doc) => !isDraftDocument(doc))
-    .map((doc) => ({ docType: "invoice" as const, summary: doc }));
+  console.log("1) Incremental window");
+  console.log(`   since                : ${since}`);
+  console.log(`   until                : ${until}`);
+  console.log(`   page size            : ${pageSize}`);
+  console.log(`   preview              : ${preview}`);
+  console.log("");
 
-  const creditNoteCandidates = creditNotes
-    .filter((doc) => !isDraftDocument(doc))
-    .map((doc) => ({ docType: "creditnote" as const, summary: doc }));
+  console.log("2) Buscando IDs cambiados en Holded...");
+  const invoiceRefs = await fetchAllChangedDocRefsByType({
+    docType: "invoice",
+    since,
+    until,
+    pageSize,
+  });
 
-  const allCandidates = [...invoiceCandidates, ...creditNoteCandidates].slice(0, limit);
+  const creditNoteRefs = await fetchAllChangedDocRefsByType({
+    docType: "creditnote",
+    since,
+    until,
+    pageSize,
+  });
 
-  printKeyValue("invoices total", invoices.length);
-  printKeyValue("creditnotes total", creditNotes.length);
-  printKeyValue("docs no-draft candidate", allCandidates.length);
-  printKeyValue("LIMIT applied", limit);
+  const changedRefs = dedupeDocRefs([...invoiceRefs, ...creditNoteRefs]);
 
-  if (allCandidates.length === 0) {
-    console.log("");
-    console.log("2) Nada pendiente. Fin.");
+  console.log(`   invoices changed     : ${invoiceRefs.length}`);
+  console.log(`   creditnotes changed  : ${creditNoteRefs.length}`);
+  console.log(`   total changed refs   : ${changedRefs.length}`);
+  console.log("");
+
+  if (changedRefs.length === 0) {
+    console.log("3) No changes detected. Fin.");
     console.log(
       JSON.stringify(
         {
           ok: true,
-          listed: 0,
-          pending: 0,
+          since,
+          until,
+          preview,
+          changedInvoices: 0,
+          changedCreditNotes: 0,
+          changedTotal: 0,
+          docsFetched: 0,
           insertedInvoices: 0,
           insertedItems: 0,
+          existingInvoices: 0,
+          updatedInvoices: 0,
           skipped: [],
           accepted: [],
         },
@@ -151,64 +223,116 @@ async function main() {
     return;
   }
 
-  console.log("");
-  printHeader("2) Descargando details de los pendientes...");
+  console.log("3) Descargando details de los cambios...");
+  const docsToImport: Array<{
+    summary: Record<string, unknown>;
+    detail: Record<string, unknown>;
+  }> = [];
 
-  const docs: HoldedDocBundle[] = [];
+  const fetchErrors: Array<{
+    id: string;
+    docType: HoldedDocType;
+    message: string;
+  }> = [];
 
-  for (const candidate of allCandidates) {
-    const docId = pickDocId(candidate.summary);
-    const docNumber =
-      typeof candidate.summary.docNumber === "string" && candidate.summary.docNumber.trim()
-        ? candidate.summary.docNumber.trim()
-        : "(sin-docNumber)";
+  for (const ref of changedRefs) {
+    try {
+      const detail = await fetchHoldedDocumentDetailById(ref.docType, ref.id);
 
-    if (!docId) {
-      console.log(
-        `   detail skip :: missing-id :: ${docNumber} :: ${candidate.docType}`
+      docsToImport.push({
+        summary: {
+          id: ref.id,
+          docType: ref.docType,
+        },
+        detail,
+      });
+
+      console.log(`   detail ok :: ${ref.id} :: ${ref.docType}`);
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+
+      fetchErrors.push({
+        id: ref.id,
+        docType: ref.docType,
+        message,
+      });
+
+      console.warn(
+        `   detail error :: ${ref.id} :: ${ref.docType} :: ${message}`
       );
-      continue;
     }
-
-    const detailBundle = await fetchDetailForCandidate(candidate.docType, candidate.summary);
-
-    if (!detailBundle) {
-      console.log(`   detail skip :: ${docId} :: ${docNumber} :: ${candidate.docType}`);
-      continue;
-    }
-
-    docs.push(detailBundle);
-    console.log(`   detail ok :: ${docId} :: ${docNumber} :: ${candidate.docType}`);
   }
 
-  printKeyValue("details descargados", docs.length);
-
+  console.log(`   details descargados  : ${docsToImport.length}`);
+  console.log(`   detail errors        : ${fetchErrors.length}`);
   console.log("");
-  printHeader("3) Aplicando import canónico...");
 
-  const result = await (runHoldedInvoicesIncrementalImport as unknown as (input: {
-    mode: "docs";
-    docs: HoldedDocBundle[];
-    limit: number;
-  }) => Promise<unknown>)({
-    mode: "docs",
-    docs,
-    limit,
+  if (docsToImport.length === 0) {
+    console.log("4) No hay docs válidos para importar.");
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          since,
+          until,
+          preview,
+          changedInvoices: invoiceRefs.length,
+          changedCreditNotes: creditNoteRefs.length,
+          changedTotal: changedRefs.length,
+          docsFetched: 0,
+          fetchErrors,
+          insertedInvoices: 0,
+          insertedItems: 0,
+          existingInvoices: 0,
+          updatedInvoices: 0,
+          skipped: [],
+          accepted: [],
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  console.log("4) Aplicando import canónico incremental...");
+  const result = await runHoldedInvoicesIncrementalImport({
+    supabase,
+    docs: docsToImport,
+    preview,
+    logger: console,
   });
 
+  console.log("");
+  console.log("5) RESULT");
   console.log(
-    typeof result === "string" ? result : JSON.stringify(result, null, 2)
+    JSON.stringify(
+      {
+        ok: true,
+        since,
+        until,
+        preview,
+        changedInvoices: invoiceRefs.length,
+        changedCreditNotes: creditNoteRefs.length,
+        changedTotal: changedRefs.length,
+        docsFetched: docsToImport.length,
+        fetchErrors,
+        ...result,
+      },
+      null,
+      2
+    )
   );
 }
 
-main().catch((error) => {
-  console.error("ERROR");
-
-  if (error instanceof Error) {
-    console.error(error.stack || error.message);
-  } else {
-    console.error(error);
-  }
-
-  process.exit(1);
-});
+main()
+  .then((res: void) => {
+    return res;
+  })
+  .catch((e: unknown) => {
+    console.error("");
+    console.error("ERROR");
+    console.error(e);
+    process.exit(1);
+  });
