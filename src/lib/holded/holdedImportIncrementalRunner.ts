@@ -142,9 +142,7 @@ function normalizeInvoiceItemLineType(row: any): "sale" | "promotion" {
     lineGrossAmount === 0;
 
   const looksPromotionBySku =
-    sku.includes("PROMO") ||
-    sku.includes("FOC") ||
-    sku === "0";
+    sku.includes("PROMO") || sku.includes("FOC") || sku === "0";
 
   const looksPromotionByDescription =
     description.includes("promo") ||
@@ -436,61 +434,22 @@ async function updateExistingInvoiceFieldsIfNeeded(args: {
   invoiceId: string;
   currentStateCode: string | null;
   nextStateCode: string | null;
-  currentIsPaid: boolean | null;
-  nextIsPaid: boolean | null;
-  currentPaidDate: string | null;
-  nextPaidDate: string | null;
-  currentExternalModifiedAt: string | null;
-  nextExternalModifiedAt: string | null;
 }) {
   const currentStateCode = normalizeInvoiceStateCode(args.currentStateCode);
   const nextStateCode = normalizeInvoiceStateCode(args.nextStateCode);
-
-  const currentPaidDate = toNullableString(args.currentPaidDate);
-  const nextPaidDate = toNullableString(args.nextPaidDate);
-
-  const currentExternalModifiedAt = toNullableString(
-    args.currentExternalModifiedAt
-  );
-  const nextExternalModifiedAt = toNullableString(args.nextExternalModifiedAt);
-
-  const currentIsPaid =
-    typeof args.currentIsPaid === "boolean" ? args.currentIsPaid : null;
-  const nextIsPaid =
-    typeof args.nextIsPaid === "boolean" ? args.nextIsPaid : null;
 
   if (!args.invoiceId) {
     return { updated: false };
   }
 
-  const patch: Record<string, unknown> = {};
-  let changed = false;
-
-  if (nextStateCode !== currentStateCode) {
-    patch.state_code = nextStateCode;
-    changed = true;
-  }
-
-  if (nextIsPaid !== currentIsPaid) {
-    patch.is_paid = nextIsPaid;
-    changed = true;
-  }
-
-  if (nextPaidDate !== currentPaidDate) {
-    patch.paid_date = nextPaidDate;
-    changed = true;
-  }
-
-  if (nextExternalModifiedAt !== currentExternalModifiedAt) {
-    patch.external_modified_at = nextExternalModifiedAt;
-    changed = true;
-  }
-
-  if (!changed) {
+  if (nextStateCode === currentStateCode) {
     return { updated: false };
   }
 
-  patch.updated_at = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    state_code: nextStateCode,
+    updated_at: new Date().toISOString(),
+  };
 
   const { error } = await args.supabase
     .from("invoices")
@@ -592,9 +551,7 @@ export async function importHoldedDocumentsIncremental(args: {
     };
   });
 
-  const allInvoiceRows = normalizedAccepted.map(
-    (x: any) => x.sanitizedInvoice
-  );
+  const allInvoiceRows = normalizedAccepted.map((x: any) => x.sanitizedInvoice);
 
   const existingInvoicesByExternalId = await loadExistingInvoicesByExternalId({
     supabase,
@@ -630,18 +587,6 @@ export async function importHoldedDocumentsIncremental(args: {
       invoiceId: existingInvoice.id,
       currentStateCode: existingInvoice.state_code ?? null,
       nextStateCode: sanitizedInvoice.state_code ?? null,
-      currentIsPaid:
-        typeof existingInvoice.is_paid === "boolean"
-          ? existingInvoice.is_paid
-          : null,
-      nextIsPaid:
-        typeof sanitizedInvoice.is_paid === "boolean"
-          ? sanitizedInvoice.is_paid
-          : null,
-      currentPaidDate: existingInvoice.paid_date ?? null,
-      nextPaidDate: sanitizedInvoice.paid_date ?? null,
-      currentExternalModifiedAt: existingInvoice.external_modified_at ?? null,
-      nextExternalModifiedAt: sanitizedInvoice.external_modified_at ?? null,
     });
 
     if (result.updated) {

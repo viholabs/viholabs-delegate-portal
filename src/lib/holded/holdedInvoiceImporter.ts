@@ -1197,18 +1197,13 @@ async function updateExistingHoldedInvoiceFields(args: {
   supabase: SupabaseLike;
   externalInvoiceId: string;
   nextStateCode: string;
-  nextIsPaid: boolean | null;
-  nextPaidDate: string | null;
 }) {
-  const { supabase, externalInvoiceId, nextStateCode, nextIsPaid, nextPaidDate } =
-    args;
+  const { supabase, externalInvoiceId, nextStateCode } = args;
 
   const { error } = await supabase
     .from("invoices")
     .update({
       state_code: nextStateCode,
-      is_paid: nextIsPaid,
-      paid_date: nextPaidDate,
       updated_at: new Date().toISOString(),
     })
     .eq("source_provider", "holded")
@@ -1359,33 +1354,15 @@ export async function importOneHoldedInvoiceById(
             ? existingInvoice.state_code
             : "OPEN";
 
-        const nextIsPaid = acceptedDecision.invoice.is_paid ?? false;
-        const currentIsPaid =
-          typeof existingInvoice.is_paid === "boolean"
-            ? existingInvoice.is_paid
-            : false;
-
-        const nextPaidDate = acceptedDecision.invoice.paid_date ?? null;
-        const currentPaidDate =
-          typeof existingInvoice.paid_date === "string"
-            ? existingInvoice.paid_date
-            : null;
-
-        if (
-          nextStateCode !== currentStateCode ||
-          nextIsPaid !== currentIsPaid ||
-          nextPaidDate !== currentPaidDate
-        ) {
+        if (nextStateCode !== currentStateCode) {
           await updateExistingHoldedInvoiceFields({
             supabase: parsed.supabase,
             externalInvoiceId: acceptedDecision.invoice.external_invoice_id,
             nextStateCode,
-            nextIsPaid,
-            nextPaidDate,
           });
 
           parsed.logger.info(
-            `[HOLDED][ONE][STATE_UPDATED] ${acceptedDecision.invoice.invoice_number} :: ${acceptedDecision.invoice.external_invoice_id} :: ${currentStateCode}/${String(currentIsPaid)} -> ${nextStateCode}/${String(nextIsPaid)}`
+            `[HOLDED][ONE][STATE_UPDATED] ${acceptedDecision.invoice.invoice_number} :: ${acceptedDecision.invoice.external_invoice_id} :: ${currentStateCode} -> ${nextStateCode}`
           );
         } else {
           parsed.logger.info(
