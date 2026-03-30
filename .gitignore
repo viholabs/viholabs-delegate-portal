@@ -28,7 +28,6 @@ holded_invoices_export.xlsx
 next
 next-env.d.ts
 tsconfig.tsbuildinfo
-scripts/
 viholabs-delegate-portal@0.1.0
 src/app/api/elyon/
 src/lib/holded/*.bak.*
