@@ -1,156 +1,59 @@
 client_id,client_name,delegate_name,delegate_id,client_tax_id,client_email,client_status,portal_holded_contact_id,matched_holded_contact_id,matched_holded_name,matched_holded_email,matched_holded_tax_id,match_type
-7de73b01-88ad-44c7-b30f-37eef5a334b3,Amparo Ferrer Báguena,,,,,active,699efdbdee49a9c69a06b8e5,699efdbdee49a9c69a06b8e5,Amparo Ferrer Báguena,amparoferrerbaguena@gmail.com,,by_holded_contact_id
-b3ff0bdb-a878-4313-8276-d8b83e399c3e,Ana Belén García Álvarez,Judith Fibla,82bfda6d-8c29-4e04-9ecb-44447ac7bff1,,,PENDING_VALIDATION,6992e5e8bbaad1baaf08b71a,6992e5e8bbaad1baaf08b71a,Ana Belén García Álvarez,anabelen.garciaalvarez@hotmail.com,,by_holded_contact_id
-9369669a-4f88-4235-9a30-c259696e97ba,ANA MARIA AMORES VIDAL,,,,,active,69835f995fd87458850b301f,69835f995fd87458850b301f,ANA MARIA AMORES VIDAL,,,by_holded_contact_id
-0e78040a-8442-4848-9cbe-5b63a0723c33,Anna MONTSALUT SL,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,PENDING_VALIDATION,69ab1033c8146555a10b6234,69ab1033c8146555a10b6234,Anna MONTSALUT SL,,,by_holded_contact_id
-c6faadd5-3dec-4c30-9ddb-77f2b37699d7,Aurora Delgado,,,,,active,699dc323a90fa9db8d0d4f75,699dc323a90fa9db8d0d4f75,Aurora Delgado,auroradelgado@hotmail.com,,by_holded_contact_id
-9f4ee41b-9698-49f1-9fbc-9073884436df,Blanca Galofre,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab10335a29f8d912073487,69ab10335a29f8d912073487,Blanca Galofre,,,by_holded_contact_id
-f8e46f44-906f-45a9-a6ac-306f6e805add,BLANCA GALOFRE MUNNE,,8d0fde62-26b2-43d1-a8a4-7247839250d9,46226775H,,active,,6978c3cd4e82ccf1e405b6e5,BLANCA GALOFRÉ MUNNÉ,info@homedical.es,,by_name
-51661407-9f1b-450c-aff4-7a0dd6ca4595,BLANCA GALOFRÉ MUNNÉ (HOMEDICAL),,,,,active,6978c3cd4e82ccf1e405b6e5,6978c3cd4e82ccf1e405b6e5,BLANCA GALOFRÉ MUNNÉ,info@homedical.es,,by_holded_contact_id
-2e496e92-3d59-4aed-bcf5-7224b8377217,Carme Pujadas Prims,,,,,active,698ef7b61b90d51704036c65,698ef7b61b90d51704036c65,Carme Pujadas Prims,carmepujser@gmail.com,,by_holded_contact_id
-1a293732-fe90-471f-bdb4-fd052485bcb8,Carmen Riera casas,,8d0fde62-26b2-43d1-a8a4-7247839250d9,00000000T,,inactive,,695b870644d13429560009d5,Carmen Riera casas,carmen3-@hotmail.es,,by_name
-887d1e31-6e14-4d48-b8cd-34d4aa2ec032,Cecilia Sandoval Arana,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,699c8ff202f6840cf5073719,699c8ff202f6840cf5073719,Cecilia Sandoval Arana,ceciliasand@hotmail.com,,by_holded_contact_id
-70ce2de8-c7b0-4573-98e4-2e8bc4dbe51a,Cliente,,,00000000T,,inactive,,,,,,no_match
-7a02320d-12f0-4472-a9e7-30cfd7b65de2,Cliente,,,00000000T,,inactive,,,,,,no_match
-2395590c-2cb0-4889-91f0-8042a2b1fe96,Cliente,,,00000000T,,inactive,,,,,,no_match
-0462ad9f-97dc-4807-99f5-cf31dd3ff5c4,Cliente,,,00000000T,,inactive,,,,,,no_match
-bf8a5653-24cd-439e-be5c-934d37b4dc22,Cliente,,,00000000T,,inactive,,,,,,no_match
-5e5f95a6-efaa-4cb9-9c12-e88e2cf4d54f,Cliente,,,00000000T,,inactive,,,,,,no_match
-42c3e89e-1262-4653-a555-1c792e44e49e,Cliente,,,00000000T,,inactive,,,,,,no_match
-b9f0146e-32c1-4756-bc4a-71cec3f30ef8,Cliente,,,00000000T,,inactive,,,,,,no_match
-4a382be1-7b85-4ac1-9949-6f8f9b18fef8,Cliente,,,00000000T,,inactive,,,,,,no_match
-802d0492-27d3-4c62-ad51-5fcd46bd5311,Cliente,,,00000000T,,inactive,,,,,,no_match
-972e66a6-45b9-4291-a9f9-9a009ec3f12f,Cliente,,,00000000T,,inactive,,,,,,no_match
-33b93f04-3fe2-4797-adee-d614a101dbd1,Cliente,,,00000000T,,inactive,,,,,,no_match
-69eb8843-7827-41c6-b825-b49e845a8bb8,Cliente,,,00000000T,,inactive,,,,,,no_match
-8c33b700-d9d0-45e8-be7d-532a3c190bd0,Cliente,,,00000000T,,inactive,,,,,,no_match
-175592fa-d6e4-4227-8046-2992997070d8,Cliente,,,00000000T,,inactive,,,,,,no_match
-731868cc-33ef-4595-963a-cd3534e8a559,Cliente,,,00000000T,,inactive,,,,,,no_match
-81cc9d79-06d4-4ca3-adfa-d7edd0bb2295,Cliente,,,00000000T,,inactive,,,,,,no_match
-0bc0a555-90c8-47ad-a30b-80f8f84d3d82,Cliente,,,00000000T,,inactive,,,,,,no_match
-a476542f-75ee-46b1-95ee-e0ce1ff0d911,Cliente,,,00000000T,,inactive,,,,,,no_match
-defd9c8e-5d31-49dc-96f4-c420e62ce241,Cliente,,,00000000T,,inactive,,,,,,no_match
-a456ef6b-87e5-418f-bf43-f94e6370c413,Cliente,,,00000000T,,inactive,,,,,,no_match
-66edc549-ecb9-4057-8a15-8d5f63ad8e21,Cliente,,,00000000T,,inactive,,,,,,no_match
-3488aec2-22ee-41c8-b21e-741e492aaba5,Cliente,,,00000000T,,inactive,,,,,,no_match
-21572df4-87a1-4c7d-960c-745706a0ff1d,Cliente,,,00000000T,,inactive,,,,,,no_match
-95e0ae97-3e8c-4845-b5db-ae453c91b084,Cliente,,,00000000T,,inactive,,,,,,no_match
-f5fc9831-5d62-44d5-91ef-5da5375727ec,Cliente,,,00000000T,,inactive,,,,,,no_match
-0c303bc6-c706-4aa1-9422-b0f07f56e664,Cliente,,,00000000T,,inactive,,,,,,no_match
-3d7514bf-3f84-40d0-84f9-34bc16898017,Cliente,,,00000000T,,inactive,,,,,,no_match
-737ba79e-0936-4e1c-b4ea-7f45b22b9e99,Cliente,,,00000000T,,inactive,,,,,,no_match
-0237e472-1d5d-4f8e-8a12-3046c434668f,Cliente,,,00000000T,,inactive,,,,,,no_match
-84ac957a-13cb-4220-b493-9c4ecdb2ff7a,Cliente,,,00000000T,,inactive,,,,,,no_match
-2a54f884-1c2c-4f8c-9e69-a6e113555210,Cliente,,,00000000T,,inactive,,,,,,no_match
-54f30e6b-cdbd-4183-b696-63c151ec8743,Cliente,,,00000000T,,inactive,,,,,,no_match
-db400bb0-39a2-4670-8c3f-daef58a1fe50,Cliente,,,00000000T,,inactive,,,,,,no_match
-d9024cb9-ccc2-4922-ad3b-8848efe3adb6,Cliente,,,00000000T,,inactive,,,,,,no_match
-a339ccc0-f5a4-4555-a32e-93f492d64bfc,Cliente,,,00000000T,,inactive,,,,,,no_match
-bfa6ec10-03fb-452e-ba4d-61a31574ad5e,Cliente,,,00000000T,,inactive,,,,,,no_match
-f5988556-2970-4e94-9956-550833e31325,Cliente,,,00000000T,,inactive,,,,,,no_match
-df3b4f59-3d82-454b-b416-e90326209f7f,Cliente,,,00000000T,,inactive,,,,,,no_match
-d34fa99c-f8f6-42ee-a938-c77e0139ec12,Cliente,,,00000000T,,inactive,,,,,,no_match
-7d6b9816-5833-48b3-a0de-cf532ab95803,Cliente,,,00000000T,,inactive,,,,,,no_match
-d832667d-39ce-4018-9282-33a66a5f99cc,Cliente,,,00000000T,,inactive,,,,,,no_match
-9833c6e3-4a7c-4f21-8ae4-636a05f37887,Cliente,,,00000000T,,inactive,,,,,,no_match
-59487a86-dec8-4e32-aa99-1b5d10727c7e,Cliente,,,00000000T,,inactive,,,,,,no_match
-363861fb-ecde-4dd3-9351-bd4e02ba84d5,Cliente,,,00000000T,,inactive,,,,,,no_match
-8d6d38bc-a8fa-4705-8b4e-04cbd748767c,Cliente,,,00000000T,,inactive,,,,,,no_match
-f5e51d87-5192-4261-943f-ef0169165017,Cliente,,,00000000T,,inactive,,,,,,no_match
-7be08b24-6a28-485d-921c-d520fdf95070,Cliente,,,00000000T,,inactive,,,,,,no_match
-fc127613-5023-448c-8cb1-84b9cb47ab47,Cliente,,,00000000T,,inactive,,,,,,no_match
-2580cbf0-62d5-4fa1-bab0-5f3860da532d,Cliente,,,00000000T,,inactive,,,,,,no_match
-16a9bb93-ca1b-4d64-b1e7-930d6ddaae5a,Cliente,,,00000000T,,inactive,,,,,,no_match
-4a1d0e00-4bee-45a5-bffb-a55ba47777c1,Cliente,,,00000000T,,inactive,,,,,,no_match
-b7f0d206-73ac-4952-992e-bca775782004,Cliente,,,00000000T,,inactive,,,,,,no_match
-42836395-2fe6-4a6f-90d1-eee292761523,Cliente,,,00000000T,,inactive,,,,,,no_match
-c1f24dd4-0f75-4aab-ad5a-576d6a645a71,Cliente,,,00000000T,,inactive,,,,,,no_match
-4ab08f00-e059-4854-b912-425d89f9df33,Cliente,,,00000000T,,inactive,,,,,,no_match
-96f778ee-149e-4802-bd4b-0db55ff7d37e,Cliente,,,00000000T,,inactive,,,,,,no_match
-d7423fbc-c79a-4e0e-98e6-845a30e4c158,Cliente,,,00000000T,,inactive,,,,,,no_match
-2b17ec62-fb35-4e21-870a-78e03a3cb4d2,Cliente,,,00000000T,,inactive,,,,,,no_match
-8c3a2d27-ddd4-4b4d-abe5-4a8a2eefe408,Cliente,,,00000000T,,inactive,,,,,,no_match
-a4c1c2c5-6c2a-444b-aaee-f6c87818311d,Cliente,,,00000000T,,inactive,,,,,,no_match
-dd0f9dc1-d6f0-4c0c-b331-92dde2d8c61c,Cliente,,,00000000T,,inactive,,,,,,no_match
-57faacc7-8441-49d7-929f-cb80a1945646,Cliente,,,00000000T,,inactive,,,,,,no_match
-a65590fc-5515-4478-ac9f-d28859ad4328,Cliente,,,00000000T,,inactive,,,,,,no_match
-ae8ffd59-8bd1-4a36-987e-c8338a83248a,Cliente,,,00000000T,,inactive,,,,,,no_match
-c3087ab3-6ba5-4422-9c8d-90a2205c5368,Cliente,,,00000000T,,inactive,,,,,,no_match
-278dab9b-1675-47e3-8593-07789e2c714d,Cliente,,,00000000T,,inactive,,,,,,no_match
-5d04a823-ef65-44bd-a5ef-fc8c51d5ba12,Cliente,,,00000000T,,inactive,,,,,,no_match
-c8509842-f4ba-4962-ad91-f2037e72a8f2,Cliente,,,00000000T,,inactive,,,,,,no_match
-c581c4c8-d5af-4b84-ba7f-2e14dd573d34,Cliente,,,00000000T,,inactive,,,,,,no_match
-fd68dbbc-904e-4366-bcd7-c57059ba165b,Cliente,,,00000000T,,inactive,,,,,,no_match
-d5774a83-ae02-4b85-9729-f80042f8b263,Cliente,,,00000000T,,inactive,,,,,,no_match
-cfc44e04-4c17-41cc-b580-50e126b5d3d4,Cliente,,,00000000T,,inactive,,,,,,no_match
-9f73fe5a-2c38-4f07-8278-111d8085444f,Cliente,,,00000000T,,inactive,,,,,,no_match
-502b979d-d440-483e-808a-4643ed82f14b,Cliente,,,00000000T,,inactive,,,,,,no_match
-b6e0be66-fc16-4600-a901-02ca0f96eadb,Cliente,,,00000000T,,inactive,,,,,,no_match
-0b77b2ec-ae5f-41ed-b25d-c0b37f9d96c2,Cliente,,,00000000T,,inactive,,,,,,no_match
-91c13359-be6c-4e82-b0f9-2a5822a0215f,Cliente,,,00000000T,,inactive,,,,,,no_match
-99798140-535b-4b67-a570-5f20857a2a35,Cliente,,,00000000T,,inactive,,,,,,no_match
-c83e2456-51cb-40e1-974e-cb31156133a9,Cliente,,,00000000T,,inactive,,,,,,no_match
-91c0baaa-f2c9-43dc-ab92-21bfcb7b2f6c,Cliente,,,00000000T,,inactive,,,,,,no_match
-e6fe2aa6-e1bd-49d9-978f-014de96261aa,Cliente,,,00000000T,,inactive,,,,,,no_match
-45cd2aaf-d481-4702-8737-e994dc262478,Cliente,,,00000000T,,inactive,,,,,,no_match
-7d98c64c-8cee-4f7f-8db2-88ac5390757d,Cliente,,,00000000T,,inactive,,,,,,no_match
-929a6f67-78f1-4334-986b-580801438c09,Cliente,,,00000000T,,inactive,,,,,,no_match
-3314cad3-7e38-4084-90cc-c2567a52843e,Cliente,,,00000000T,,inactive,,,,,,no_match
-4ac4b148-f3cd-4449-a8aa-8a23058cbb8e,Cliente,,,00000000T,,inactive,,,,,,no_match
-59989640-cfcb-4857-a8d0-b542babf36da,Cliente,,,00000000T,,inactive,,,,,,no_match
-fb948f3f-ff6f-4946-9c31-00a983551a61,Cliente,,,00000000T,,inactive,,,,,,no_match
-541ea491-9645-4dc2-b213-5c0d46811dba,Cliente,,,00000000T,,inactive,,,,,,no_match
-8cc8bafa-c0d8-48ad-8e69-82ec3d33c59d,Cliente,,,00000000T,,inactive,,,,,,no_match
-cc3688f1-b4c7-4e7a-8521-a0466707a53a,Cliente,,,00000000T,,inactive,,,,,,no_match
-dc71de49-ba3d-48f7-98c9-417f51172e30,CÓDIGO CONCEPTO PRECIO UNIDADES SUBTOTAL IVA TOTAL,,,00000000T,,inactive,,,,,,no_match
-83174c23-4648-41e6-b4bc-d86fb9c20dba,Constancia Guallar Latorre,,,,,active,699721f7159d74d34a0ce2e5,699721f7159d74d34a0ce2e5,Constancia Guallar Latorre,cos.guallar@gmail.com,,by_holded_contact_id
-184332fa-6875-40ec-854c-98e329ee23eb,Cristina ArumÍ Ortiz (Herbolari El Refugi De Les Herbes),Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,active,699d5d632e996c0e9e006d04,699d5d632e996c0e9e006d04,Cristina ArumÍ Ortiz,bcn@elrefuguidelesherbes.com,,by_holded_contact_id
-6f3e214a-80c6-4857-ad0f-8d741756d1b8,Dra Montserrat Florit Juste,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab1033c841de6bcf097d0b,69ab1033c841de6bcf097d0b,Dra Montserrat Florit Juste,,,by_holded_contact_id
-669cd64a-9a58-457f-8c77-88592f2c25dd,Dra Silvia Tutusaus,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab1034be5b5cf36e0f025a,69ab1034be5b5cf36e0f025a,Dra Silvia Tutusaus,,,by_holded_contact_id
-54e4da83-40dc-4a2c-887e-a7d0e90d2a68,Dra Suni Peirè,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab103438b07e4c110e0a79,69ab103438b07e4c110e0a79,Dra Suni Peirè,,,by_holded_contact_id
-8deeed7c-8236-435b-bc68-848230750a45,Encarnacion Martin Ruiz,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,,6968f39040364e13b3061233,Encarnacion Martín Ruiz,vibraconenka@gmail.com,,by_name
-070edcff-ecd1-4516-96cd-2b72abb93299,Encarnacion Martín Ruiz,,8d0fde62-26b2-43d1-a8a4-7247839250d9,46705395P,,active,6968f39040364e13b3061233,6968f39040364e13b3061233,Encarnacion Martín Ruiz,vibraconenka@gmail.com,,by_holded_contact_id
-75866c59-ce72-4800-a643-93ed81e7bbbc,Erica Arroyo Mata,,,,,active,698eeda321a387d0870a4b65,698eeda321a387d0870a4b65,Erica Arroyo Mata,ericaarroyom@outlook.com,,by_holded_contact_id
-2c486e8d-e105-4662-9304-458794612f67,ESTETIC MEDICEL SL,,,,,active,699d5e61c2f0df5edf032d38,699d5e61c2f0df5edf032d38,ESTETIC MEDICEL SL,clients@medicel.es,,by_holded_contact_id
-1768254d-1145-462d-b169-aac18f9cac5e,Esther Pich Dura,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,PENDING_VALIDATION,699c076f5a0e09f8390eb274,699c076f5a0e09f8390eb274,Esther Pich Dura,herbodieteticaarrels@gmail.com,,by_holded_contact_id
-2ab973bc-2452-467a-b88b-5e1805911318,Gemma Morales,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab10345ddd12336b02285c,69ab10345ddd12336b02285c,Gemma Morales,,,by_holded_contact_id
-f86ccb65-58a6-41d5-9c16-2635a06a64b8,Gisele Butelman,,,,,active,699f2f0024bc324791058ab2,699f2f0024bc324791058ab2,Gisele Butelman,,,by_holded_contact_id
-52d0625e-7084-4869-a6f5-6f275969c535,Isabel de las Heras (Isabel de las Heras),,8d0fde62-26b2-43d1-a8a4-7247839250d9,,,active,697c6426438f11f79605a83a,697c6426438f11f79605a83a,Isabel de las Heras,isabeldelasheras13@gmail.com,,by_holded_contact_id
-cb130d88-7ca6-4084-b892-bdd44eae8970,Ivette Fernandez Tornero,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,,695b763a3857a4886a00c390,Ivette Fernández Tornero,ivette.dietintegrativa@gmail.com,,by_name
-ae9c7cd1-9918-452b-b7d5-d6e77a5006ed,Ivette Fernández Tornero,,8d0fde62-26b2-43d1-a8a4-7247839250d9,47971402A,,active,695b763a3857a4886a00c390,695b763a3857a4886a00c390,Ivette Fernández Tornero,ivette.dietintegrativa@gmail.com,,by_holded_contact_id
-773f0c05-7bda-443e-bf62-edfdb5c00675,Janicette Garcia Lopez,,,00000000T,,inactive,69714490e39807a0bf0d10a5,69714490e39807a0bf0d10a5,Janicette Garcia Lopez,dulcemariantonieta@gmail.com,,by_holded_contact_id
-393648b4-a68a-40bb-a8c1-cd5f7bb88641,Jose Anselmo Serrano,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab1034283982e17102076e,69ab1034283982e17102076e,Jose Anselmo Serrano,,,by_holded_contact_id
-bd00ecd3-3897-46e2-ae4a-6f821668bd2c,José Anselmo Serrano López,,8d0fde62-26b2-43d1-a8a4-7247839250d9,52421138K,,active,697733304008cf085f085dab,697733304008cf085f085dab,José Anselmo Serrano López,,,by_holded_contact_id
-2c6c7785-9245-4918-9619-3a2c9f7d7010,Josefina Alsina Falgas,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,PENDING_VALIDATION,699eb67ee4e9e3e95c0e13fb,699eb67ee4e9e3e95c0e13fb,Josefina Alsina Falgas,f.alsina@hotmail.com,,by_holded_contact_id
-af795e9b-e3d4-42bc-9967-574af090e8a9,Lidia Rodriguez Fdez,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab1035c35e569b92076586,69ab1035c35e569b92076586,Lidia Rodriguez Fdez,,,by_holded_contact_id
-e281dd87-fdfe-4129-98ab-e01aa53fb570,Lidia Rodríguez Fernández,,,,,active,698b3498817fc93c410f1b60,698b3498817fc93c410f1b60,Lidia Rodríguez Fernández,lidiarodriguezfernandez59@gmail.com,,by_holded_contact_id
-2a50a5dd-642c-4a25-98a2-8cebe2044b07,Lidia Teixidor Marce,Judith Fibla,82bfda6d-8c29-4e04-9ecb-44447ac7bff1,,,PENDING_VALIDATION,699c8374268245387a0ca4e7,699c8374268245387a0ca4e7,Lidia Teixidor Marce,cos9@cos9.com,,by_holded_contact_id
-e1c3a311-8858-4f75-95e9-ffa1a294e60a,Lorena Fernandez Fernández,,,,,active,6998317fd4241928ab08e835,6998317fd4241928ab08e835,Lorena Fernandez Fernández,lorenamonchi@gmail.com,,by_holded_contact_id
-77bfd6f8-4fd1-4bba-ae94-8775b6321eb9,Manjeet Kalra (New Master food company SL),,,,,active,699c9d4822559e4eff0b7d95,699c9d4822559e4eff0b7d95,Manjeet Kalra (New Master food company SL),mikekalra@gmail.com,,by_holded_contact_id
-854c5869-1cbc-4269-bcd3-77873b2e208a,Margarita Sanz Garcia,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69982dad2165dc36bf077579,69982dad2165dc36bf077579,Margarita Sanz Garcia,margasanz59@gmail.com,,by_holded_contact_id
-25ea13c4-625c-48fd-957c-ed362999c5f6,María del Carmen Corrochano Hernando,,,,,active,69823cfbd5076b09a80a6be5,69823cfbd5076b09a80a6be5,María del Carmen Corrochano Hernando,luismollero@gmail.com,,by_holded_contact_id
-6f2b4368-334f-4653-a7c1-8f003d7d3db6,Maria dolores Bustos Marin,,,,,active,698e0cb1fb6e665d0a0f2dc5,698e0cb1fb6e665d0a0f2dc5,Maria dolores Bustos Marin,loli.buma4@gmail.com,,by_holded_contact_id
-0bf4f67b-ce37-44d7-bd91-2d800bfdd9f1,María Jesús Cuartero Moncada,,,,,active,69a7ff0387575c3cf70791fd,69a7ff0387575c3cf70791fd,María Jesús Cuartero Moncada,,,by_holded_contact_id
-f925862e-337a-442f-845e-6442c64df21e,Maria Trave,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab103586252b31db01ab82,69ab103586252b31db01ab82,Maria Trave,,,by_holded_contact_id
-bf26c127-d731-49a4-895b-fb4fd876bec6,María Trave Martínez,,,,,active,699c3833839c9f1415090f16,699c3833839c9f1415090f16,María Trave Martínez,mariatravemm@gmail.com,,by_holded_contact_id
-c8a32226-90f6-4086-9dfa-de935abaf7a1,Marta Lima Parra,,,,,active,6996ecfcaacbe9b6e60ec125,6996ecfcaacbe9b6e60ec125,Marta Lima Parra,emedemarta@gmail.com,,by_holded_contact_id
-d8f1fa78-91f6-4cd5-a357-bb5149944521,MCarme Pujadas Prims,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,,,PENDING_VALIDATION,69ab1035a71e8a61ba03fe4c,69ab1035a71e8a61ba03fe4c,MCarme Pujadas Prims,,,by_holded_contact_id
-a37d53e4-09c7-497d-b778-f63e91bfdd1b,Melania Coronado Castellano (Herbolario Naturmel),,,,,active,6998563150ff9a0de008165c,6998563150ff9a0de008165c,Melania Coronado Castellano,,,by_holded_contact_id
-52f65a99-98a2-4b2a-85d7-9bbe2437cfd5,Melania Coronado Catellano,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,PENDING_VALIDATION,69ab10352c9762fc9b0372a0,69ab10352c9762fc9b0372a0,Melania Coronado Catellano,,,by_holded_contact_id
-a451f2b0-32f2-40a1-bca9-49c2637dcda1,Mireia Gabarro Rodenas,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,PENDING_VALIDATION,698defbd55752a8cb8034eb5,698defbd55752a8cb8034eb5,Mireia Gabarro Rodenas,,,by_holded_contact_id
-c69b3ea0-4889-44f9-8205-7fad303c823f,Monica Falla Pérez,Judith Fibla,82bfda6d-8c29-4e04-9ecb-44447ac7bff1,,,PENDING_VALIDATION,,69a53f5f1a4196fb5507c793,Mònica Falla Pérez,,,by_name
-85c9287e-2ba9-4336-a5b9-70c8f217b2f7,Mònica Falla Pérez,,,,,active,69a53f5f1a4196fb5507c793,69a53f5f1a4196fb5507c793,Mònica Falla Pérez,,,by_holded_contact_id
-08ffcd0e-54ee-4e35-9b16-8cac2d0f3188,Monica Ramirez Guirao,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,PENDING_VALIDATION,,698b4c36941538e1b70b8059,Mónica Ramírez Guirao,herboristeria.lasalut@gmail.com,,by_name
-609be93a-3f39-4289-8e6d-a010163af9af,Mónica Ramírez Guirao,,,,,active,698b4c36941538e1b70b8059,698b4c36941538e1b70b8059,Mónica Ramírez Guirao,herboristeria.lasalut@gmail.com,,by_holded_contact_id
-06de3c80-a065-4d75-b53b-c22e4056fcec,Monsalut S.L.,,,,,active,6993091b6b1b3cf3ad064635,6993091b6b1b3cf3ad064635,Monsalut S.L.,conta@wearenorth.biz,B61414777,by_holded_contact_id
-060a9be8-2878-4cf1-ba02-a16d0da8dcab,Nuria Colome,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,PENDING_VALIDATION,69ab103660d02b56cf06f17b,69ab103660d02b56cf06f17b,Nuria Colome,,,by_holded_contact_id
-2d6ffec5-6643-4b0c-abb7-8ab010805c62,Nuria Colomer Prat,,,,,active,699569bb1aaee0e00c0d47ab,699569bb1aaee0e00c0d47ab,Nuria Colomer Prat,ncp.colomer@gmail.com,,by_holded_contact_id
-e9dcb90a-599f-444a-986a-b7ffc1063f72,Pascual Martínez,,,00000000T,,inactive,69ab11a58159457fda0fe078,69ab11a58159457fda0fe078,Pascual Martínez,,,by_holded_contact_id
-5d68bdee-af61-4e63-8a80-a5464ef6947e,patrícia miralles,,,00000000T,,inactive,6975e22d897816c3a7034e95,6975e22d897816c3a7034e95,patrícia miralles,sileta17@gmail.com,,by_holded_contact_id
-d7ed14ba-c834-44d7-abda-4e07743130c1,Pilar Busquets Soy,,,,,active,69a5a24b8b749635b7038be0,69a5a24b8b749635b7038be0,Pilar Busquets Soy,,,by_holded_contact_id
-0b477fdf-e85f-4352-a9fd-96bb311f4c56,Richard Beguiristain Sastre,,,,,active,699cb4b9c0c7da158d024925,699cb4b9c0c7da158d024925,Richard Beguiristain Sastre,rbeguiristain@hotmail.com,,by_holded_contact_id
-053a5ad3-d29b-470c-9a9e-109e5563ab84,rosalia iglesias,,,,,active,699752efd0091309a207a2c5,699752efd0091309a207a2c5,rosalia iglesias,rosaliaiglesias@gmail.com,,by_holded_contact_id
-95103e87-16f6-4a80-8fa7-d5c4c9821b56,SATORRE 1938 S.C.P.,,,,,active,69a85df064723f3ada0c2e42,69a85df064723f3ada0c2e42,SATORRE 1938 S.C.P.,,J17147778,by_holded_contact_id
-3efabc7c-f3f4-43f5-a974-7c4360afea4c,Silvina Flavia Sanchez,Roser Cuixart,14265ceb-2852-4149-9f62-f083f2e76230,,,PENDING_VALIDATION,,699c9b77d58e33e9ec0ca425,Silvina Flavia Sánchez,silvina@turinconnatural.es,,by_name
-dd0effca-6a28-464c-9a54-98fc393a33dd,Silvina Flavia Sánchez,,,,,active,699c9b77d58e33e9ec0ca425,699c9b77d58e33e9ec0ca425,Silvina Flavia Sánchez,silvina@turinconnatural.es,,by_holded_contact_id
-a7dc4f82-bdf7-49a6-952e-a03036895625,Teresa Luisa Palmeiro Pereiro,,,,,active,69a5a6f3e668b9992a0d9d05,69a5a6f3e668b9992a0d9d05,Teresa Luisa Palmeiro Pereiro,tlpalmeiro@gmail.com,,by_holded_contact_id
+a6682124-3160-4622-ad9a-67f92dbae76e,Amparo Ferrer Báguena,,,,,active,699efdbdee49a9c69a06b8e5,699efdbdee49a9c69a06b8e5,Amparo Ferrer Báguena,amparoferrerbaguena@gmail.com,,by_holded_contact_id
+beb25668-9e56-4565-981f-be8964f36a4b,Ana Belén García Álvarez,,,,,active,6992e5e8bbaad1baaf08b71a,6992e5e8bbaad1baaf08b71a,Ana Belén García Álvarez,anabelen.garciaalvarez@hotmail.com,,by_holded_contact_id
+eabeead6-e783-42b3-a3a8-2033daf37b9f,ANA MARIA AMORES VIDAL,,,,,active,69835f995fd87458850b301f,69835f995fd87458850b301f,ANA MARIA AMORES VIDAL,,,by_holded_contact_id
+67b3598a-6bbe-4eb9-8783-d9b1509ef77c,Angie Amatller,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,00000000T,,PENDING_VALIDATION,69b3c9bd8452234f3402becc,69b3c9bd8452234f3402becc,Angie Amatller,angeleta_bcn@hotmail.com,,by_holded_contact_id
+f9248905-7957-460d-b6e7-257f2cd67baa,Angie Amatller,,,,,active,69b345d3c077313d5b05da35,69b345d3c077313d5b05da35,Angie Amatller,angeleta_bcn@hotmail.com,,by_holded_contact_id
+ebf50ace-c0dc-4505-9583-92986db8cdc8,Aurora Delgado,,,,,active,699dc323a90fa9db8d0d4f75,699dc323a90fa9db8d0d4f75,Aurora Delgado,auroradelgado@hotmail.com,,by_holded_contact_id
+e8fc4ea6-30dc-4411-af5a-c42fd455d770,Belkis María Cermeño Pinto,,,,,active,69aede474c346dd0bc0441e8,69aede474c346dd0bc0441e8,Belkis María Cermeño Pinto,belkisalud@gmail.com,,by_holded_contact_id
+d94139fc-d5a0-4a43-b2e7-6f8db06a8573,BLANCA GALOFRÉ MUNNÉ,,,,,active,6978c3cd4e82ccf1e405b6e5,6978c3cd4e82ccf1e405b6e5,BLANCA GALOFRÉ MUNNÉ,info@homedical.es,,by_holded_contact_id
+4f55592c-dacd-4f4a-af39-f1c144492d63,Carme Pujadas Prims,,,,,active,698ef7b61b90d51704036c65,698ef7b61b90d51704036c65,Carme Pujadas Prims,carmepujser@gmail.com,,by_holded_contact_id
+824f2004-3b06-4a09-be49-38c845e7ec42,Carmen Riera casas,,,,,active,695b870644d13429560009d5,695b870644d13429560009d5,Carmen Riera casas,carmen3-@hotmail.es,,by_holded_contact_id
+ee24c71c-d4a1-467e-a260-5c2449e925ef,Cecilia Sandoval Arana,,,,,active,699c8ff202f6840cf5073719,699c8ff202f6840cf5073719,Cecilia Sandoval Arana,ceciliasand@hotmail.com,,by_holded_contact_id
+9a11c1e2-4747-44cd-ba3b-078e910e41ec,Constancia Guallar Latorre,,,,,active,699721f7159d74d34a0ce2e5,699721f7159d74d34a0ce2e5,Constancia Guallar Latorre,cos.guallar@gmail.com,,by_holded_contact_id
+001e9fa5-dac3-4ce1-a94c-fa3d300b0ae1,Cristina ArumÍ Ortiz,,,,,active,699d5d632e996c0e9e006d04,699d5d632e996c0e9e006d04,Cristina ArumÍ Ortiz,bcn@elrefuguidelesherbes.com,,by_holded_contact_id
+46bacb8f-b853-4e3b-8460-cde0a6b1e716,Cristina Male Figols,,,,,active,69b2852d8b425243a60b2ac1,69b2852d8b425243a60b2ac1,Cristina Male Figols,info@esteticadoblete.com,,by_holded_contact_id
+555ea387-1697-498c-adde-3771263b2811,Encarnacion Martín Ruiz,,,,,active,6968f39040364e13b3061233,6968f39040364e13b3061233,Encarnacion Martín Ruiz,vibraconenka@gmail.com,,by_holded_contact_id
+78b3dd21-2ce9-4c1e-aacc-e936a9edb09e,Erica Arroyo Mata,,,,,active,698eeda321a387d0870a4b65,698eeda321a387d0870a4b65,Erica Arroyo Mata,ericaarroyom@outlook.com,,by_holded_contact_id
+60a42ee7-67a4-414d-9d0b-6bdd2f9f37e2,ESTETIC MEDICEL SL,,,,,active,699d5e61c2f0df5edf032d38,699d5e61c2f0df5edf032d38,ESTETIC MEDICEL SL,clients@medicel.es,,by_holded_contact_id
+817c7fee-585b-443e-ba54-f38ad9133c47,Esther Pich Dura,,,,,active,699c076f5a0e09f8390eb274,699c076f5a0e09f8390eb274,Esther Pich Dura,herbodieteticaarrels@gmail.com,,by_holded_contact_id
+8e3d9687-9531-4f20-a4e4-84f86df1d14c,Esther Reig Camus,,,,,active,69ac0a14afd22b23140f3c35,69ac0a14afd22b23140f3c35,Esther Reig Camus,esthereigcamus@gmail.com,,by_holded_contact_id
+b11647ea-59ba-4428-9856-f8b54d45d9a4,Gisele Butelman,,,,,active,699f2f0024bc324791058ab2,699f2f0024bc324791058ab2,Gisele Butelman,,,by_holded_contact_id
+4e897612-488e-4e9c-a0d4-676d83678ddf,Glòria Moya,,,,,active,69b40f481da182ead305fd65,69b40f481da182ead305fd65,Glòria Moya,gloriabnz@yahoo.es,,by_holded_contact_id
+b34a63e6-c9f3-4b68-a77e-f6b71ba69d34,Imma Requena Vilalta,,,,,active,695b870724b74a8b0e0fbd05,695b870724b74a8b0e0fbd05,Imma Requena Vilalta,,,by_holded_contact_id
+a1daa67e-c29b-4adf-8396-130d6319e66b,Isabel de las Heras,,,,,active,697c6426438f11f79605a83a,697c6426438f11f79605a83a,Isabel de las Heras,isabeldelasheras13@gmail.com,,by_holded_contact_id
+497e1db8-c87f-4fc6-929a-1eb5686ec784,Isabel Prendes Alvargonzález,,,,,active,69b02f8d45867234f908f5ec,69b02f8d45867234f908f5ec,Isabel Prendes Alvargonzález,farmaciaprendes@gmail.com,,by_holded_contact_id
+6e70696b-9761-4fa8-a7a2-dd677d0667cb,Ivette Fernández Tornero,,,,,active,695b763a3857a4886a00c390,695b763a3857a4886a00c390,Ivette Fernández Tornero,ivette.dietintegrativa@gmail.com,,by_holded_contact_id
+82a7fa0f-8538-4932-977a-eca738b68c6a,Janicette Garcia Lopez,,,,,active,69714490e39807a0bf0d10a5,69714490e39807a0bf0d10a5,Janicette Garcia Lopez,dulcemariantonieta@gmail.com,,by_holded_contact_id
+88f9065c-4b9f-4d2e-b183-c68f40f2583d,José Anselmo Serrano López,,,,,active,697733304008cf085f085dab,697733304008cf085f085dab,José Anselmo Serrano López,,,by_holded_contact_id
+f6707618-0699-4c90-a854-7749fcfc707e,Josefina Alsina Falgas,,,,,active,699eb67ee4e9e3e95c0e13fb,699eb67ee4e9e3e95c0e13fb,Josefina Alsina Falgas,f.alsina@hotmail.com,,by_holded_contact_id
+4c3308e3-6714-4f99-aa31-a394494b3baf,Lidia Rodríguez Fernández,,,,,active,698b3498817fc93c410f1b60,698b3498817fc93c410f1b60,Lidia Rodríguez Fernández,lidiarodriguezfernandez59@gmail.com,,by_holded_contact_id
+39e236fe-c512-442d-889c-ff6c5d0b8018,Lidia Teixidor Marce,,,,,active,699c8374268245387a0ca4e7,699c8374268245387a0ca4e7,Lidia Teixidor Marce,cos9@cos9.com,,by_holded_contact_id
+dfbd64cd-661e-479d-b85d-0fc10c3e7ad3,Lorena Fernandez Fernández,,,,,active,6998317fd4241928ab08e835,6998317fd4241928ab08e835,Lorena Fernandez Fernández,lorenamonchi@gmail.com,,by_holded_contact_id
+ff880deb-aeaf-49a9-b1ff-5e1daf411090,Manjeet Kalra (New Master food company SL),,,,,active,699c9d4822559e4eff0b7d95,699c9d4822559e4eff0b7d95,Manjeet Kalra (New Master food company SL),mikekalra@gmail.com,,by_holded_contact_id
+4e04cc7f-8073-48d3-8763-7ee9d4ebb025,Margarita Sanz Garcia,,,,,active,69982dad2165dc36bf077579,69982dad2165dc36bf077579,Margarita Sanz Garcia,margasanz59@gmail.com,,by_holded_contact_id
+4fcb4ecb-6660-4780-a08e-9da4eed94cb4,María del Carmen Corrochano Hernando,,,,,active,69823cfbd5076b09a80a6be5,69823cfbd5076b09a80a6be5,María del Carmen Corrochano Hernando,luismollero@gmail.com,,by_holded_contact_id
+b29458a5-2278-4f5c-9476-f05f6db2bd47,Maria dolores Bustos Marin,,,,,active,698e0cb1fb6e665d0a0f2dc5,698e0cb1fb6e665d0a0f2dc5,Maria dolores Bustos Marin,loli.buma4@gmail.com,,by_holded_contact_id
+ef43ee0d-c68c-45ce-ae90-dd7c4d27ac6c,María Jesús Cuartero Moncada,,,,,active,69a7ff0387575c3cf70791fd,69a7ff0387575c3cf70791fd,María Jesús Cuartero Moncada,,,by_holded_contact_id
+37da93b4-8af9-4596-ba69-c45bbef8dba5,María Trave Martínez,,,,,active,699c3833839c9f1415090f16,699c3833839c9f1415090f16,María Trave Martínez,mariatravemm@gmail.com,,by_holded_contact_id
+1f47e905-f054-4731-a4ed-1fe75642d6c8,Marta Lima Parra,,,,,active,6996ecfcaacbe9b6e60ec125,6996ecfcaacbe9b6e60ec125,Marta Lima Parra,emedemarta@gmail.com,,by_holded_contact_id
+ad852547-3752-4495-abb0-d17683a13d1c,Marta Vernet Sumalla,Isabel Solé Mesas,d15a25b1-fbc4-49bc-a37a-c340bbc80f5e,77786901G,,PENDING_VALIDATION,69ba8de5c38fc9022503cdaf,69ba8de5c38fc9022503cdaf,Marta Vernet Sumalla,mvernet.dietista@gmail.com,,by_holded_contact_id
+d67febe9-7a12-459d-9d76-6eb5d94a31a2,Melania Coronado Castellano,,,,,active,6998563150ff9a0de008165c,6998563150ff9a0de008165c,Melania Coronado Castellano,,,by_holded_contact_id
+5988978c-5206-4186-bc9c-07ec4fc9a3de,Miacentrebellesa sc,,,,,active,69b047503600feb1300f79e4,69b047503600feb1300f79e4,Miacentrebellesa sc,miacentrebellesa@gmail.com,,by_holded_contact_id
+3a3a23ec-9f9b-4a50-8bcd-3d22adb6f62a,Mireia Gabarro Rodenas,,,,,active,698defbd55752a8cb8034eb5,698defbd55752a8cb8034eb5,Mireia Gabarro Rodenas,,,by_holded_contact_id
+fa13b4db-c067-4308-a98e-76dd999f0b47,Mònica Falla Pérez,,,,,active,69a53f5f1a4196fb5507c793,69a53f5f1a4196fb5507c793,Mònica Falla Pérez,,,by_holded_contact_id
+72b82822-8bf6-44bb-88f3-35c2bc82605a,Mónica Ramírez Guirao,,,,,active,698b4c36941538e1b70b8059,698b4c36941538e1b70b8059,Mónica Ramírez Guirao,herboristeria.lasalut@gmail.com,,by_holded_contact_id
+a8dd10dc-2e23-480d-80b2-472c69f5948b,Monsalut S.L.,,,,,active,6993091b6b1b3cf3ad064635,6993091b6b1b3cf3ad064635,Monsalut S.L.,conta@wearenorth.biz,B61414777,by_holded_contact_id
+0b041ce1-ed25-4572-b5b7-61422d3edb4f,Montse Alvarez,,,,,active,69b4030e41b57f2a8d023b15,69b4030e41b57f2a8d023b15,Montse Alvarez,4allplanificacion@gmail.com,,by_holded_contact_id
+83634e31-13c4-404b-87cf-42efe787ee3d,Nuria Colomer Prat,,,,,active,699569bb1aaee0e00c0d47ab,699569bb1aaee0e00c0d47ab,Nuria Colomer Prat,ncp.colomer@gmail.com,,by_holded_contact_id
+f4d70cfa-c055-45f1-81e1-26056f2be36b,patrícia miralles,,,,,active,6975e22d897816c3a7034e95,6975e22d897816c3a7034e95,patrícia miralles,sileta17@gmail.com,,by_holded_contact_id
+622ca021-e450-46f6-a0e8-f96eb6bc5ba7,Pilar Busquets Soy,,,,,active,69a5a24b8b749635b7038be0,69a5a24b8b749635b7038be0,Pilar Busquets Soy,,,by_holded_contact_id
+d2cc2440-1a1f-45f9-9da7-5d432d9c96f3,Pilar Fenoy Illacer,,,,,active,69ac7c8d760d5776320d64d5,69ac7c8d760d5776320d64d5,Pilar Fenoy Illacer,pilar_fenoy@hotmail.com,,by_holded_contact_id
+d269e847-484a-4c57-9dbc-d636a74ca7ba,Richard Beguiristain Sastre,,,,,active,699cb4b9c0c7da158d024925,699cb4b9c0c7da158d024925,Richard Beguiristain Sastre,rbeguiristain@hotmail.com,,by_holded_contact_id
+8a69fbb1-dc3e-4027-bde7-f33d942da0e5,rosalia iglesias,,,,,active,699752efd0091309a207a2c5,699752efd0091309a207a2c5,rosalia iglesias,rosaliaiglesias@gmail.com,,by_holded_contact_id
+8691bfe3-968d-4410-ac1a-ac288f50d56a,SATORRE 1938 S.C.P.,,,,,active,69a85df064723f3ada0c2e42,69a85df064723f3ada0c2e42,SATORRE 1938 S.C.P.,,J17147778,by_holded_contact_id
+f4a00289-4d27-428f-97e2-66b666ba252b,Silvina Flavia Sánchez,,,,,active,699c9b77d58e33e9ec0ca425,699c9b77d58e33e9ec0ca425,Silvina Flavia Sánchez,silvina@turinconnatural.es,,by_holded_contact_id
+69d9e9fa-629b-4724-bedc-55f21e000c58,Sofia Segura Avilar,,,,,active,69b272b30276938a2807a78a,69b272b30276938a2807a78a,Sofia Segura Avilar,sofikroski@gmail.com,,by_holded_contact_id
+4a34027b-b557-4aa1-b0b4-bdfe2293e4d2,Susana Egea Pons,,,,,active,69b2d7f981d2c5587d00cd2c,69b2d7f981d2c5587d00cd2c,Susana Egea Pons,,,by_holded_contact_id
+d43d54d3-930d-43d5-b95e-fa148d78d040,Teresa Luisa Palmeiro Pereiro,,,,,active,69a5a6f3e668b9992a0d9d05,69a5a6f3e668b9992a0d9d05,Teresa Luisa Palmeiro Pereiro,tlpalmeiro@gmail.com,,by_holded_contact_id
+5fdeccef-af32-49e4-9945-0c6627e7528f,YOLANDA RAMIREZ BALLÓ,,,,,active,69b94813c09eee2a7d030e35,69b94813c09eee2a7d030e35,YOLANDA RAMIREZ BALLÓ,yolandaramirezballo@gmail.com,,by_holded_contact_id

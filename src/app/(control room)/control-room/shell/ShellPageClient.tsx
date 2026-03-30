@@ -1,14 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-import useCommunityProfile from "@/components/portal/community/useCommunityProfile";
-
-import TechnicalTab from "@/components/control-room/technical/TechnicalTab";
-import ElElyonControlBlock from "@/components/control-room/resources/ElElyonControlBlock";
+import ControlRoomMission from "@/components/control-room/dashboard/ControlRoomMission";
 import ResourcesHubBlock from "@/components/control-room/resources/ResourcesHubBlock";
 import HoldedDocumentsTable from "@/components/control-room/invoices/HoldedDocumentsTable";
+import ClientsPanel from "@/components/control-room/clients/ClientsPanel";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -19,96 +17,102 @@ type ShellTabId =
   | "recursos"
   | "el-elyon";
 
+function isShellTabId(value: string | null): value is ShellTabId {
+  return (
+    value === "situation" ||
+    value === "clients" ||
+    value === "facturacion" ||
+    value === "recursos" ||
+    value === "el-elyon"
+  );
+}
+
 function SituationPanel() {
   return (
     <Card>
       <CardHeader>
         <CardTitle>Situation</CardTitle>
       </CardHeader>
-      <CardContent className="text-sm" style={{ color: "var(--viho-muted)" }}>
+      <CardContent
+        className="text-sm"
+        style={{ color: "var(--viho-muted, rgba(42,29,32,0.72))" }}
+      >
         Dashboard principal del actor.
       </CardContent>
     </Card>
   );
 }
 
-function ClientsPanel() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Clients</CardTitle>
-      </CardHeader>
-      <CardContent className="text-sm" style={{ color: "var(--viho-muted)" }}>
-        Dominio relacional y comercial del actor.
-      </CardContent>
-    </Card>
-  );
+function ClientsShellPanel() {
+  return <ClientsPanel />;
 }
 
 function FacturacionPanel() {
-  return <HoldedDocumentsTable />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <HoldedDocumentsTable />
+    </div>
+  );
 }
 
 function RecursosPanel() {
   return (
-    <div className="space-y-4">
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <ResourcesHubBlock />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Recursos</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm" style={{ color: "var(--viho-muted)" }}>
-          Recursos contiene formación, documentación, materiales y soportes del
-          actor.
-        </CardContent>
-      </Card>
     </div>
   );
 }
 
 function ElElyonPanel() {
   return (
-    <div className="space-y-4">
-      <ElElyonControlBlock />
-      <TechnicalTab />
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <ControlRoomMission />
     </div>
   );
 }
 
-function normalizeTab(value: string | null, isMelquisedec: boolean): ShellTabId {
-  if (value === "situation") return "situation";
-  if (value === "clients") return "clients";
-  if (value === "facturacion") return "facturacion";
-  if (value === "recursos") return "recursos";
-  if (value === "el-elyon" && isMelquisedec) return "el-elyon";
-  return "situation";
-}
-
 export default function ShellPageClient() {
   const searchParams = useSearchParams();
-  const { isMelquisedec } = useCommunityProfile();
 
-  const activeTab = useMemo(
-    () => normalizeTab(searchParams.get("tab"), isMelquisedec),
-    [searchParams, isMelquisedec]
+  const initialTab = useMemo<ShellTabId>(() => {
+    const tabParam = searchParams.get("tab");
+    return isShellTabId(tabParam) ? tabParam : "situation";
+  }, [searchParams]);
+
+  const [activeTab, setActiveTab] = useState<ShellTabId>(initialTab);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  const content = useMemo(() => {
+    switch (activeTab) {
+      case "situation":
+        return <SituationPanel />;
+
+      case "clients":
+        return <ClientsShellPanel />;
+
+      case "facturacion":
+        return <FacturacionPanel />;
+
+      case "recursos":
+        return <RecursosPanel />;
+
+      case "el-elyon":
+        return <ElElyonPanel />;
+
+      default:
+        return <SituationPanel />;
+    }
+  }, [activeTab]);
+
+  return (
+    <div
+      className="flex flex-col gap-4"
+      style={{ width: "100%", minWidth: 0 }}
+    >
+      <div style={{ width: "100%", minWidth: 0 }}>{content}</div>
+    </div>
   );
-
-  switch (activeTab) {
-    case "clients":
-      return <ClientsPanel />;
-
-    case "facturacion":
-      return <FacturacionPanel />;
-
-    case "recursos":
-      return <RecursosPanel />;
-
-    case "el-elyon":
-      return <ElElyonPanel />;
-
-    case "situation":
-    default:
-      return <SituationPanel />;
-  }
 }

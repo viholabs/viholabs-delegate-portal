@@ -1,0 +1,4 @@
+{
+    "github.copilot.chat.organizationCustomAgents.enabled": false,
+    "chat.useAgentsMdFile": false
+}

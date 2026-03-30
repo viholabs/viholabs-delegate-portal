@@ -1,0 +1,239 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import fs from "node:fs";
+import path from "node:path";
+import dotenv from "dotenv";
+
+const envLocalPath = path.resolve(process.cwd(), ".env.local");
+
+if (fs.existsSync(envLocalPath)) {
+  dotenv.config({ path: envLocalPath });
+} else {
+  dotenv.config();
+}
+
+import { createClient } from "@supabase/supabase-js";
+import {
+  holdedFetchJson as holdedListDocuments,
+  holdedFetch as holdedDocumentDetail,
+} from "../src/lib/holded/holdedFetch";
+import {
+  buildHoldedImportDecision,
+} from "../src/lib/holded/holdedInvoiceImporter";
+
+type HoldedDocType = "invoice" | "creditnote";
+
+const TARGET_IDS = new Set<string>([
+  "69ac0a14afd22b23140f3c34",
+  "69ac7c8d760d5776320d64d4",
+  "69aede9bd4de6645560dffa5",
+]);
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value || !value.trim()) {
+    throw new Error(`Missing env var: ${name}`);
+  }
+  return value;
+}
+
+function extractExternalId(doc: Record<string, unknown>): string | null {
+  const id =
+    (typeof doc.id === "string" && doc.id.trim()) ||
+    (typeof doc._id === "string" && doc._id.trim()) ||
+    "";
+
+  return id || null;
+}
+
+function inferDocTypeFromSummary(doc: Record<string, unknown>): HoldedDocType {
+  const candidates = [
+    doc.docType,
+    doc.documentType,
+    doc.type,
+    doc.kind,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+
+      if (
+        normalized.includes("credit") ||
+        normalized.includes("refund") ||
+        normalized.includes("abon") ||
+        normalized.includes("rectific")
+      ) {
+        return "creditnote";
+      }
+
+      if (normalized.includes("invoice") || normalized.includes("fact")) {
+        return "invoice";
+      }
+    }
+  }
+
+  const numberCandidate =
+    (typeof doc.docNumber === "string" && doc.docNumber.trim()) ||
+    (typeof doc.number === "string" && doc.number.trim()) ||
+    "";
+
+  if (numberCandidate.toUpperCase().startsWith("CN")) {
+    return "creditnote";
+  }
+
+  return "invoice";
+}
+
+function pickInvoiceNumber(doc: Record<string, unknown>): string | null {
+  if (typeof doc.docNumber === "string" && doc.docNumber.trim()) {
+    return doc.docNumber.trim();
+  }
+
+  if (typeof doc.number === "string" && doc.number.trim()) {
+    return doc.number.trim();
+  }
+
+  return null;
+}
+
+async function fetchHoldedDocumentsByType(docType: HoldedDocType): Promise<any[]> {
+  const result = await holdedListDocuments(docType);
+
+  if (!Array.isArray(result)) {
+    throw new Error(`Holded list for ${docType} did not return an array`);
+  }
+
+  return result;
+}
+
+async function fetchHoldedDocumentDetailById(
+  docType: HoldedDocType,
+  externalId: string
+): Promise<any> {
+  const detail = await holdedDocumentDetail(docType, externalId);
+
+  if (!detail || typeof detail !== "object") {
+    throw new Error(`Holded detail for ${docType}/${externalId} is empty o inválido`);
+  }
+
+  return detail;
+}
+
+async function resolveByHoldedContactIdFactory(supabase: any) {
+  return async (holdedContactId: string) => {
+    const { data: mapRow, error: mapError } = await supabase
+      .from("holded_contact_client_map_g1")
+      .select("client_id")
+      .eq("holded_contact_id", holdedContactId)
+      .maybeSingle();
+
+    if (mapError) throw mapError;
+    if (!mapRow?.client_id) return null;
+
+    const { data: clientRow, error: clientError } = await supabase
+      .from("clients")
+      .select("id, delegate_id")
+      .eq("id", mapRow.client_id)
+      .maybeSingle();
+
+    if (clientError) throw clientError;
+
+    return {
+      clientId: clientRow?.id ?? mapRow.client_id ?? null,
+      delegateId: clientRow?.delegate_id ?? null,
+    };
+  };
+}
+
+async function resolveByContactNamePreviewFactory(supabase: any) {
+  return async (contactName: string) => {
+    const { data, error } = await supabase
+      .from("clients")
+      .select("id, delegate_id, name")
+      .ilike("name", contactName)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    return {
+      clientId: data.id ?? null,
+      delegateId: data.delegate_id ?? null,
+    };
+  };
+}
+
+async function main() {
+  const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+
+  const resolveByHoldedContactId = await resolveByHoldedContactIdFactory(supabase);
+  const resolveByContactNamePreviewOnly =
+    await resolveByContactNamePreviewFactory(supabase);
+
+  console.log("");
+  console.log("1) Listando Holded...");
+  const invoices = await fetchHoldedDocumentsByType("invoice");
+  const creditNotes = await fetchHoldedDocumentsByType("creditnote");
+  const allDocs = [...invoices, ...creditNotes];
+  console.log(`   invoices total    : ${invoices.length}`);
+  console.log(`   creditnotes total : ${creditNotes.length}`);
+  console.log(`   all docs total    : ${allDocs.length}`);
+  console.log("");
+
+  const matchedSummaries = allDocs
+    .filter((doc) => {
+      const externalId = extractExternalId(doc);
+      return externalId !== null && TARGET_IDS.has(externalId);
+    })
+    .map((summary) => ({
+      externalId: extractExternalId(summary)!,
+      invoiceNumber: pickInvoiceNumber(summary),
+      docType: inferDocTypeFromSummary(summary),
+      summary,
+    }));
+
+  console.log("2) Auditando decisiones canónicas...");
+  const output: Array<Record<string, unknown>> = [];
+
+  for (const item of matchedSummaries) {
+    const detail = await fetchHoldedDocumentDetailById(item.docType, item.externalId);
+
+    const decision = await buildHoldedImportDecision({
+      summary: item.summary,
+      detail,
+      resolveByHoldedContactId,
+      resolveByContactNamePreviewOnly,
+      enableNameFallbackInPreview: false,
+      summarySource: "list",
+    });
+
+    output.push({
+      external_id: item.externalId,
+      invoice_number: item.invoiceNumber,
+      inferred_doc_type: item.docType,
+      decision_status: decision.status,
+      decision_reason: decision.status === "skip" ? decision.reason : null,
+      decision_diagnostics: decision.diagnostics,
+      accepted_invoice: decision.status === "accept" ? decision.invoice : null,
+      accepted_items_count:
+        decision.status === "accept" && Array.isArray(decision.items)
+          ? decision.items.length
+          : 0,
+    });
+  }
+
+  console.log(JSON.stringify(output, null, 2));
+  console.log("");
+}
+
+main().catch((error: unknown) => {
+  console.error("");
+  console.error("ERROR");
+  console.error(error);
+  process.exit(1);
+});

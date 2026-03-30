@@ -1,52 +1,66 @@
 // src/app/api/control-room/month/route.ts
-import { NextResponse } from "next/server";
-import { getActorFromRequest } from "@/app/api/delegate/_utils";
-import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
+
+import { NextRequest, NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+
+import { resolveDashboardContext } from "@/lib/control-room/resolveDashboardContext";
 
 export const runtime = "nodejs";
 
 function json(status: number, body: unknown) {
-  return NextResponse.json(body, { status });
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+    },
+  });
 }
 
-type ActorLite = {
-  id: string;
-  role: string | null;
-  status?: string | null;
-  name?: string | null;
-  email?: string | null;
-};
-
-type ActorFromRequestOk = {
-  ok: true;
-  actor: ActorLite;
-  supaRls: any;
-};
-
-type ActorFromRequestFail = {
-  ok: false;
-  status: number;
-  error: string;
-};
-
-function isOk(ar: any): ar is ActorFromRequestOk {
-  return !!ar && ar.ok === true && !!ar.actor && !!ar.supaRls;
+function toNum(v: any, fallback = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function isMonth01(s: string) {
   return /^\d{4}-\d{2}-01$/.test(s);
 }
 
-function pickName(obj: any) {
-  return obj?.name ?? obj?.contact_email ?? obj?.email ?? "—";
+function getMadridTodayParts(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const [year, month, day] = fmt.format(date).split("-");
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+  };
 }
 
-/**
- * SERVICE ROLE client (SUPER_ADMIN = Déu):
- * - Al Control Room, el SUPER_ADMIN ha de poder veure KPI i comissions sense RLS.
- * - Evita errors per policies circulars / permisos incomplets en MVP.
- */
+function getCurrentMonth01Madrid(date = new Date()) {
+  const { year, month } = getMadridTodayParts(date);
+  return `${year}-${String(month).padStart(2, "0")}-01`;
+}
+
+function nextMonth01(month01: string) {
+  const [y, m] = month01.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, (m ?? 1) - 1, 1));
+  dt.setUTCMonth(dt.getUTCMonth() + 1);
+
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+
+  return `${yy}-${mm}-01`;
+}
+
+function monthKey(month01: string) {
+  return month01.slice(0, 7);
+}
+
 function getServiceSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const key =
@@ -54,7 +68,7 @@ function getServiceSupabase() {
 
   if (!url || !key) {
     throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY"
+      "Missing NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY",
     );
   }
 
@@ -63,21 +77,17 @@ function getServiceSupabase() {
 
 type MonthStateCode = "OPEN" | "LOCKED" | "UNKNOWN";
 
-/**
- * Determinista:
- * - Intenta llegir el lock/state real des de backend (commission_month_locks) amb diferents claus.
- * - Si no hi ha dades (o la taula no existeix encara), aplica default contractual: OPEN.
- * - No trenca mai la UI.
- */
 async function getMonthStateCode(admin: any, month01: string): Promise<{
   state_code: MonthStateCode;
-  source: "commission_month_locks.period_month" | "commission_month_locks.month" | "default_open";
+  source:
+    | "commission_month_locks.period_month"
+    | "commission_month_locks.month"
+    | "default_open";
   lock_row: any | null;
   warning_fallback: boolean;
 }> {
-  const monthKey = month01.slice(0, 7); // YYYY-MM
+  const monthKeyValue = monthKey(month01);
 
-  // 1) Prova: commission_month_locks.period_month = YYYY-MM-01
   {
     const { data, error } = await admin
       .from("commission_month_locks")
@@ -89,7 +99,13 @@ async function getMonthStateCode(admin: any, month01: string): Promise<{
       const row = data[0];
       const sc = String(row.state_code ?? "").toUpperCase();
       const state_code: MonthStateCode =
-        sc === "LOCKED" ? "LOCKED" : sc === "OPEN" ? "OPEN" : row.is_locked === true ? "LOCKED" : "OPEN";
+        sc === "LOCKED"
+          ? "LOCKED"
+          : sc === "OPEN"
+            ? "OPEN"
+            : row.is_locked === true
+              ? "LOCKED"
+              : "OPEN";
 
       return {
         state_code,
@@ -100,19 +116,24 @@ async function getMonthStateCode(admin: any, month01: string): Promise<{
     }
   }
 
-  // 2) Prova: commission_month_locks.month = YYYY-MM
   {
     const { data, error } = await admin
       .from("commission_month_locks")
       .select("*")
-      .eq("month", monthKey)
+      .eq("month", monthKeyValue)
       .limit(1);
 
     if (!error && Array.isArray(data) && data[0]) {
       const row = data[0];
       const sc = String(row.state_code ?? "").toUpperCase();
       const state_code: MonthStateCode =
-        sc === "LOCKED" ? "LOCKED" : sc === "OPEN" ? "OPEN" : row.is_locked === true ? "LOCKED" : "OPEN";
+        sc === "LOCKED"
+          ? "LOCKED"
+          : sc === "OPEN"
+            ? "OPEN"
+            : row.is_locked === true
+              ? "LOCKED"
+              : "OPEN";
 
       return {
         state_code,
@@ -123,7 +144,6 @@ async function getMonthStateCode(admin: any, month01: string): Promise<{
     }
   }
 
-  // 3) Default contractual: OPEN (si no hi ha lock registrat, el mes és obert)
   return {
     state_code: "OPEN",
     source: "default_open",
@@ -132,41 +152,349 @@ async function getMonthStateCode(admin: any, month01: string): Promise<{
   };
 }
 
+async function parseMonthFromRequest(req: Request) {
+  const url = new URL(req.url);
+  const fromQuery =
+    url.searchParams.get("month") || url.searchParams.get("source_month") || "";
+
+  if (isMonth01(String(fromQuery))) {
+    return String(fromQuery);
+  }
+
+  if (req.method !== "GET") {
+    const body = await req.json().catch(() => null);
+    const fromBody = String(body?.month ?? body?.source_month ?? "");
+    if (isMonth01(fromBody)) {
+      return fromBody;
+    }
+  }
+
+  return getCurrentMonth01Madrid();
+}
+
+async function queryScopedInvoices(args: {
+  supaService: any;
+  month01: string;
+  nextMonth01: string;
+  scope: {
+    clientIds: string[];
+    delegateIds: string[];
+    actorIds: string[];
+  };
+  permissions: {
+    canViewGlobal: boolean;
+    canViewFinance: boolean;
+  };
+}) {
+  const { supaService, month01, nextMonth01, scope, permissions } = args;
+
+  const canUseGlobalFinance =
+    permissions.canViewGlobal && permissions.canViewFinance;
+
+  if (canUseGlobalFinance) {
+    const { data, error } = await supaService
+      .from("invoices")
+      .select(
+        "id, client_id, delegate_id, invoice_date, total_net, total_gross, source_provider",
+      )
+      .gte("invoice_date", month01)
+      .lt("invoice_date", nextMonth01)
+      .eq("source_provider", "holded");
+
+    if (!error) {
+      const rows = Array.isArray(data) ? data : [];
+      return {
+        rows,
+        source: "invoices.global",
+        query_mode: "global_by_invoice_date_and_source_provider",
+        warning_fallback: false,
+      };
+    }
+  }
+
+  if (scope.clientIds.length > 0) {
+    const { data, error } = await supaService
+      .from("invoices")
+      .select("id, client_id, delegate_id, invoice_date, total_net, total_gross")
+      .gte("invoice_date", month01)
+      .lt("invoice_date", nextMonth01)
+      .in("client_id", scope.clientIds);
+
+    if (!error) {
+      const rows = Array.isArray(data) ? data : [];
+      return {
+        rows,
+        source: "invoices.client_scope",
+        query_mode: "scoped_by_client_id",
+        warning_fallback: false,
+      };
+    }
+  }
+
+  if (scope.delegateIds.length > 0) {
+    const { data, error } = await supaService
+      .from("invoices")
+      .select("id, client_id, delegate_id, invoice_date, total_net, total_gross")
+      .gte("invoice_date", month01)
+      .lt("invoice_date", nextMonth01)
+      .in("delegate_id", scope.delegateIds);
+
+    if (!error) {
+      const rows = Array.isArray(data) ? data : [];
+      return {
+        rows,
+        source: "invoices.delegate_scope",
+        query_mode: "scoped_by_delegate_id",
+        warning_fallback: false,
+      };
+    }
+  }
+
+  if (scope.actorIds.length > 0) {
+    const { data, error } = await supaService
+      .from("invoices")
+      .select(
+        "id, client_id, delegate_id, ops_owner_actor_id, invoice_date, total_net, total_gross",
+      )
+      .gte("invoice_date", month01)
+      .lt("invoice_date", nextMonth01)
+      .in("ops_owner_actor_id", scope.actorIds);
+
+    if (!error) {
+      const rows = Array.isArray(data) ? data : [];
+      return {
+        rows,
+        source: "invoices.actor_scope",
+        query_mode: "scoped_by_ops_owner_actor_id",
+        warning_fallback: true,
+      };
+    }
+  }
+
+  return {
+    rows: [],
+    source: "fallback_zero",
+    query_mode: "fallback_zero",
+    warning_fallback: true,
+  };
+}
+
+async function queryGlobalKpiMonth(admin: any, month01: string) {
+  const { data: kpiMonthRows, error } = await admin.rpc("kpi_month_summary_v1", {
+    p_month: month01,
+  });
+
+  if (error) {
+    return {
+      ok: false as const,
+      error: error.message,
+      kpi_month: null,
+    };
+  }
+
+  const kpi_month = Array.isArray(kpiMonthRows) ? kpiMonthRows[0] : kpiMonthRows;
+
+  return {
+    ok: true as const,
+    error: null,
+    kpi_month: kpi_month ?? null,
+  };
+}
+
+async function queryScopedCommissionData(args: {
+  supaService: any;
+  month01: string;
+  permissions: {
+    canViewGlobal: boolean;
+    canViewFinance: boolean;
+  };
+  scope: {
+    clientIds: string[];
+    delegateIds: string[];
+  };
+}) {
+  const { supaService, month01, permissions, scope } = args;
+
+  const canUseGlobalFinance =
+    permissions.canViewGlobal && permissions.canViewFinance;
+
+  if (canUseGlobalFinance) {
+    const { data, error } = await supaService
+      .from("commission_monthly")
+      .select(
+        "beneficiary_type, beneficiary_id, commission_amount, units_sale, units_promotion, period_month, calc_meta",
+      )
+      .eq("period_month", month01);
+
+    if (!error) {
+      return {
+        rows: Array.isArray(data) ? data : [],
+        source: "commission_monthly.global",
+        query_mode: "global",
+        warning_fallback: false,
+      };
+    }
+  }
+
+  const scopedRows: any[] = [];
+
+  if (scope.delegateIds.length > 0) {
+    const { data, error } = await supaService
+      .from("commission_monthly")
+      .select(
+        "beneficiary_type, beneficiary_id, commission_amount, units_sale, units_promotion, period_month, calc_meta",
+      )
+      .eq("period_month", month01)
+      .eq("beneficiary_type", "delegate")
+      .in("beneficiary_id", scope.delegateIds);
+
+    if (!error && Array.isArray(data)) {
+      scopedRows.push(...data);
+    }
+  }
+
+  if (scope.clientIds.length > 0) {
+    const { data, error } = await supaService
+      .from("commission_monthly")
+      .select(
+        "beneficiary_type, beneficiary_id, commission_amount, units_sale, units_promotion, period_month, calc_meta",
+      )
+      .eq("period_month", month01)
+      .eq("beneficiary_type", "client_recommender")
+      .in("beneficiary_id", scope.clientIds);
+
+    if (!error && Array.isArray(data)) {
+      scopedRows.push(...data);
+    }
+  }
+
+  return {
+    rows: scopedRows,
+    source: "commission_monthly.scoped",
+    query_mode: "delegate_ids_and_client_ids",
+    warning_fallback: true,
+  };
+}
+
+function pickName(obj: any) {
+  return obj?.name ?? obj?.contact_email ?? obj?.email ?? "—";
+}
+
+async function buildRankings(args: {
+  supaService: any;
+  commissionRows: any[];
+}) {
+  const { supaService, commissionRows } = args;
+
+  const totalDevengado = commissionRows.reduce(
+    (acc: number, r: any) => acc + Number(r.commission_amount ?? 0),
+    0,
+  );
+
+  const calcMetas = commissionRows
+    .map((r: any) => r.calc_meta)
+    .filter(Boolean)
+    .slice(0, 50);
+
+  const delegatesRows = commissionRows
+    .filter((r: any) => r.beneficiary_type === "delegate")
+    .sort(
+      (a: any, b: any) =>
+        Number(b.commission_amount ?? 0) - Number(a.commission_amount ?? 0),
+    )
+    .slice(0, 10);
+
+  const recommRows = commissionRows
+    .filter((r: any) => r.beneficiary_type === "client_recommender")
+    .sort(
+      (a: any, b: any) =>
+        Number(b.commission_amount ?? 0) - Number(a.commission_amount ?? 0),
+    )
+    .slice(0, 10);
+
+  const delegateIds = Array.from(
+    new Set(delegatesRows.map((r: any) => String(r.beneficiary_id))),
+  );
+  const recommClientIds = Array.from(
+    new Set(recommRows.map((r: any) => String(r.beneficiary_id))),
+  );
+
+  const [delegatesRes, clientsRes] = await Promise.all([
+    delegateIds.length
+      ? supaService
+          .from("delegates")
+          .select("id, name, email, actor_id")
+          .in("id", delegateIds)
+      : Promise.resolve({ data: [], error: null } as any),
+
+    recommClientIds.length
+      ? supaService
+          .from("clients")
+          .select("id, name, contact_email, tax_id")
+          .in("id", recommClientIds)
+      : Promise.resolve({ data: [], error: null } as any),
+  ]);
+
+  const delegatesById = new Map<string, any>(
+    ((delegatesRes.data ?? []) as any[]).map((d: any) => [String(d.id), d]),
+  );
+  const clientsById = new Map<string, any>(
+    ((clientsRes.data ?? []) as any[]).map((c: any) => [String(c.id), c]),
+  );
+
+  const rankingsDelegates = delegatesRows.map((r: any) => {
+    const d = delegatesById.get(String(r.beneficiary_id));
+    return {
+      id: String(r.beneficiary_id),
+      name: d?.name ?? d?.email ?? "—",
+      email: d?.email ?? null,
+      units_sale: Number(r.units_sale ?? 0) || 0,
+      units_promotion: Number(r.units_promotion ?? 0) || 0,
+      commission: Number(r.commission_amount ?? 0) || 0,
+    };
+  });
+
+  const rankingsRecommenders = recommRows.map((r: any) => {
+    const c = clientsById.get(String(r.beneficiary_id));
+    return {
+      id: String(r.beneficiary_id),
+      name: pickName(c),
+      contact_email: c?.contact_email ?? null,
+      tax_id: c?.tax_id ?? null,
+      units_sale: Number(r.units_sale ?? 0) || 0,
+      units_promotion: Number(r.units_promotion ?? 0) || 0,
+      commission: Number(r.commission_amount ?? 0) || 0,
+    };
+  });
+
+  return {
+    totals: {
+      total_devengado_commissions: Number(totalDevengado.toFixed(2)),
+    },
+    rankingsDelegates,
+    rankingsRecommenders,
+    calc_meta_sample: calcMetas[0] ?? null,
+  };
+}
+
 async function handle(req: Request) {
   let stage = "init";
 
   try {
-    // 1) Auth + actor + supaRls (canónico)
-    stage = "actor_from_request";
-    const ar = (await getActorFromRequest(req)) as
-      | ActorFromRequestOk
-      | ActorFromRequestFail
-      | any;
+    stage = "resolve_dashboard_context";
+    const ctx = await resolveDashboardContext(req);
 
-    if (!isOk(ar)) {
-      return json((ar?.status as number) ?? 401, {
+    if (!ctx.ok) {
+      return json(ctx.status, {
         ok: false,
         stage,
-        error: (ar?.error as string) ?? "No autenticado",
+        error: ctx.error,
+        context_stage: ctx.stage ?? null,
       });
     }
 
-    const actor = ar.actor;
-    const supaRls = ar.supaRls;
-
-    // 2) Permisos efectivos (SUPER_ADMIN = allowed)
-    stage = "effective_permissions";
-    const eff = await getEffectivePermissionsByActorId(String(actor.id));
-
     stage = "authorize";
-    const allowed =
-      eff.isSuperAdmin ||
-      eff.has("control_room.dashboard.read") ||
-      eff.has("control_room.month.read") ||
-      eff.has("control_room.invoices.read") ||
-      eff.has("actors.read");
-
-    if (!allowed) {
+    if (!ctx.permissions.canViewFinance && !ctx.permissions.canViewGlobal) {
       return json(403, {
         ok: false,
         stage,
@@ -174,11 +502,8 @@ async function handle(req: Request) {
       });
     }
 
-    // 3) Input (month)
-    stage = "input";
-    const body = await req.json().catch(() => null);
-    const month = String(body?.month ?? "");
-
+    stage = "month_input";
+    const month = await parseMonthFromRequest(req);
     if (!isMonth01(month)) {
       return json(422, {
         ok: false,
@@ -187,179 +512,132 @@ async function handle(req: Request) {
       });
     }
 
-    // SERVICE ROLE client per tot el bloc "executive view"
+    const monthNext = nextMonth01(month);
+
+    stage = "service_supabase";
     const admin = getServiceSupabase();
 
-    // 3.1) Month state_code contractual (REAL -> fallback OPEN)
     stage = "month_state_code";
     const monthState = await getMonthStateCode(admin, month);
 
-    // 4) KPI Month Summary (SERVICE ROLE + función estable v1)
-    stage = "kpi_month_summary";
-    const { data: kpiMonthRows, error: kpiMonthErr } = await admin.rpc(
-      "kpi_month_summary_v1",
-      { p_month: month }
-    );
+    stage = "global_kpi_month";
+    const globalKpi = await queryGlobalKpiMonth(admin, month);
 
-    if (kpiMonthErr) {
-      return json(500, { ok: false, stage, error: kpiMonthErr.message });
-    }
-
-    const kpi_month = Array.isArray(kpiMonthRows)
-      ? kpiMonthRows[0]
-      : kpiMonthRows;
-
-    // 5) commission_monthly (SERVICE ROLE: SUPER_ADMIN ho veu tot)
-    stage = "commission_monthly";
-    const { data: cmRows, error: cmErr } = await admin
-      .from("commission_monthly")
-      .select(
-        "beneficiary_type, beneficiary_id, commission_amount, units_sale, units_promotion, period_month, calc_meta"
-      )
-      .eq("period_month", month);
-
-    if (cmErr) {
-      return json(500, { ok: false, stage, error: cmErr.message });
-    }
-
-    const rows = Array.isArray(cmRows) ? cmRows : [];
-
-    const totalDevengado = rows.reduce(
-      (acc: number, r: any) => acc + Number(r.commission_amount ?? 0),
-      0
-    );
-
-    const calcMetas = rows
-      .map((r: any) => r.calc_meta)
-      .filter(Boolean)
-      .slice(0, 50);
-
-    const delegatesRows = rows
-      .filter((r: any) => r.beneficiary_type === "delegate")
-      .sort(
-        (a: any, b: any) =>
-          Number(b.commission_amount ?? 0) - Number(a.commission_amount ?? 0)
-      )
-      .slice(0, 10);
-
-    const recommRows = rows
-      .filter((r: any) => r.beneficiary_type === "client_recommender")
-      .sort(
-        (a: any, b: any) =>
-          Number(b.commission_amount ?? 0) - Number(a.commission_amount ?? 0)
-      )
-      .slice(0, 10);
-
-    // 6) Resolver nombres (delegates + clients) con SERVICE ROLE
-    stage = "resolve_names";
-    const delegateIds = Array.from(
-      new Set(delegatesRows.map((r: any) => String(r.beneficiary_id)))
-    );
-    const recommClientIds = Array.from(
-      new Set(recommRows.map((r: any) => String(r.beneficiary_id)))
-    );
-
-    const [delegatesRes, clientsRes] = await Promise.all([
-      delegateIds.length
-        ? admin
-            .from("delegates")
-            .select("id, name, email, actor_id")
-            .in("id", delegateIds)
-        : Promise.resolve({ data: [], error: null } as any),
-
-      recommClientIds.length
-        ? admin
-            .from("clients")
-            .select("id, name, contact_email, tax_id")
-            .in("id", recommClientIds)
-        : Promise.resolve({ data: [], error: null } as any),
-    ]);
-
-    if (delegatesRes?.error) {
-      return json(500, {
-        ok: false,
-        stage: "delegates_select",
-        error: delegatesRes.error.message,
-      });
-    }
-    if (clientsRes?.error) {
-      return json(500, {
-        ok: false,
-        stage: "clients_select",
-        error: clientsRes.error.message,
-      });
-    }
-
-    const delegatesById = new Map<string, any>(
-      (delegatesRes.data ?? []).map((d: any) => [String(d.id), d])
-    );
-    const clientsById = new Map<string, any>(
-      (clientsRes.data ?? []).map((c: any) => [String(c.id), c])
-    );
-
-    const rankingsDelegates = delegatesRows.map((r: any) => {
-      const d = delegatesById.get(String(r.beneficiary_id));
-      return {
-        id: String(r.beneficiary_id),
-        name: d?.name ?? d?.email ?? "—",
-        email: d?.email ?? null,
-        units_sale: Number(r.units_sale ?? 0) || 0,
-        units_promotion: Number(r.units_promotion ?? 0) || 0,
-        commission: Number(r.commission_amount ?? 0) || 0,
-      };
+    stage = "scoped_invoices";
+    const scopedInvoices = await queryScopedInvoices({
+      supaService: ctx.supaService,
+      month01: month,
+      nextMonth01: monthNext,
+      scope: {
+        clientIds: ctx.scope.clientIds,
+        delegateIds: ctx.scope.delegateIds,
+        actorIds: ctx.scope.actorIds,
+      },
+      permissions: {
+        canViewGlobal: ctx.permissions.canViewGlobal,
+        canViewFinance: ctx.permissions.canViewFinance,
+      },
     });
 
-    const rankingsRecommenders = recommRows.map((r: any) => {
-      const c = clientsById.get(String(r.beneficiary_id));
-      return {
-        id: String(r.beneficiary_id),
-        name: pickName(c),
-        contact_email: c?.contact_email ?? null,
-        tax_id: c?.tax_id ?? null,
-        units_sale: Number(r.units_sale ?? 0) || 0,
-        units_promotion: Number(r.units_promotion ?? 0) || 0,
-        commission: Number(r.commission_amount ?? 0) || 0,
-      };
+    const invoiceRows = scopedInvoices.rows ?? [];
+    const revenueScoped = invoiceRows.reduce(
+      (acc: number, row: any) => acc + toNum(row?.total_net, 0),
+      0,
+    );
+
+    stage = "commission_rows";
+    const scopedCommission = await queryScopedCommissionData({
+      supaService: ctx.supaService,
+      month01: month,
+      permissions: {
+        canViewGlobal: ctx.permissions.canViewGlobal,
+        canViewFinance: ctx.permissions.canViewFinance,
+      },
+      scope: {
+        clientIds: ctx.scope.clientIds,
+        delegateIds: ctx.scope.delegateIds,
+      },
     });
 
-    // 7) Actividad: últimas importaciones (RLS; si falla, no rompe)
-    stage = "recent_imports";
-    let recentImports: any[] = [];
-    const { data: ingestaData, error: ingestaErr } = await supaRls
-      .from("ingesta_log")
-      .select("id, usuario_email, fecha_procesado, num_pdfs, num_ok")
-      .order("fecha_procesado", { ascending: false })
-      .limit(5);
+    stage = "rankings";
+    const rankings = await buildRankings({
+      supaService: ctx.supaService,
+      commissionRows: scopedCommission.rows,
+    });
 
-    if (!ingestaErr && Array.isArray(ingestaData)) recentImports = ingestaData;
+    const kpiMonth = globalKpi.ok ? globalKpi.kpi_month : null;
 
-    // 8) Respuesta (contractual: state_code sempre present)
+    const revenue =
+      ctx.permissions.canViewGlobal && ctx.permissions.canViewFinance
+        ? toNum(kpiMonth?.revenue, toNum(kpiMonth?.total_net, revenueScoped))
+        : Number(revenueScoped.toFixed(2));
+
+    const unitsSold =
+      ctx.permissions.canViewGlobal && ctx.permissions.canViewFinance
+        ? toNum(kpiMonth?.units_total, toNum(kpiMonth?.units_sale, 0))
+        : 0;
+
+    const unitsPromo =
+      ctx.permissions.canViewGlobal && ctx.permissions.canViewFinance
+        ? toNum(kpiMonth?.units_promotion, toNum(kpiMonth?.units_promo, 0))
+        : 0;
+
     return json(200, {
       ok: true,
+
       month,
       state_code: monthState.state_code,
       month_state: {
         state_code: monthState.state_code,
         source: monthState.source,
         warning_fallback: monthState.warning_fallback,
-        // Row només per diagnòstic; si no existeix, és null (no trenca UI)
         lock_row: monthState.lock_row ?? null,
       },
+
+      actor_context: {
+        actor: ctx.actor,
+        effectiveActor: ctx.effectiveActor,
+        roles: ctx.roles,
+        scope: {
+          mode: ctx.scope.mode,
+          label: ctx.scope.label,
+          viewAs: ctx.scope.viewAs,
+          client_count: ctx.scope.clientIds.length,
+          actor_count: ctx.scope.actorIds.length,
+          delegate_count: ctx.scope.delegateIds.length,
+        },
+      },
+
       actor: {
-        id: String(actor.id),
-        role: actor.role ?? "unknown",
-        name: actor.name ?? actor.email ?? "—",
+        id: ctx.effectiveActor.id,
+        role: ctx.effectiveActor.role ?? "unknown",
+        name: ctx.effectiveActor.name ?? ctx.effectiveActor.email ?? "—",
       },
-      warning_actor_missing: false,
-      kpi_month: kpi_month ?? null,
-      totals: {
-        total_devengado_commissions: Number(totalDevengado.toFixed(2)),
-      },
-      rankingsDelegates,
-      rankingsRecommenders,
+
+      revenue: Number(revenue.toFixed(2)),
+      units_sold: unitsSold,
+      units_promo: unitsPromo,
+
+      kpi_month: kpiMonth ?? null,
+
+      totals: rankings.totals,
+      rankingsDelegates: rankings.rankingsDelegates,
+      rankingsRecommenders: rankings.rankingsRecommenders,
+
       activity: {
-        recent_imports: recentImports,
-        calc_meta_sample: calcMetas[0] ?? null,
+        recent_imports: [],
+        calc_meta_sample: rankings.calc_meta_sample,
+      },
+
+      meta: {
+        generated_at: new Date().toISOString(),
+        invoice_source: scopedInvoices.source,
+        invoice_query_mode: scopedInvoices.query_mode,
+        invoice_warning_fallback: scopedInvoices.warning_fallback,
+        commission_source: scopedCommission.source,
+        commission_query_mode: scopedCommission.query_mode,
+        commission_warning_fallback: scopedCommission.warning_fallback,
+        kpi_global_warning_fallback: !globalKpi.ok,
       },
     });
   } catch (e: any) {
@@ -371,6 +649,10 @@ async function handle(req: Request) {
   }
 }
 
-export async function POST(req: Request) {
+export async function GET(req: NextRequest) {
+  return handle(req);
+}
+
+export async function POST(req: NextRequest) {
   return handle(req);
 }

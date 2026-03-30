@@ -1,7 +1,3 @@
 "use client";
 
-import ElElyonAssignmentsWorkspace from "./ElElyonAssignmentsWorkspace";
-
-export default function ElElyonAssignmentsTab() {
-  return <ElElyonAssignmentsWorkspace />;
-}
+export { default } from "@/components/control-room/el-elyon/ElElyonAssignmentsWorkspace";

@@ -1,23 +1,36 @@
-import { NextResponse } from "next/server";
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { NextRequest, NextResponse } from "next/server";
+
+import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 
-type ActorRow = {
+type ActorLite = {
   id: string;
-  name: string | null;
-  email: string | null;
   role: string | null;
-  status: string | null;
-  auth_user_id: string | null;
+  status?: string | null;
+  name?: string | null;
+  email?: string | null;
+};
+
+type ActorFromRequestOk = {
+  ok: true;
+  actor: ActorLite;
+  supaRls: any;
+  supaService?: any;
+};
+
+type ActorFromRequestFail = {
+  ok: false;
+  status: number;
+  error: string;
 };
 
 type ActorRoleRow = {
   actor_id: string;
   role_code: string | null;
-  is_primary: boolean | null;
-  assigned_at: string | null;
+  is_primary?: boolean | null;
+  assigned_at?: string | null;
   state_code: string | null;
 };
 
@@ -36,190 +49,311 @@ type ClientAssignmentRow = {
   source: string | null;
 };
 
-function normalizeRole(value: string | null | undefined): string | null {
-  if (!value) return null;
-  return String(value).trim().toLowerCase();
-}
+type ClientRecommendationRow = {
+  id: string;
+  recommender_client_id: string;
+  referred_client_id: string;
+  percentage: number | string;
+  active: boolean;
+  valid_from: string | null;
+  valid_to: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  mode: "deduct" | "additive" | string;
+  state_code: string;
+};
 
-function hasPrivilegedRole(roles: string[]): boolean {
-  return roles.some((role) =>
-    ["melquisedec", "super_admin", "coordinator", "administrative"].includes(role),
-  );
-}
+type ActorCatalogRow = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  role: string | null;
+  status: string | null;
+};
 
-async function createSupabaseServerClient() {
-  const cookieStore = await cookies();
+type AffiliateAccountRow = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  affiliate_external_id: string | null;
+  state_code: string | null;
+};
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+type AffiliateClientEventRow = {
+  id: string;
+  source: string | null;
+  source_event_id: string | null;
+  client_id: string | null;
+  affiliate_account_id: string | null;
+  event_at: string | null;
+  created_at: string;
+  state_code: string;
+  source_payload: Record<string, unknown> | null;
+};
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Faltan variables de entorno de Supabase.");
-  }
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      get(name: string) {
-        return cookieStore.get(name)?.value;
-      },
-      set(name: string, value: string, options: CookieOptions) {
-        try {
-          cookieStore.set({ name, value, ...options });
-        } catch {}
-      },
-      remove(name: string, options: CookieOptions) {
-        try {
-          cookieStore.set({ name, value: "", ...options });
-        } catch {}
-      },
+function json(status: number, body: unknown) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
     },
   });
 }
 
-async function resolveCurrentActor() {
-  const supabase = await createSupabaseServerClient();
+function isOk(ar: unknown): ar is ActorFromRequestOk {
+  if (!ar || typeof ar !== "object") return false;
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+  const v = ar as {
+    ok?: unknown;
+    actor?: { id?: unknown } | null;
+    supaService?: unknown;
+  };
 
-  if (authError || !user) {
-    return {
-      ok: false as const,
-      status: 401,
-      error: "UNAUTHENTICATED",
-    };
-  }
+  return v.ok === true && typeof v.actor?.id === "string" && !!v.supaService;
+}
 
-  const actorResult = await supabase
-    .from("actors")
-    .select("id, name, email, role, status, auth_user_id")
-    .eq("auth_user_id", user.id)
-    .maybeSingle<ActorRow>();
+function normalizeRole(value: string | null | undefined): string | null {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v || null;
+}
 
-  if (actorResult.error || !actorResult.data) {
-    return {
-      ok: false as const,
-      status: 404,
-      error: "ACTOR_NOT_FOUND",
-    };
-  }
+function hasRole(roles: string[], expected: string[]) {
+  return roles.some((role) => expected.includes(role));
+}
 
-  const actor = actorResult.data;
+function canManageClientAssignmentsByRole(roles: string[]): boolean {
+  return hasRole(roles, [
+    "melquisedec",
+    "super_admin",
+    "delegate",
+    "kol",
+    "coordinator",
+    "coordinator_commercial",
+    "coordinator_cect",
+    "administrative",
+    "administrativa",
+  ]);
+}
 
-  const rolesSet = new Set<string>();
-  const baseRole = normalizeRole(actor.role);
-  if (baseRole) rolesSet.add(baseRole);
+function canManageInvoiceOverridesByRole(roles: string[]): boolean {
+  return hasRole(roles, ["melquisedec"]);
+}
 
-  const actorRolesResult = await supabase
-    .from("actor_roles")
-    .select("actor_id, role_code, is_primary, assigned_at, state_code")
-    .eq("actor_id", actor.id)
-    .eq("state_code", "OPEN");
+function canReadClientAssignments(args: {
+  eff: Awaited<ReturnType<typeof getEffectivePermissionsByActorId>>;
+  roles: string[];
+}) {
+  const { eff, roles } = args;
 
-  if (!actorRolesResult.error && Array.isArray(actorRolesResult.data)) {
-    for (const row of actorRolesResult.data as ActorRoleRow[]) {
-      const role = normalizeRole(row.role_code);
-      if (role) rolesSet.add(role);
-    }
-  }
+  return (
+    eff.isSuperAdmin ||
+    eff.has("actors.read") ||
+    eff.has("clients.read") ||
+    eff.has("clients.manage") ||
+    eff.has("control_room.delegates.read") ||
+    eff.has("invoices.read") ||
+    eff.has("invoices.manage") ||
+    canManageClientAssignmentsByRole(roles) ||
+    canManageInvoiceOverridesByRole(roles)
+  );
+}
+
+function actorInfoFromAssignment(
+  assignment: ClientAssignmentRow | null,
+  actorById: Map<string, { id: string; name: string | null }>,
+) {
+  if (!assignment) return null;
+
+  const actor = actorById.get(assignment.actor_id) ?? null;
 
   return {
-    ok: true as const,
-    supabase,
-    actor,
-    roles: Array.from(rolesSet),
+    actorId: assignment.actor_id,
+    actorName: actor?.name ?? null,
+    source: assignment.source,
+    validFrom: assignment.valid_from,
   };
 }
 
-export async function GET() {
+function affiliateInfoFromEvent(
+  event: AffiliateClientEventRow | null,
+  affiliateById: Map<
+    string,
+    { id: string; name: string | null; email: string | null; affiliateExternalId: string | null }
+  >,
+) {
+  if (!event?.affiliate_account_id) return null;
+
+  const affiliate = affiliateById.get(String(event.affiliate_account_id)) ?? null;
+
+  return {
+    affiliateAccountId: String(event.affiliate_account_id),
+    affiliateName: affiliate?.name ?? null,
+    affiliateEmail: affiliate?.email ?? null,
+    affiliateExternalId: affiliate?.affiliateExternalId ?? null,
+    source: event.source ?? "manual_control_room",
+    validFrom: event.event_at ?? event.created_at ?? null,
+  };
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const resolved = await resolveCurrentActor();
+    const resolved = (await getActorFromRequest(req)) as
+      | ActorFromRequestOk
+      | ActorFromRequestFail
+      | unknown;
 
-    if (!resolved.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: resolved.error,
-        },
-        { status: resolved.status },
-      );
+    if (!isOk(resolved)) {
+      const fail = resolved as ActorFromRequestFail | undefined;
+      return json(fail?.status ?? 401, {
+        ok: false,
+        error: fail?.error ?? "UNAUTHENTICATED",
+      });
     }
 
-    const { supabase, actor, roles } = resolved;
+    const actorId = String(resolved.actor.id);
+    const eff = await getEffectivePermissionsByActorId(actorId);
 
-    if (!hasPrivilegedRole(roles)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "FORBIDDEN",
-        },
-        { status: 403 },
-      );
+    const actorRolesResult = await resolved.supaService
+      .from("actor_roles")
+      .select("actor_id, role_code, is_primary, assigned_at, state_code")
+      .eq("actor_id", actorId)
+      .eq("state_code", "OPEN");
+
+    if (actorRolesResult.error) {
+      return json(500, {
+        ok: false,
+        error: actorRolesResult.error.message,
+      });
     }
 
-    const [clientsResult, assignmentsResult, actorsResult, actorRolesResult] = await Promise.all([
-      supabase
+    const rolesSet = new Set<string>();
+    const baseRole = normalizeRole(resolved.actor.role);
+    if (baseRole) rolesSet.add(baseRole);
+
+    for (const row of (actorRolesResult.data ?? []) as ActorRoleRow[]) {
+      const role = normalizeRole(row.role_code);
+      if (role) rolesSet.add(role);
+    }
+
+    const roles = Array.from(rolesSet);
+    const canManageClientAssignments = canManageClientAssignmentsByRole(roles);
+    const canManageInvoiceOverrides = canManageInvoiceOverridesByRole(roles);
+    const allowed = canReadClientAssignments({ eff, roles });
+
+    if (!allowed) {
+      return json(403, {
+        ok: false,
+        error: "FORBIDDEN",
+      });
+    }
+
+    const [
+      clientsResult,
+      assignmentsResult,
+      recommendationsResult,
+      actorsResult,
+      allActorRolesResult,
+      affiliatesResult,
+      affiliateClientEventsResult,
+    ] = await Promise.all([
+      resolved.supaService
         .from("clients")
         .select("id, name, holded_contact_id")
         .not("holded_contact_id", "is", null)
         .order("name", { ascending: true }),
 
-      supabase
+      resolved.supaService
         .from("client_actor_assignments_g1")
-        .select("actor_id, client_holded_contact_id, assignment_role, valid_from, valid_to, source")
-        .in("assignment_role", ["delegate", "recommender"])
+        .select(
+          "actor_id, client_holded_contact_id, assignment_role, valid_from, valid_to, source",
+        )
+        .in("assignment_role", [
+          "delegate",
+          "kol",
+          "coordinator",
+          "commissionist_1",
+          "commissionist_2",
+          "commissionist_3",
+          "commissionist_4",
+          "commissionist_5",
+        ])
         .is("valid_to", null),
 
-      supabase
+      resolved.supaService
+        .from("client_recommendations")
+        .select(
+          "id, recommender_client_id, referred_client_id, percentage, active, valid_from, valid_to, notes, created_at, updated_at, mode, state_code",
+        )
+        .eq("active", true)
+        .is("valid_to", null)
+        .eq("state_code", "OPEN"),
+
+      resolved.supaService
         .from("actors")
         .select("id, name, email, role, status")
         .order("name", { ascending: true }),
 
-      supabase
+      resolved.supaService
         .from("actor_roles")
         .select("actor_id, role_code, is_primary, assigned_at, state_code")
         .eq("state_code", "OPEN"),
+
+      resolved.supaService
+        .from("affiliate_accounts")
+        .select("id, name, email, affiliate_external_id, state_code")
+        .eq("state_code", "OPEN")
+        .order("name", { ascending: true }),
+
+      resolved.supaService
+        .from("affiliate_attribution_events")
+        .select(
+          "id, source, source_event_id, client_id, affiliate_account_id, event_at, created_at, state_code, source_payload",
+        )
+        .eq("source", "manual_control_room")
+        .not("client_id", "is", null)
+        .eq("state_code", "OPEN")
+        .order("created_at", { ascending: false }),
     ]);
 
     if (clientsResult.error) {
-      return NextResponse.json(
-        { ok: false, error: clientsResult.error.message },
-        { status: 500 },
-      );
+      return json(500, { ok: false, error: clientsResult.error.message });
     }
 
     if (assignmentsResult.error) {
-      return NextResponse.json(
-        { ok: false, error: assignmentsResult.error.message },
-        { status: 500 },
-      );
+      return json(500, { ok: false, error: assignmentsResult.error.message });
+    }
+
+    if (recommendationsResult.error) {
+      return json(500, { ok: false, error: recommendationsResult.error.message });
     }
 
     if (actorsResult.error) {
-      return NextResponse.json(
-        { ok: false, error: actorsResult.error.message },
-        { status: 500 },
-      );
+      return json(500, { ok: false, error: actorsResult.error.message });
     }
 
-    if (actorRolesResult.error) {
-      return NextResponse.json(
-        { ok: false, error: actorRolesResult.error.message },
-        { status: 500 },
-      );
+    if (allActorRolesResult.error) {
+      return json(500, { ok: false, error: allActorRolesResult.error.message });
     }
 
-    const actorRows = (actorsResult.data ?? []) as Array<{
-      id: string;
-      name: string | null;
-      email: string | null;
-      role: string | null;
-      status: string | null;
-    }>;
+    if (affiliatesResult.error) {
+      return json(500, { ok: false, error: affiliatesResult.error.message });
+    }
 
-    const actorRoleRows = (actorRolesResult.data ?? []) as ActorRoleRow[];
+    if (affiliateClientEventsResult.error) {
+      return json(500, { ok: false, error: affiliateClientEventsResult.error.message });
+    }
+
+    const clientRows = (clientsResult.data ?? []) as ClientRow[];
+    const actorRows = (actorsResult.data ?? []) as ActorCatalogRow[];
+    const actorRoleRows = (allActorRolesResult.data ?? []) as ActorRoleRow[];
+    const activeAssignments = (assignmentsResult.data ?? []) as ClientAssignmentRow[];
+    const activeRecommendations =
+      (recommendationsResult.data ?? []) as ClientRecommendationRow[];
+    const affiliateRows = (affiliatesResult.data ?? []) as AffiliateAccountRow[];
+    const affiliateClientEvents =
+      (affiliateClientEventsResult.data ?? []) as AffiliateClientEventRow[];
+
     const roleMap = new Map<string, Set<string>>();
 
     for (const actorRow of actorRows) {
@@ -232,9 +366,11 @@ export async function GET() {
     for (const actorRoleRow of actorRoleRows) {
       const roleValue = normalizeRole(actorRoleRow.role_code);
       if (!roleValue) continue;
+
       if (!roleMap.has(actorRoleRow.actor_id)) {
         roleMap.set(actorRoleRow.actor_id, new Set<string>());
       }
+
       roleMap.get(actorRoleRow.actor_id)!.add(roleValue);
     }
 
@@ -247,84 +383,187 @@ export async function GET() {
     }));
 
     const delegates = eligibleActors.filter((row) => row.roles.includes("delegate"));
-    const recommenders = eligibleActors.filter((row) => row.roles.includes("recommender"));
-    const kols = eligibleActors.filter((row) => row.roles.includes("kol"));
-    const coordinators = eligibleActors.filter((row) => row.roles.includes("coordinator"));
 
-    const activeAssignments = (assignmentsResult.data ?? []) as ClientAssignmentRow[];
+    const kols = eligibleActors.filter((row) => row.roles.includes("kol"));
+
+    const coordinators = eligibleActors.filter((row) =>
+      row.roles.some((role) =>
+        ["coordinator", "coordinator_commercial", "coordinator_cect"].includes(role),
+      ),
+    );
+
+    const commissionists = eligibleActors.filter((row) =>
+      row.roles.some((role) =>
+        [
+          "commissionist",
+          "commissionist_1",
+          "commissionist_2",
+          "commissionist_3",
+          "commissionist_4",
+          "commissionist_5",
+        ].includes(role),
+      ),
+    );
 
     const delegateByHoldedContactId = new Map<string, ClientAssignmentRow>();
-    const recommenderByHoldedContactId = new Map<string, ClientAssignmentRow>();
+    const kolByHoldedContactId = new Map<string, ClientAssignmentRow>();
+    const coordinatorByHoldedContactId = new Map<string, ClientAssignmentRow>();
+
+    const commission1ByHoldedContactId = new Map<string, ClientAssignmentRow>();
+    const commission2ByHoldedContactId = new Map<string, ClientAssignmentRow>();
+    const commission3ByHoldedContactId = new Map<string, ClientAssignmentRow>();
+    const commission4ByHoldedContactId = new Map<string, ClientAssignmentRow>();
+    const commission5ByHoldedContactId = new Map<string, ClientAssignmentRow>();
 
     for (const row of activeAssignments) {
       if (row.assignment_role === "delegate") {
         delegateByHoldedContactId.set(row.client_holded_contact_id, row);
       }
-      if (row.assignment_role === "recommender") {
-        recommenderByHoldedContactId.set(row.client_holded_contact_id, row);
+      if (row.assignment_role === "kol") {
+        kolByHoldedContactId.set(row.client_holded_contact_id, row);
+      }
+      if (row.assignment_role === "coordinator") {
+        coordinatorByHoldedContactId.set(row.client_holded_contact_id, row);
+      }
+      if (row.assignment_role === "commissionist_1") {
+        commission1ByHoldedContactId.set(row.client_holded_contact_id, row);
+      }
+      if (row.assignment_role === "commissionist_2") {
+        commission2ByHoldedContactId.set(row.client_holded_contact_id, row);
+      }
+      if (row.assignment_role === "commissionist_3") {
+        commission3ByHoldedContactId.set(row.client_holded_contact_id, row);
+      }
+      if (row.assignment_role === "commissionist_4") {
+        commission4ByHoldedContactId.set(row.client_holded_contact_id, row);
+      }
+      if (row.assignment_role === "commissionist_5") {
+        commission5ByHoldedContactId.set(row.client_holded_contact_id, row);
       }
     }
 
-    const actorById = new Map(eligibleActors.map((row) => [row.id, row]));
+    const actorById = new Map(
+      eligibleActors.map((row) => [row.id, { id: row.id, name: row.name }]),
+    );
 
-    const clients = ((clientsResult.data ?? []) as ClientRow[]).map((client) => {
+    const clientById = new Map(clientRows.map((row) => [row.id, row]));
+    const recommenderByReferredClientId = new Map<string, ClientRecommendationRow>();
+
+    for (const row of activeRecommendations) {
+      recommenderByReferredClientId.set(row.referred_client_id, row);
+    }
+
+    const affiliateById = new Map(
+      affiliateRows.map((row) => [
+        row.id,
+        {
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          affiliateExternalId: row.affiliate_external_id,
+        },
+      ]),
+    );
+
+    const currentAffiliateEventByClientId = new Map<string, AffiliateClientEventRow>();
+
+    for (const row of affiliateClientEvents) {
+      const clientId = String(row.client_id ?? "").trim();
+      if (!clientId) continue;
+      if (currentAffiliateEventByClientId.has(clientId)) continue;
+      currentAffiliateEventByClientId.set(clientId, row);
+    }
+
+    const recommenderClients = clientRows.map((client) => ({
+      id: client.id,
+      name: client.name,
+      holdedContactId: client.holded_contact_id ?? "",
+    }));
+
+    const affiliates = affiliateRows.map((row) => ({
+      id: row.id,
+      label: [row.name?.trim(), row.email?.trim(), row.affiliate_external_id?.trim()]
+        .filter(Boolean)
+        .join(" · "),
+      name: row.name,
+      email: row.email,
+      affiliate_external_id: row.affiliate_external_id,
+    }));
+
+    const clients = clientRows.map((client) => {
       const holdedContactId = client.holded_contact_id ?? "";
+
       const delegateAssignment = delegateByHoldedContactId.get(holdedContactId) ?? null;
-      const recommenderAssignment = recommenderByHoldedContactId.get(holdedContactId) ?? null;
+      const kolAssignment = kolByHoldedContactId.get(holdedContactId) ?? null;
+      const coordinatorAssignment =
+        coordinatorByHoldedContactId.get(holdedContactId) ?? null;
 
-      const delegateActor = delegateAssignment
-        ? actorById.get(delegateAssignment.actor_id) ?? null
+      const commission1Assignment = commission1ByHoldedContactId.get(holdedContactId) ?? null;
+      const commission2Assignment = commission2ByHoldedContactId.get(holdedContactId) ?? null;
+      const commission3Assignment = commission3ByHoldedContactId.get(holdedContactId) ?? null;
+      const commission4Assignment = commission4ByHoldedContactId.get(holdedContactId) ?? null;
+      const commission5Assignment = commission5ByHoldedContactId.get(holdedContactId) ?? null;
+
+      const recommenderRecommendation = recommenderByReferredClientId.get(client.id) ?? null;
+
+      const recommenderClient = recommenderRecommendation
+        ? clientById.get(recommenderRecommendation.recommender_client_id) ?? null
         : null;
 
-      const recommenderActor = recommenderAssignment
-        ? actorById.get(recommenderAssignment.actor_id) ?? null
-        : null;
+      const currentAffiliateEvent = currentAffiliateEventByClientId.get(client.id) ?? null;
 
       return {
         id: client.id,
         name: client.name,
-        holdedContactId: holdedContactId,
-        delegate: delegateAssignment
+        holdedContactId,
+
+        delegate: actorInfoFromAssignment(delegateAssignment, actorById),
+
+        recommender: recommenderRecommendation
           ? {
-              actorId: delegateAssignment.actor_id,
-              actorName: delegateActor?.name ?? null,
-              source: delegateAssignment.source,
-              validFrom: delegateAssignment.valid_from,
+              clientId: recommenderRecommendation.recommender_client_id,
+              clientName: recommenderClient?.name ?? null,
+              source: recommenderRecommendation.mode ?? "deduct",
+              validFrom: recommenderRecommendation.valid_from,
             }
           : null,
-        recommender: recommenderAssignment
-          ? {
-              actorId: recommenderAssignment.actor_id,
-              actorName: recommenderActor?.name ?? null,
-              source: recommenderAssignment.source,
-              validFrom: recommenderAssignment.valid_from,
-            }
-          : null,
+
+        affiliate: affiliateInfoFromEvent(currentAffiliateEvent, affiliateById),
+
+        kol: actorInfoFromAssignment(kolAssignment, actorById),
+        coordinator: actorInfoFromAssignment(coordinatorAssignment, actorById),
+
+        commissionist_1: actorInfoFromAssignment(commission1Assignment, actorById),
+        commissionist_2: actorInfoFromAssignment(commission2Assignment, actorById),
+        commissionist_3: actorInfoFromAssignment(commission3Assignment, actorById),
+        commissionist_4: actorInfoFromAssignment(commission4Assignment, actorById),
+        commissionist_5: actorInfoFromAssignment(commission5Assignment, actorById),
       };
     });
 
-    return NextResponse.json({
+    return json(200, {
       ok: true,
       viewer: {
-        actorId: actor.id,
-        actorName: actor.name,
+        actorId: resolved.actor.id,
+        actorName: resolved.actor.name ?? null,
         roles,
+        canManageClientAssignments,
+        canManageInvoiceOverrides,
       },
       dictionaries: {
         delegates,
-        recommenders,
+        recommenders: recommenderClients,
+        affiliates,
         kols,
         coordinators,
+        commissionists,
       },
       clients,
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "UNKNOWN_ERROR",
-      },
-      { status: 500 },
-    );
+    return json(500, {
+      ok: false,
+      error: error instanceof Error ? error.message : "UNKNOWN_ERROR",
+    });
   }
 }

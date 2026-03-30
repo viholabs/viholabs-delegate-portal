@@ -1,327 +1,472 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { cookies } from "next/headers";
+
+import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 
 export const runtime = "nodejs";
 
-type ActorRow = {
+type ActorLite = {
   id: string;
-  name: string | null;
-  email: string | null;
   role: string | null;
-  status: string | null;
-  auth_user_id: string | null;
+  status?: string | null;
+  name?: string | null;
+  email?: string | null;
+};
+
+type ActorFromRequestOk = {
+  ok: true;
+  actor: ActorLite;
+  supaRls: any;
+  supaService?: any;
+};
+
+type ActorFromRequestFail = {
+  ok: false;
+  status: number;
+  error: string;
 };
 
 type ActorRoleRow = {
   actor_id: string;
   role_code: string | null;
-  is_primary: boolean | null;
-  assigned_at: string | null;
+  is_primary?: boolean | null;
+  assigned_at?: string | null;
   state_code: string | null;
 };
 
-type ClientAssignmentRow = {
-  actor_id: string;
-  client_holded_contact_id: string;
-  assignment_role: string;
-  valid_from: string | null;
-  valid_to: string | null;
-  source: string | null;
+type ClientRow = {
+  id: string;
+  name: string | null;
+  holded_contact_id: string | null;
 };
 
-type RequestBody = {
-  clientHoldedContactId: string;
-  assignmentRole: "delegate" | "recommender";
-  actorId: string | null;
-};
+type UpsertBody =
+  | {
+      clientHoldedContactId: string;
+      assignmentRole:
+        | "delegate"
+        | "kol"
+        | "coordinator"
+        | "commissionist_1"
+        | "commissionist_2"
+        | "commissionist_3"
+        | "commissionist_4"
+        | "commissionist_5";
+      actorId: string | null;
+    }
+  | {
+      clientHoldedContactId: string;
+      assignmentRole: "recommender";
+      recommenderClientId: string | null;
+    };
 
-function normalizeRole(value: string | null | undefined): string | null {
-  if (!value) return null;
-  return String(value).trim().toLowerCase();
-}
-
-function hasPrivilegedRole(roles: string[]): boolean {
-  return roles.some((role) =>
-    ["melquisedec", "super_admin", "coordinator", "administrative"].includes(role),
-  );
-}
-
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-async function createSupabaseServerClient() {
-  const cookieStore = await cookies();
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Faltan variables de entorno de Supabase.");
-  }
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      get(name: string) {
-        return cookieStore.get(name)?.value;
-      },
-      set(name: string, value: string, options: CookieOptions) {
-        try {
-          cookieStore.set({ name, value, ...options });
-        } catch {}
-      },
-      remove(name: string, options: CookieOptions) {
-        try {
-          cookieStore.set({ name, value: "", ...options });
-        } catch {}
-      },
+function json(status: number, body: unknown) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
     },
   });
 }
 
-async function resolveCurrentActor() {
-  const supabase = await createSupabaseServerClient();
+function isOk(ar: unknown): ar is ActorFromRequestOk {
+  if (!ar || typeof ar !== "object") return false;
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+  const v = ar as {
+    ok?: unknown;
+    actor?: { id?: unknown } | null;
+    supaService?: unknown;
+  };
 
-  if (authError || !user) {
+  return v.ok === true && typeof v.actor?.id === "string" && !!v.supaService;
+}
+
+function normalizeRole(value: string | null | undefined): string | null {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v || null;
+}
+
+function canManageClientAssignmentsByRole(roles: string[]): boolean {
+  return roles.some((role) =>
+    [
+      "melquisedec",
+      "super_admin",
+      "delegate",
+      "kol",
+      "coordinator",
+      "coordinator_commercial",
+      "coordinator_cect",
+      "administrative",
+      "administrativa",
+    ].includes(role),
+  );
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
+async function requireAuthorized(req: NextRequest) {
+  const resolved = (await getActorFromRequest(req)) as
+    | ActorFromRequestOk
+    | ActorFromRequestFail
+    | unknown;
+
+  if (!isOk(resolved)) {
+    const fail = resolved as ActorFromRequestFail | undefined;
     return {
       ok: false as const,
-      status: 401,
-      error: "UNAUTHENTICATED",
+      response: json(fail?.status ?? 401, {
+        ok: false,
+        error: fail?.error ?? "UNAUTHENTICATED",
+      }),
     };
   }
 
-  const actorResult = await supabase
-    .from("actors")
-    .select("id, name, email, role, status, auth_user_id")
-    .eq("auth_user_id", user.id)
-    .maybeSingle<ActorRow>();
+  const actorId = String(resolved.actor.id);
+  const eff = await getEffectivePermissionsByActorId(actorId);
 
-  if (actorResult.error || !actorResult.data) {
-    return {
-      ok: false as const,
-      status: 404,
-      error: "ACTOR_NOT_FOUND",
-    };
-  }
-
-  const actor = actorResult.data;
-
-  const rolesSet = new Set<string>();
-  const baseRole = normalizeRole(actor.role);
-  if (baseRole) rolesSet.add(baseRole);
-
-  const actorRolesResult = await supabase
+  const actorRolesResult = await resolved.supaService
     .from("actor_roles")
     .select("actor_id, role_code, is_primary, assigned_at, state_code")
-    .eq("actor_id", actor.id)
+    .eq("actor_id", actorId)
     .eq("state_code", "OPEN");
 
-  if (!actorRolesResult.error && Array.isArray(actorRolesResult.data)) {
-    for (const row of actorRolesResult.data as ActorRoleRow[]) {
-      const role = normalizeRole(row.role_code);
-      if (role) rolesSet.add(role);
-    }
+  if (actorRolesResult.error) {
+    return {
+      ok: false as const,
+      response: json(500, {
+        ok: false,
+        error: actorRolesResult.error.message,
+      }),
+    };
+  }
+
+  const rolesSet = new Set<string>();
+  const baseRole = normalizeRole(resolved.actor.role);
+  if (baseRole) rolesSet.add(baseRole);
+
+  for (const row of (actorRolesResult.data ?? []) as ActorRoleRow[]) {
+    const role = normalizeRole(row.role_code);
+    if (role) rolesSet.add(role);
+  }
+
+  const roles = Array.from(rolesSet);
+
+  const allowed =
+    eff.isSuperAdmin ||
+    eff.has("clients.manage") ||
+    canManageClientAssignmentsByRole(roles);
+
+  if (!allowed) {
+    return {
+      ok: false as const,
+      response: json(403, {
+        ok: false,
+        error: "FORBIDDEN",
+      }),
+    };
   }
 
   return {
     ok: true as const,
-    supabase,
-    actor,
-    roles: Array.from(rolesSet),
+    resolved,
+    actorId,
+    roles,
   };
 }
 
-export async function POST(request: NextRequest) {
+export async function GET(req: NextRequest) {
+  const mod = await import("../route");
+  return mod.GET(req);
+}
+
+export async function POST(req: NextRequest) {
   try {
-    const resolved = await resolveCurrentActor();
+    const auth = await requireAuthorized(req);
+    if (!auth.ok) return auth.response;
 
-    if (!resolved.ok) {
-      return NextResponse.json(
-        { ok: false, error: resolved.error },
-        { status: resolved.status },
-      );
-    }
-
-    const { supabase, roles } = resolved;
-
-    if (!hasPrivilegedRole(roles)) {
-      return NextResponse.json(
-        { ok: false, error: "FORBIDDEN" },
-        { status: 403 },
-      );
-    }
-
-    const body = (await request.json()) as RequestBody;
-
-    const clientHoldedContactId = body.clientHoldedContactId?.trim();
-    const assignmentRole = body.assignmentRole;
-    const actorId = body.actorId?.trim() || null;
+    const body = (await req.json()) as UpsertBody | null;
+    const clientHoldedContactId = String(body?.clientHoldedContactId ?? "").trim();
+    const assignmentRole = String(body?.assignmentRole ?? "").trim();
 
     if (!clientHoldedContactId) {
-      return NextResponse.json(
-        { ok: false, error: "CLIENT_HOLDED_CONTACT_ID_REQUIRED" },
-        { status: 400 },
-      );
+      return json(422, {
+        ok: false,
+        error: "clientHoldedContactId requerido",
+      });
     }
 
-    if (!["delegate", "recommender"].includes(assignmentRole)) {
-      return NextResponse.json(
-        { ok: false, error: "INVALID_ASSIGNMENT_ROLE" },
-        { status: 400 },
-      );
+    if (
+      ![
+        "delegate",
+        "recommender",
+        "kol",
+        "coordinator",
+        "commissionist_1",
+        "commissionist_2",
+        "commissionist_3",
+        "commissionist_4",
+        "commissionist_5",
+      ].includes(assignmentRole)
+    ) {
+      return json(422, {
+        ok: false,
+        error: "assignmentRole no soportado",
+      });
     }
 
-    const clientResult = await supabase
+    const supa = auth.resolved.supaService;
+    const actorId = auth.actorId;
+
+    const clientResult = await supa
       .from("clients")
-      .select("id, holded_contact_id")
+      .select("id, name, holded_contact_id")
       .eq("holded_contact_id", clientHoldedContactId)
       .maybeSingle();
 
-    if (clientResult.error || !clientResult.data) {
-      return NextResponse.json(
-        { ok: false, error: "CLIENT_NOT_FOUND" },
-        { status: 404 },
-      );
+    if (clientResult.error) {
+      return json(500, {
+        ok: false,
+        error: clientResult.error.message,
+      });
     }
 
-    const activeAssignmentResult = await supabase
-      .from("client_actor_assignments_g1")
-      .select("actor_id, client_holded_contact_id, assignment_role, valid_from, valid_to, source")
-      .eq("client_holded_contact_id", clientHoldedContactId)
-      .eq("assignment_role", assignmentRole)
-      .is("valid_to", null)
-      .maybeSingle<ClientAssignmentRow>();
+    const clientData = (clientResult.data ?? null) as ClientRow | null;
 
-    if (activeAssignmentResult.error) {
-      return NextResponse.json(
-        { ok: false, error: activeAssignmentResult.error.message },
-        { status: 500 },
-      );
+    if (!clientData?.id) {
+      return json(404, {
+        ok: false,
+        error: "Cliente no encontrado para ese holded_contact_id",
+      });
     }
 
-    const currentActive = activeAssignmentResult.data ?? null;
+    if (assignmentRole === "recommender") {
+      const recommenderClientId = String(
+        (body as Extract<UpsertBody, { assignmentRole: "recommender" }> | null)
+          ?.recommenderClientId ?? "",
+      ).trim();
 
-    if (!actorId) {
-      if (!currentActive) {
-        return NextResponse.json({ ok: true, changed: false });
+      if (recommenderClientId && recommenderClientId === clientData.id) {
+        return json(422, {
+          ok: false,
+          error: "El recomendador no puede ser el mismo cliente",
+        });
       }
 
-      const closeResult = await supabase
-        .from("client_actor_assignments_g1")
-        .update({
-          valid_to: todayIsoDate(),
-          source: `${currentActive.source ?? "el_elyon_manual_assignment"}__closed_2026_03_10`,
-        })
-        .eq("client_holded_contact_id", clientHoldedContactId)
-        .eq("assignment_role", assignmentRole)
-        .is("valid_to", null);
-
-      if (closeResult.error) {
-        return NextResponse.json(
-          { ok: false, error: closeResult.error.message },
-          { status: 500 },
-        );
+      if (recommenderClientId && !isUuid(recommenderClientId)) {
+        return json(422, {
+          ok: false,
+          error: "recommenderClientId inválido",
+        });
       }
 
-      return NextResponse.json({ ok: true, changed: true });
-    }
+      const currentOpenResult = await supa
+        .from("client_recommendations")
+        .select(
+          "id, recommender_client_id, referred_client_id, percentage, active, valid_from, valid_to, notes, created_at, updated_at, mode, state_code",
+        )
+        .eq("referred_client_id", clientData.id)
+        .eq("active", true)
+        .is("valid_to", null)
+        .eq("state_code", "OPEN");
 
-    const actorResult = await supabase
-      .from("actors")
-      .select("id, role")
-      .eq("id", actorId)
-      .maybeSingle();
-
-    if (actorResult.error || !actorResult.data) {
-      return NextResponse.json(
-        { ok: false, error: "TARGET_ACTOR_NOT_FOUND" },
-        { status: 404 },
-      );
-    }
-
-    const roleCheckResult = await supabase
-      .from("actor_roles")
-      .select("actor_id, role_code, state_code")
-      .eq("actor_id", actorId)
-      .eq("state_code", "OPEN");
-
-    if (roleCheckResult.error) {
-      return NextResponse.json(
-        { ok: false, error: roleCheckResult.error.message },
-        { status: 500 },
-      );
-    }
-
-    const targetRoles = new Set<string>();
-    const baseRole = normalizeRole(actorResult.data.role);
-    if (baseRole) targetRoles.add(baseRole);
-
-    for (const row of roleCheckResult.data ?? []) {
-      const roleValue = normalizeRole(row.role_code);
-      if (roleValue) targetRoles.add(roleValue);
-    }
-
-    if (!targetRoles.has(assignmentRole)) {
-      return NextResponse.json(
-        { ok: false, error: "TARGET_ACTOR_DOES_NOT_HAVE_REQUIRED_ROLE" },
-        { status: 400 },
-      );
-    }
-
-    if (currentActive?.actor_id === actorId) {
-      return NextResponse.json({ ok: true, changed: false });
-    }
-
-    if (currentActive) {
-      const closeResult = await supabase
-        .from("client_actor_assignments_g1")
-        .update({
-          valid_to: todayIsoDate(),
-        })
-        .eq("client_holded_contact_id", clientHoldedContactId)
-        .eq("assignment_role", assignmentRole)
-        .is("valid_to", null);
-
-      if (closeResult.error) {
-        return NextResponse.json(
-          { ok: false, error: closeResult.error.message },
-          { status: 500 },
-        );
+      if (currentOpenResult.error) {
+        return json(500, {
+          ok: false,
+          error: currentOpenResult.error.message,
+        });
       }
-    }
 
-    const insertResult = await supabase
-      .from("client_actor_assignments_g1")
-      .insert({
-        client_holded_contact_id: clientHoldedContactId,
-        actor_id: actorId,
-        assignment_role: assignmentRole,
-        valid_from: todayIsoDate(),
+      const currentRows = currentOpenResult.data ?? [];
+
+      if (currentRows.length > 0) {
+        const closeResult = await supa
+          .from("client_recommendations")
+          .update({
+            active: false,
+            valid_to: new Date().toISOString().slice(0, 10),
+            updated_at: new Date().toISOString(),
+            state_code: "CLOSED",
+          })
+          .eq("referred_client_id", clientData.id)
+          .eq("active", true)
+          .is("valid_to", null)
+          .eq("state_code", "OPEN");
+
+        if (closeResult.error) {
+          return json(500, {
+            ok: false,
+            error: closeResult.error.message,
+          });
+        }
+      }
+
+      if (!recommenderClientId) {
+        return json(200, {
+          ok: true,
+          changed: true,
+          assignmentRole,
+          mode: "clear",
+        });
+      }
+
+      const recommenderClientResult = await supa
+        .from("clients")
+        .select("id, name, holded_contact_id")
+        .eq("id", recommenderClientId)
+        .maybeSingle();
+
+      if (recommenderClientResult.error) {
+        return json(500, {
+          ok: false,
+          error: recommenderClientResult.error.message,
+        });
+      }
+
+      const recommenderClientData = (recommenderClientResult.data ?? null) as ClientRow | null;
+
+      if (!recommenderClientData?.id) {
+        return json(404, {
+          ok: false,
+          error: "Cliente recomendador no encontrado",
+        });
+      }
+
+      const insertResult = await supa.from("client_recommendations").insert({
+        recommender_client_id: recommenderClientId,
+        referred_client_id: clientData.id,
+        percentage: 7,
+        active: true,
+        valid_from: new Date().toISOString().slice(0, 10),
         valid_to: null,
-        source: "el_elyon_manual_assignment_2026_03_10",
+        notes: "EL-ELYON manual upsert",
+        mode: "deduct",
+        state_code: "OPEN",
       });
 
-    if (insertResult.error) {
-      return NextResponse.json(
-        { ok: false, error: insertResult.error.message },
-        { status: 500 },
-      );
+      if (insertResult.error) {
+        return json(500, {
+          ok: false,
+          error: insertResult.error.message,
+        });
+      }
+
+      return json(200, {
+        ok: true,
+        changed: true,
+        assignmentRole,
+        mode: "set",
+      });
     }
 
-    return NextResponse.json({ ok: true, changed: true });
-  } catch (error) {
-    return NextResponse.json(
-      {
+    const actorAssignmentBody = body as Exclude<
+      UpsertBody,
+      { assignmentRole: "recommender" }
+    >;
+
+    const targetActorId = String(actorAssignmentBody?.actorId ?? "").trim();
+
+    const currentOpenResult = await supa
+      .from("client_actor_assignments_g1")
+      .select(
+        "actor_id, client_holded_contact_id, assignment_role, valid_from, valid_to, source",
+      )
+      .eq("client_holded_contact_id", clientHoldedContactId)
+      .eq("assignment_role", assignmentRole)
+      .is("valid_to", null);
+
+    if (currentOpenResult.error) {
+      return json(500, {
         ok: false,
-        error: error instanceof Error ? error.message : "UNKNOWN_ERROR",
-      },
-      { status: 500 },
-    );
+        error: currentOpenResult.error.message,
+      });
+    }
+
+    if ((currentOpenResult.data ?? []).length > 0) {
+      const closeResult = await supa
+        .from("client_actor_assignments_g1")
+        .update({
+          valid_to: new Date().toISOString().slice(0, 10),
+        })
+        .eq("client_holded_contact_id", clientHoldedContactId)
+        .eq("assignment_role", assignmentRole)
+        .is("valid_to", null);
+
+      if (closeResult.error) {
+        return json(500, {
+          ok: false,
+          error: closeResult.error.message,
+        });
+      }
+    }
+
+    if (!targetActorId) {
+      return json(200, {
+        ok: true,
+        changed: true,
+        assignmentRole,
+        mode: "clear",
+      });
+    }
+
+    if (!isUuid(targetActorId)) {
+      return json(422, {
+        ok: false,
+        error: "actorId inválido",
+      });
+    }
+
+    const actorResult = await supa
+      .from("actors")
+      .select("id, name, email, role, status")
+      .eq("id", targetActorId)
+      .maybeSingle();
+
+    if (actorResult.error) {
+      return json(500, {
+        ok: false,
+        error: actorResult.error.message,
+      });
+    }
+
+    const actorData = actorResult.data ?? null;
+
+    if (!(actorData as { id?: string } | null)?.id) {
+      return json(404, {
+        ok: false,
+        error: "Actor no encontrado",
+      });
+    }
+
+    const insertResult = await supa.from("client_actor_assignments_g1").insert({
+      actor_id: targetActorId,
+      client_holded_contact_id: clientHoldedContactId,
+      assignment_role: assignmentRole,
+      valid_from: new Date().toISOString().slice(0, 10),
+      valid_to: null,
+      source: `el-elyon:${actorId}`,
+    });
+
+    if (insertResult.error) {
+      return json(500, {
+        ok: false,
+        error: insertResult.error.message,
+      });
+    }
+
+    return json(200, {
+      ok: true,
+      changed: true,
+      assignmentRole,
+      mode: "set",
+    });
+  } catch (error) {
+    return json(500, {
+      ok: false,
+      error: error instanceof Error ? error.message : "UNKNOWN_ERROR",
+    });
   }
 }

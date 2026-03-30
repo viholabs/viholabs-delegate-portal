@@ -1,5 +1,3 @@
-// src/app/api/delegate/clients/route.ts
-
 import { NextResponse } from "next/server";
 import { getActorFromRequest, json } from "../_utils";
 import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
@@ -50,9 +48,68 @@ type CreateClientBody = {
   shipping_city?: string | null;
   shipping_province?: string | null;
   shipping_country?: string | null;
+  iban?: string | null;
+  bank_account_holder?: string | null;
+  payment_method_name?: string | null;
+  payment_terms_name?: string | null;
   equivalence_surcharge?: boolean | null;
   notes?: string | null;
   vat_percent?: number | null;
+};
+
+type ClientListRow = {
+  id: string | null;
+  created_at: string | null;
+  actor_id: string | null;
+  delegate_id: string | null;
+  profile_type: string | null;
+  tax_id: string | null;
+  name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  status: string | null;
+  updated_at: string | null;
+  recommended_by_client_id: string | null;
+  name_raw: string | null;
+  legal_name: string | null;
+  billing_email: string | null;
+  fiscal_address_line1: string | null;
+  fiscal_address_line2: string | null;
+  fiscal_city: string | null;
+  fiscal_region: string | null;
+  fiscal_postal_code: string | null;
+  fiscal_country: string | null;
+  vat_number: string | null;
+  is_company: boolean | null;
+  state_code: string | null;
+  holded_contact_id: string | null;
+  payment_method_name: string | null;
+  payment_terms_name: string | null;
+  iban: string | null;
+  bank_account_holder: string | null;
+  sepa_status: string | null;
+  sepa_reference: string | null;
+  sepa_generated_at: string | null;
+  sepa_signed_at: string | null;
+  sepa_document_path: string | null;
+};
+
+type InsertedClientRow = {
+  id: string;
+  name: string | null;
+  tax_id: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  delegate_id: string | null;
+  holded_contact_id: string | null;
+  status: string | null;
+  profile_type: string | null;
+  created_at: string | null;
+  payment_method_name: string | null;
+  payment_terms_name: string | null;
+  iban: string | null;
+  bank_account_holder: string | null;
+  sepa_status: string | null;
 };
 
 function isValidEmail(v: string) {
@@ -61,6 +118,10 @@ function isValidEmail(v: string) {
 
 function normalizeTaxId(raw: string) {
   return safeStr(raw).replace(/\s+/g, "").toUpperCase().trim();
+}
+
+function normalizeIban(raw: string) {
+  return safeStr(raw).replace(/\s+/g, "").toUpperCase();
 }
 
 function isValidSpanishTaxId(raw: string) {
@@ -177,19 +238,22 @@ async function createHoldedContact(args: {
     ],
   };
 
-  const response = await fetch("https://api.holded.com/api/invoicing/v1/contacts", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      key: apiKey,
-    },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
+  const response = await fetch(
+    "https://api.holded.com/api/invoicing/v1/contacts",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        key: apiKey,
+      },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    }
+  );
 
   const text = await response.text();
-  let body: any = null;
+  let body: unknown = null;
 
   try {
     body = text ? JSON.parse(text) : null;
@@ -198,12 +262,22 @@ async function createHoldedContact(args: {
   }
 
   if (!response.ok) {
-    throw new HoldedClientError(`Holded HTTP ${response.status}`, response.status, body);
+    throw new HoldedClientError(
+      `Holded HTTP ${response.status}`,
+      response.status,
+      body
+    );
   }
 
-  const holdedContactId = safeStr(body?.id || body?._id);
+  const holdedBody = body as { id?: unknown; _id?: unknown } | null;
+  const holdedContactId = safeStr(holdedBody?.id || holdedBody?._id);
+
   if (!holdedContactId) {
-    throw new HoldedClientError("Holded contact created but id missing", response.status, body);
+    throw new HoldedClientError(
+      "Holded contact created but id missing",
+      response.status,
+      body
+    );
   }
 
   return {
@@ -221,8 +295,8 @@ export async function GET(req: Request) {
 
   try {
     const url = new URL(req.url);
-    const delegateIdQuery = (url.searchParams.get("delegateId") ?? "").trim();
-    const q = (url.searchParams.get("q") ?? "").trim();
+    const delegateIdQuery = safeStr(url.searchParams.get("delegateId"));
+    const q = safeStr(url.searchParams.get("q"));
 
     stage = "effective_permissions";
     const eff = await getEffectivePermissionsByActorId(String(r.actor.id));
@@ -236,7 +310,11 @@ export async function GET(req: Request) {
       eff.has("actors.read");
 
     if (!allowed) {
-      return json(403, { ok: false, stage, error: "No autorizado (clients.read)" });
+      return json(403, {
+        ok: false,
+        stage,
+        error: "No autorizado (clients.read)",
+      });
     }
 
     const isSupervisor = actorLooksSupervisor({
@@ -247,7 +325,13 @@ export async function GET(req: Request) {
     let delegateActorId: string | null = null;
 
     if (delegateIdQuery) {
-      if (!(eff.isSuperAdmin || eff.has("control_room.delegates.read") || eff.has("actors.read"))) {
+      if (
+        !(
+          eff.isSuperAdmin ||
+          eff.has("control_room.delegates.read") ||
+          eff.has("actors.read")
+        )
+      ) {
         return json(403, {
           ok: false,
           stage: "resolve_delegate",
@@ -257,63 +341,129 @@ export async function GET(req: Request) {
 
       delegateActorId = delegateIdQuery;
     } else if (isSupervisor) {
-      return NextResponse.json({
-        ok: true,
-        delegateActorId: null,
-        items: [],
-      });
+      delegateActorId = null;
     } else {
       delegateActorId = String(r.actor.id);
     }
 
-    stage = "query";
-    const { data, error } = await r.supaService
-      .from("v_control_room_clients_by_delegate_current")
+    stage = "query_clients";
+    let query = r.supaService
+      .from("clients")
       .select(
-        "client_id, client_name, holded_contact_id, delegate_actor_id, delegate_name, delegate_email, delegate_valid_from, delegate_source"
+        [
+          "id",
+          "created_at",
+          "actor_id",
+          "delegate_id",
+          "profile_type",
+          "tax_id",
+          "name",
+          "contact_email",
+          "contact_phone",
+          "status",
+          "updated_at",
+          "recommended_by_client_id",
+          "name_raw",
+          "legal_name",
+          "billing_email",
+          "fiscal_address_line1",
+          "fiscal_address_line2",
+          "fiscal_city",
+          "fiscal_region",
+          "fiscal_postal_code",
+          "fiscal_country",
+          "vat_number",
+          "is_company",
+          "state_code",
+          "holded_contact_id",
+          "payment_method_name",
+          "payment_terms_name",
+          "iban",
+          "bank_account_holder",
+          "sepa_status",
+          "sepa_reference",
+          "sepa_generated_at",
+          "sepa_signed_at",
+          "sepa_document_path",
+        ].join(",")
       )
-      .eq("delegate_actor_id", delegateActorId)
-      .order("client_name", { ascending: true });
+      .order("name", { ascending: true });
 
-    if (error) {
-      return json(500, { ok: false, stage, error: error.message });
+    if (delegateActorId) {
+      query = query.eq("delegate_id", delegateActorId);
     }
 
-    let rows = Array.isArray(data) ? data : [];
+    const queryResult = await query;
+    const queryError = queryResult.error;
 
-    if (q) {
-      const nq = normalize(q);
-      rows = rows.filter((c: any) => {
-        const n = normalize(String(c?.client_name ?? ""));
-        return n.includes(nq);
-      });
+    if (queryError) {
+      return json(500, { ok: false, stage, error: queryError.message });
     }
+
+    const rows = ((queryResult.data ?? []) as unknown[]) as ClientListRow[];
+
+    const filteredRows = q
+      ? rows.filter((c) => {
+          const byName = normalize(String(c.name ?? ""));
+          const byLegalName = normalize(String(c.legal_name ?? ""));
+          const byTaxId = normalize(String(c.tax_id ?? ""));
+          const byEmail = normalize(String(c.contact_email ?? ""));
+          const nq = normalize(q);
+
+          return (
+            byName.includes(nq) ||
+            byLegalName.includes(nq) ||
+            byTaxId.includes(nq) ||
+            byEmail.includes(nq)
+          );
+        })
+      : rows;
 
     return NextResponse.json({
       ok: true,
       delegateActorId,
-      items: rows.map((c: any) => ({
-        id: String(c?.client_id ?? ""),
-        name: c?.client_name ?? null,
-        tax_id: null,
-        contact_email: null,
-        contact_phone: null,
-        status: null,
-        profile_type: null,
-        created_at: null,
-        delegate_id: c?.delegate_actor_id ?? null,
-        holded_contact_id: c?.holded_contact_id ?? null,
-        delegate_name: c?.delegate_name ?? null,
-        delegate_email: c?.delegate_email ?? null,
-        delegate_valid_from: c?.delegate_valid_from ?? null,
-        delegate_source: c?.delegate_source ?? null,
+      items: filteredRows.map((c) => ({
+        id: c.id ?? null,
+        created_at: c.created_at ?? null,
+        actor_id: c.actor_id ?? null,
+        delegate_id: c.delegate_id ?? null,
+        profile_type: c.profile_type ?? null,
+        tax_id: c.tax_id ?? null,
+        name: c.name ?? null,
+        contact_email: c.contact_email ?? null,
+        contact_phone: c.contact_phone ?? null,
+        status: c.status ?? null,
+        updated_at: c.updated_at ?? null,
+        recommended_by_client_id: c.recommended_by_client_id ?? null,
+        name_raw: c.name_raw ?? null,
+        legal_name: c.legal_name ?? null,
+        billing_email: c.billing_email ?? null,
+        fiscal_address_line1: c.fiscal_address_line1 ?? null,
+        fiscal_address_line2: c.fiscal_address_line2 ?? null,
+        fiscal_city: c.fiscal_city ?? null,
+        fiscal_region: c.fiscal_region ?? null,
+        fiscal_postal_code: c.fiscal_postal_code ?? null,
+        fiscal_country: c.fiscal_country ?? null,
+        vat_number: c.vat_number ?? null,
+        is_company: c.is_company ?? null,
+        state_code: c.state_code ?? null,
+        holded_contact_id: c.holded_contact_id ?? null,
+        payment_method_name: c.payment_method_name ?? null,
+        payment_terms_name: c.payment_terms_name ?? null,
+        iban: c.iban ?? null,
+        bank_account_holder: c.bank_account_holder ?? null,
+        sepa_status: c.sepa_status ?? null,
+        sepa_reference: c.sepa_reference ?? null,
+        sepa_generated_at: c.sepa_generated_at ?? null,
+        sepa_signed_at: c.sepa_signed_at ?? null,
+        sepa_document_path: c.sepa_document_path ?? null,
       })),
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return json(500, {
       ok: false,
       stage,
-      error: e?.message ?? "Error inesperado",
+      error: e instanceof Error ? e.message : "Error inesperado",
     });
   }
 }
@@ -337,7 +487,11 @@ export async function POST(req: Request) {
       eff.has("actors.read");
 
     if (!allowed) {
-      return json(403, { ok: false, stage, error: "No autorizado (clients.manage)" });
+      return json(403, {
+        ok: false,
+        stage,
+        error: "No autorizado (clients.manage)",
+      });
     }
 
     stage = "parse_body";
@@ -356,7 +510,13 @@ export async function POST(req: Request) {
 
     stage = "resolve_delegate";
     if (requestedDelegateId) {
-      if (!(eff.isSuperAdmin || eff.has("control_room.delegates.read") || eff.has("actors.read"))) {
+      if (
+        !(
+          eff.isSuperAdmin ||
+          eff.has("control_room.delegates.read") ||
+          eff.has("actors.read")
+        )
+      ) {
         return json(403, {
           ok: false,
           stage,
@@ -384,6 +544,10 @@ export async function POST(req: Request) {
     const fiscalCity = safeStr(body.shipping_city);
     const fiscalRegion = safeStr(body.shipping_province);
     const fiscalCountry = safeStr(body.shipping_country) || "España";
+    const iban = normalizeIban(body.iban ?? "");
+    const bankAccountHolder = safeStr(body.bank_account_holder);
+    const paymentMethodName = safeStr(body.payment_method_name);
+    const paymentTermsName = safeStr(body.payment_terms_name);
     const notes = safeStr(body.notes);
     const equivalenceSurcharge = !!body.equivalence_surcharge;
     const vatPercent =
@@ -397,16 +561,28 @@ export async function POST(req: Request) {
     if (!isValidSpanishTaxId(taxId)) {
       return json(400, { ok: false, stage, error: "tax_id inválido" });
     }
-    if (!contactPhone) return json(400, { ok: false, stage, error: "phone requerido" });
-    if (!contactEmail) return json(400, { ok: false, stage, error: "email requerido" });
+    if (!contactPhone) {
+      return json(400, { ok: false, stage, error: "phone requerido" });
+    }
+    if (!contactEmail) {
+      return json(400, { ok: false, stage, error: "email requerido" });
+    }
     if (!isValidEmail(contactEmail)) {
       return json(400, { ok: false, stage, error: "email inválido" });
     }
     if (!fiscalAddressLine1) {
-      return json(400, { ok: false, stage, error: "shipping_address requerido" });
+      return json(400, {
+        ok: false,
+        stage,
+        error: "shipping_address requerido",
+      });
     }
     if (!fiscalPostalCode) {
-      return json(400, { ok: false, stage, error: "shipping_postal_code requerido" });
+      return json(400, {
+        ok: false,
+        stage,
+        error: "shipping_postal_code requerido",
+      });
     }
 
     stage = "create_holded_contact";
@@ -426,7 +602,7 @@ export async function POST(req: Request) {
     });
 
     stage = "insert_client";
-    const { data: insertedClient, error: insertClientError } = await r.supaService
+    const insertResponse = await r.supaService
       .from("clients")
       .insert({
         name,
@@ -446,17 +622,50 @@ export async function POST(req: Request) {
         status: "PENDING_VALIDATION",
         state_code: "OPEN",
         profile_type: "CLIENT",
+        payment_method_name: paymentMethodName || null,
+        payment_terms_name: paymentTermsName || null,
+        iban: iban || null,
+        bank_account_holder: bankAccountHolder || null,
+        sepa_status: iban ? "PENDING_SIGNATURE" : null,
       })
       .select(
-        "id, name, tax_id, contact_email, contact_phone, delegate_id, holded_contact_id, status, profile_type, created_at"
+        [
+          "id",
+          "name",
+          "tax_id",
+          "contact_email",
+          "contact_phone",
+          "delegate_id",
+          "holded_contact_id",
+          "status",
+          "profile_type",
+          "created_at",
+          "payment_method_name",
+          "payment_terms_name",
+          "iban",
+          "bank_account_holder",
+          "sepa_status",
+        ].join(",")
       )
       .single();
 
-    if (insertClientError) {
+    const insertedClientError = insertResponse.error;
+    if (insertedClientError) {
       return json(500, {
         ok: false,
         stage,
-        error: insertClientError.message,
+        error: insertedClientError.message,
+        holded_contact_id: holded.holdedContactId,
+      });
+    }
+
+    const insertedClient = (insertResponse.data as unknown) as InsertedClientRow | null;
+
+    if (!insertedClient?.id) {
+      return json(500, {
+        ok: false,
+        stage,
+        error: "Client insert returned no id",
         holded_contact_id: holded.holdedContactId,
       });
     }
@@ -505,24 +714,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      client: {
-        id: insertedClient.id,
-        name: insertedClient.name,
-        tax_id: insertedClient.tax_id,
-        contact_email: insertedClient.contact_email,
-        contact_phone: insertedClient.contact_phone,
-        delegate_id: insertedClient.delegate_id,
-        holded_contact_id: insertedClient.holded_contact_id,
-        status: insertedClient.status,
-        profile_type: insertedClient.profile_type,
-        created_at: insertedClient.created_at,
-      },
+      client: insertedClient,
       meta: {
         delegate_actor_id: delegateActorId,
         holded_contact_id: holded.holdedContactId,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (e instanceof HoldedClientError) {
       return json(e.status ?? 502, {
         ok: false,
@@ -535,7 +733,7 @@ export async function POST(req: Request) {
     return json(500, {
       ok: false,
       stage,
-      error: e?.message ?? "Error inesperado",
+      error: e instanceof Error ? e.message : "Error inesperado",
     });
   }
 }

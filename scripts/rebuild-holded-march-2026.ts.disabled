@@ -1,0 +1,312 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import fs from "node:fs";
+import path from "node:path";
+import dotenv from "dotenv";
+
+const envLocalPath = path.resolve(process.cwd(), ".env.local");
+
+if (fs.existsSync(envLocalPath)) {
+  dotenv.config({ path: envLocalPath });
+} else {
+  dotenv.config();
+}
+import { createClient } from "@supabase/supabase-js";
+import {
+  holdedFetchJson as holdedListDocuments,
+  holdedFetch as holdedDocumentDetail,
+} from "../src/lib/holded/holdedFetch";
+import { importHoldedDocumentsIncremental } from "../src/lib/holded/holdedImportIncrementalRunner";
+
+const MODE = process.env.MODE ?? "DRY_RUN";
+const MONTH = process.env.MONTH ?? "2026-03";
+
+type HoldedDocType = "invoice" | "creditnote";
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value || !value.trim()) {
+    throw new Error(`Missing env var: ${name}`);
+  }
+  return value;
+}
+
+function monthRange(month: string): { from: string; toExclusive: string } {
+  const parts = month.split("-");
+
+  if (parts.length !== 2) {
+    throw new Error(`Invalid MONTH format: ${month}. Expected YYYY-MM`);
+  }
+
+  const year = Number(parts[0]);
+  const monthIndex = Number(parts[1]);
+
+  if (!Number.isInteger(year) || !Number.isInteger(monthIndex)) {
+    throw new Error(`Invalid MONTH value: ${month}. Expected YYYY-MM`);
+  }
+
+  const from = new Date(Date.UTC(year, monthIndex - 1, 1));
+  const to = new Date(Date.UTC(year, monthIndex, 1));
+
+  return {
+    from: from.toISOString().slice(0, 10),
+    toExclusive: to.toISOString().slice(0, 10),
+  };
+}
+
+function toYmdFromUnknownDate(raw: unknown): string | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    const ms = raw > 9999999999 ? raw : raw * 1000;
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  }
+
+  if (typeof raw === "string" && raw.trim()) {
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) {
+      return toYmdFromUnknownDate(numeric);
+    }
+
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  }
+
+  return null;
+}
+
+function extractExternalId(doc: Record<string, unknown>): string {
+  const id =
+    (typeof doc.id === "string" && doc.id.trim()) ||
+    (typeof doc._id === "string" && doc._id.trim());
+
+  if (!id) {
+    throw new Error("Holded summary document without id/_id");
+  }
+
+  return id;
+}
+
+function isInsideMonth(
+  doc: Record<string, unknown>,
+  from: string,
+  toExclusive: string
+): boolean {
+  const ymd = toYmdFromUnknownDate(doc.date);
+  if (!ymd) return false;
+  return ymd >= from && ymd < toExclusive;
+}
+
+function inferDocTypeFromSummary(doc: Record<string, unknown>): HoldedDocType {
+  const candidates = [
+    doc.docType,
+    doc.documentType,
+    doc.type,
+    doc.kind,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+
+      if (
+        normalized.includes("credit") ||
+        normalized.includes("refund") ||
+        normalized.includes("abon") ||
+        normalized.includes("rectific")
+      ) {
+        return "creditnote";
+      }
+
+      if (normalized.includes("invoice") || normalized.includes("fact")) {
+        return "invoice";
+      }
+    }
+  }
+
+  const numberCandidate =
+    (typeof doc.docNumber === "string" && doc.docNumber.trim()) ||
+    (typeof doc.number === "string" && doc.number.trim()) ||
+    "";
+
+  if (numberCandidate.toUpperCase().startsWith("CN")) {
+    return "creditnote";
+  }
+
+  return "invoice";
+}
+
+function isDraftSummary(doc: Record<string, unknown>): boolean {
+  const candidates = [
+    doc.status,
+    doc.docType,
+    doc.documentType,
+    doc.type,
+    doc.kind,
+    doc.stage,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value !== "string") continue;
+
+    const normalized = value.trim().toLowerCase();
+
+    if (
+      normalized.includes("draft") ||
+      normalized.includes("borrador") ||
+      normalized.includes("proforma")
+    ) {
+      return true;
+    }
+  }
+
+  const invoiceNumber =
+    (typeof doc.docNumber === "string" && doc.docNumber.trim()) ||
+    (typeof doc.number === "string" && doc.number.trim()) ||
+    "";
+
+  if (/^[0-9a-f]{24}$/i.test(invoiceNumber)) {
+    return true;
+  }
+
+  return false;
+}
+
+async function fetchHoldedDocumentsByType(docType: HoldedDocType): Promise<any[]> {
+  const result = await holdedListDocuments(docType);
+
+  if (!Array.isArray(result)) {
+    throw new Error(`Holded list for ${docType} did not return an array`);
+  }
+
+  return result;
+}
+
+async function fetchHoldedDocumentDetailById(
+  docType: HoldedDocType,
+  externalId: string
+): Promise<any> {
+  const detail = await holdedDocumentDetail(docType, externalId);
+
+  if (!detail || typeof detail !== "object") {
+    throw new Error(`Holded detail for ${docType}/${externalId} is empty or invalid`);
+  }
+
+  return detail;
+}
+
+async function deleteMonthInDatabase(
+  supabase: any,
+  from: string,
+  toExclusive: string
+): Promise<void> {
+  const { data: invoicesToDelete, error: selectError } = await supabase
+    .from("invoices")
+    .select("id")
+    .eq("source_provider", "holded")
+    .gte("invoice_date", from)
+    .lt("invoice_date", toExclusive);
+
+  if (selectError) {
+    throw selectError;
+  }
+
+  const invoiceIds = (invoicesToDelete ?? []).map((row: any) => row.id);
+
+  if (invoiceIds.length > 0) {
+    const { error: deleteItemsError } = await supabase
+      .from("invoice_items")
+      .delete()
+      .in("invoice_id", invoiceIds);
+
+    if (deleteItemsError) {
+      throw deleteItemsError;
+    }
+  }
+
+  const { error: deleteInvoicesError } = await supabase
+    .from("invoices")
+    .delete()
+    .eq("source_provider", "holded")
+    .gte("invoice_date", from)
+    .lt("invoice_date", toExclusive);
+
+  if (deleteInvoicesError) {
+    throw deleteInvoicesError;
+  }
+}
+
+async function main() {
+  const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const supabaseServiceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  const supabase: any = createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: { persistSession: false },
+  });
+
+  const { from, toExclusive } = monthRange(MONTH);
+
+  console.log(`MODE: ${MODE}`);
+  console.log(`MONTH: ${MONTH}`);
+  console.log("");
+
+  console.log("1) Listando Holded...");
+  const invoices = await fetchHoldedDocumentsByType("invoice");
+  const creditNotes = await fetchHoldedDocumentsByType("creditnote");
+
+  const allDocs = [...invoices, ...creditNotes]
+    .filter((doc) => isInsideMonth(doc, from, toExclusive))
+    .filter((doc) => !isDraftSummary(doc));
+
+  console.log(`   invoices total    : ${invoices.length}`);
+  console.log(`   creditnotes total : ${creditNotes.length}`);
+  console.log(`   kept month        : ${allDocs.length}`);
+  console.log("");
+
+  console.log("2) Descargando detalles...");
+  const fullDocs: Array<{
+    summary: Record<string, unknown>;
+    detail: Record<string, unknown>;
+  }> = [];
+
+  for (const summary of allDocs) {
+    const externalId = extractExternalId(summary);
+    const docType = inferDocTypeFromSummary(summary);
+    const detail = await fetchHoldedDocumentDetailById(docType, externalId);
+
+    fullDocs.push({
+      summary,
+      detail,
+    });
+  }
+
+  console.log(`   details ok : ${fullDocs.length}`);
+  console.log("");
+
+  if (MODE === "APPLY") {
+    console.log("3) Borrando mes actual en BD (solo holded)...");
+    await deleteMonthInDatabase(supabase, from, toExclusive);
+    console.log("   delete ok");
+    console.log("");
+  }
+
+  console.log(`4) ${MODE === "APPLY" ? "Aplicando" : "Preview"} import canónico...`);
+
+  const result = await importHoldedDocumentsIncremental({
+    supabase,
+    docs: fullDocs,
+    preview: MODE !== "APPLY",
+    logger: console,
+  });
+
+  console.log("");
+  console.log("5) RESULT");
+  console.log(JSON.stringify(result, null, 2));
+}
+
+main().catch((error: unknown) => {
+  console.error("");
+  console.error("ERROR");
+  console.error(error);
+  process.exit(1);
+});
