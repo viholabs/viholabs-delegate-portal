@@ -78,41 +78,14 @@ function toNullableString(raw: unknown): string | null {
 }
 
 function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
   }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  if (error && typeof error === "object") {
-    const e = error as {
-      message?: unknown;
-      details?: unknown;
-      hint?: unknown;
-      code?: unknown;
-    };
-
-    const parts = [
-      toNullableString(e.message),
-      toNullableString(e.details),
-      toNullableString(e.hint),
-      toNullableString(e.code),
-    ].filter((x): x is string => Boolean(x));
-
-    if (parts.length > 0) {
-      return parts.join(" | ");
-    }
-
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return String(error);
-    }
-  }
-
-  return String(error);
 }
 
 function dedupeDocRefs(items: HoldedDocRef[]): HoldedDocRef[] {
@@ -149,24 +122,16 @@ async function fetchAllChangedDocRefsByType(args: {
       pageSize,
     });
 
-    if (!Array.isArray(ids) || ids.length === 0) {
-      break;
-    }
+    if (!Array.isArray(ids) || ids.length === 0) break;
 
     for (const id of ids) {
       const cleanId = toNullableString(id);
       if (!cleanId) continue;
 
-      collected.push({
-        id: cleanId,
-        docType,
-      });
+      collected.push({ id: cleanId, docType });
     }
 
-    if (ids.length < pageSize) {
-      break;
-    }
-
+    if (ids.length < pageSize) break;
     page += 1;
   }
 
@@ -190,125 +155,95 @@ async function ensureHoldedContact(
   supabase: SupabaseLike,
   holdedContactId: string,
   rawDetail: any
-): Promise<"exists" | "inserted"> {
+): Promise<void> {
   const existing = await supabase
     .from("holded_contacts")
     .select("holded_id")
     .eq("holded_id", holdedContactId)
     .maybeSingle();
 
-  if (existing.error) {
-    throw existing.error;
+  if (existing.error) throw existing.error;
+
+  if (!existing.data) {
+    await supabase.from("holded_contacts").insert({
+      holded_id: holdedContactId,
+      raw_payload: rawDetail,
+      name: toNullableString(rawDetail?.contactName),
+    });
   }
+}
 
-  if (existing.data) {
-    return "exists";
-  }
-
-  const insertPayload: Record<string, unknown> = {
-    holded_id: holdedContactId,
-    raw_payload: rawDetail,
-  };
-
-  const contactName = toNullableString(rawDetail?.contactName);
-  if (contactName) {
-    insertPayload.name = contactName;
-  }
-
-  const insertResult = await supabase
-    .from("holded_contacts")
-    .insert(insertPayload);
-
-  if (insertResult.error) {
-    throw insertResult.error;
-  }
-
-  const verify = await supabase
-    .from("holded_contacts")
-    .select("holded_id")
-    .eq("holded_id", holdedContactId)
+/**
+ * 🔥 FUNCIÓN CLAVE NUEVA
+ */
+async function ensureClientForHoldedContact(
+  supabase: SupabaseLike,
+  holdedContactId: string,
+  rawDetail: any
+): Promise<string> {
+  const existing = await supabase
+    .from("clients")
+    .select("id")
+    .eq("holded_contact_id", holdedContactId)
     .maybeSingle();
 
-  if (verify.error) {
-    throw verify.error;
+  if (existing.error) throw existing.error;
+
+  if (existing.data?.id) {
+    return existing.data.id;
   }
 
-  if (!verify.data) {
-    throw new Error(`Contact not persisted: ${holdedContactId}`);
-  }
+  const name =
+    toNullableString(rawDetail?.contactName) ||
+    toNullableString(rawDetail?.name) ||
+    "UNKNOWN";
 
-  return "inserted";
+  const inserted = await supabase
+    .from("clients")
+    .insert({
+      holded_contact_id: holdedContactId,
+      name,
+      name_raw: name,
+      legal_name: name,
+      profile_type: "client",
+      status: "active",
+      state_code: "OPEN",
+    })
+    .select("id")
+    .single();
+
+  if (inserted.error) throw inserted.error;
+
+  console.log(`   client auto-created :: ${holdedContactId}`);
+
+  return inserted.data.id;
 }
 
 async function ensureMapping(
   supabase: SupabaseLike,
-  holdedContactId: string
-): Promise<"exists" | "inserted" | "skipped_no_client" | "skipped_multiple_clients"> {
-  const existingMap = await supabase
+  holdedContactId: string,
+  clientId: string
+): Promise<"exists" | "inserted"> {
+  const existing = await supabase
     .from("holded_contact_client_map_g1")
     .select("client_id")
     .eq("holded_contact_id", holdedContactId)
     .maybeSingle();
 
-  if (existingMap.error) {
-    throw existingMap.error;
-  }
+  if (existing.error) throw existing.error;
 
-  const existingClientId = toNullableString(existingMap.data?.client_id);
-  if (existingClientId) {
+  if (existing.data?.client_id) {
     return "exists";
   }
 
-  const clientsResult = await supabase
-    .from("clients")
-    .select("id")
-    .eq("holded_contact_id", holdedContactId)
-    .limit(2);
-
-  if (clientsResult.error) {
-    throw clientsResult.error;
-  }
-
-  const rows = Array.isArray(clientsResult.data) ? clientsResult.data : [];
-
-  if (rows.length === 0) {
-    return "skipped_no_client";
-  }
-
-  if (rows.length > 1) {
-    return "skipped_multiple_clients";
-  }
-
-  const clientId = toNullableString(rows[0]?.id);
-  if (!clientId) {
-    return "skipped_no_client";
-  }
-
-  const insertResult = await supabase
+  const insert = await supabase
     .from("holded_contact_client_map_g1")
     .insert({
       holded_contact_id: holdedContactId,
       client_id: clientId,
     });
 
-  if (insertResult.error) {
-    throw insertResult.error;
-  }
-
-  const verify = await supabase
-    .from("holded_contact_client_map_g1")
-    .select("holded_contact_id, client_id")
-    .eq("holded_contact_id", holdedContactId)
-    .maybeSingle();
-
-  if (verify.error) {
-    throw verify.error;
-  }
-
-  const verifiedClientId = toNullableString(verify.data?.client_id);
-  if (!verify.data || !verifiedClientId) {
-    throw new Error(`Mapping not persisted: ${holdedContactId}`);
-  }
+  if (insert.error) throw insert.error;
 
   return "inserted";
 }
@@ -318,187 +253,85 @@ async function main(): Promise<void> {
   const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
   if (!supabaseUrl) {
-    throw new Error("Missing env var: SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL");
+    throw new Error("Missing SUPABASE_URL");
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
   }) as unknown as SupabaseLike;
 
-  const lookbackDays = parsePositiveInt(process.env.LOOKBACK_DAYS, 30);
-  const since = normalizeYmd(process.env.SINCE, getDateNDaysAgo(lookbackDays));
+  const since = normalizeYmd(process.env.SINCE, getDateNDaysAgo(30));
   const until = normalizeYmd(
     process.env.UNTIL,
     new Date().toISOString().slice(0, 10)
   );
-  const pageSize = parsePositiveInt(process.env.PAGE_SIZE, 100);
 
-  console.log("1) Preflight window");
-  console.log(`   since                : ${since}`);
-  console.log(`   until                : ${until}`);
-  console.log(`   page size            : ${pageSize}`);
-  console.log("");
+  console.log("PRE-FLIGHT START");
+  console.log(`since: ${since}`);
+  console.log(`until: ${until}`);
 
-  console.log("2) Buscando IDs cambiados en Holded...");
   const invoiceRefs = await fetchAllChangedDocRefsByType({
     docType: "invoice",
     since,
     until,
-    pageSize,
+    pageSize: 100,
   });
 
-  const creditNoteRefs = await fetchAllChangedDocRefsByType({
+  const creditRefs = await fetchAllChangedDocRefsByType({
     docType: "creditnote",
     since,
     until,
-    pageSize,
+    pageSize: 100,
   });
 
-  const changedRefs = dedupeDocRefs([...invoiceRefs, ...creditNoteRefs]);
+  const refs = dedupeDocRefs([...invoiceRefs, ...creditRefs]);
 
-  console.log(`   invoices changed     : ${invoiceRefs.length}`);
-  console.log(`   creditnotes changed  : ${creditNoteRefs.length}`);
-  console.log(`   total changed refs   : ${changedRefs.length}`);
-  console.log("");
+  const contacts = new Map<string, any>();
 
-  const uniqueContacts = new Map<string, any>();
-  const fetchErrors: Array<{
-    externalId: string;
-    docType: HoldedDocType;
-    reason: string;
-  }> = [];
+  for (const ref of refs) {
+    const detail = await fetchHoldedDocumentDetailById(
+      ref.docType,
+      ref.id
+    );
 
-  console.log("3) Descargando details y detectando detail.contact...");
-  for (const ref of changedRefs) {
-    try {
-      const detail = await fetchHoldedDocumentDetailById(ref.docType, ref.id);
-      const holdedContactId = toNullableString(detail.contact);
+    const contactId = toNullableString(detail.contact);
+    if (!contactId) continue;
 
-      console.log(
-        `   detail ok :: ${ref.id} :: ${ref.docType} :: contact=${holdedContactId ?? "NO_CONTACT"}`
-      );
-
-      if (!holdedContactId) {
-        continue;
-      }
-
-      if (!uniqueContacts.has(holdedContactId)) {
-        uniqueContacts.set(holdedContactId, detail);
-      }
-    } catch (error: unknown) {
-      const message = normalizeError(error);
-      fetchErrors.push({
-        externalId: ref.id,
-        docType: ref.docType,
-        reason: message,
-      });
-      console.warn(`   detail error :: ${ref.id} :: ${ref.docType} :: ${message}`);
+    if (!contacts.has(contactId)) {
+      contacts.set(contactId, detail);
     }
   }
 
-  console.log("");
-  console.log("4) Contactos únicos detectados...");
-  console.log(`   unique contacts      : ${uniqueContacts.size}`);
-  console.log(`   detail errors        : ${fetchErrors.length}`);
-  console.log("");
-
-  let contactsInserted = 0;
-  let contactsAlreadyExisted = 0;
-  let mappingsInserted = 0;
-  let mappingsAlreadyExisted = 0;
-  let mappingsSkippedNoClient = 0;
-  let mappingsSkippedMultipleClients = 0;
-
-  const unresolved: Array<{
-    holdedContactId: string;
-    reason: string;
-  }> = [];
-
-  for (const [holdedContactId, rawDetail] of uniqueContacts.entries()) {
+  for (const [contactId, rawDetail] of contacts.entries()) {
     try {
-      const contactResult = await ensureHoldedContact(
+      await ensureHoldedContact(supabase, contactId, rawDetail);
+
+      const clientId = await ensureClientForHoldedContact(
         supabase,
-        holdedContactId,
+        contactId,
         rawDetail
       );
 
-      if (contactResult === "inserted") {
-        contactsInserted += 1;
-        console.log(`   contact inserted :: ${holdedContactId}`);
-      } else {
-        contactsAlreadyExisted += 1;
-        console.log(`   contact exists   :: ${holdedContactId}`);
-      }
+      const mapping = await ensureMapping(
+        supabase,
+        contactId,
+        clientId
+      );
 
-      const mappingResult = await ensureMapping(supabase, holdedContactId);
-
-      if (mappingResult === "inserted") {
-        mappingsInserted += 1;
-        console.log(`   mapping inserted :: ${holdedContactId}`);
-      } else if (mappingResult === "exists") {
-        mappingsAlreadyExisted += 1;
-        console.log(`   mapping exists   :: ${holdedContactId}`);
-      } else if (mappingResult === "skipped_no_client") {
-        mappingsSkippedNoClient += 1;
-        unresolved.push({
-          holdedContactId,
-          reason: "no_client_with_same_holded_contact_id",
-        });
-        console.log(
-          `   mapping skipped  :: ${holdedContactId} :: no_client_with_same_holded_contact_id`
-        );
-      } else if (mappingResult === "skipped_multiple_clients") {
-        mappingsSkippedMultipleClients += 1;
-        unresolved.push({
-          holdedContactId,
-          reason: "multiple_clients_with_same_holded_contact_id",
-        });
-        console.log(
-          `   mapping skipped  :: ${holdedContactId} :: multiple_clients_with_same_holded_contact_id`
-        );
-      }
-    } catch (error: unknown) {
-      const message = normalizeError(error);
-      unresolved.push({
-        holdedContactId,
-        reason: message,
-      });
-      console.warn(`   preflight error  :: ${holdedContactId} :: ${message}`);
+      console.log(
+        `   OK :: ${contactId} :: mapping=${mapping}`
+      );
+    } catch (e) {
+      console.error(
+        `   ERROR :: ${contactId} :: ${normalizeError(e)}`
+      );
     }
   }
 
-  console.log("");
-  console.log("5) RESULT");
-  console.log(
-    JSON.stringify(
-      {
-        ok: true,
-        since,
-        until,
-        changedInvoices: invoiceRefs.length,
-        changedCreditNotes: creditNoteRefs.length,
-        changedTotal: changedRefs.length,
-        uniqueContacts: uniqueContacts.size,
-        detailErrors: fetchErrors.length,
-        contactsInserted,
-        contactsAlreadyExisted,
-        mappingsInserted,
-        mappingsAlreadyExisted,
-        mappingsSkippedNoClient,
-        mappingsSkippedMultipleClients,
-        unresolvedCount: unresolved.length,
-        unresolved,
-        fetchErrors,
-      },
-      null,
-      2
-    )
-  );
+  console.log("DONE");
 }
 
-main().catch((error: unknown) => {
-  console.error("");
-  console.error("[HOLDED_PREFLIGHT_CONTACTS_AND_MAPPINGS][ERROR]");
-  console.error(normalizeError(error));
+main().catch((e) => {
+  console.error("FATAL:", normalizeError(e));
   process.exit(1);
 });
