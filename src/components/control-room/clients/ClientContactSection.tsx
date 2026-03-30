@@ -43,6 +43,16 @@ export default function ClientContactSection({
           value={selected.contact_phone}
           onChange={(value) => updateSelected("contact_phone", value)}
         />
+        <TextInput
+          label="Móvil"
+          value={selected.mobile_phone}
+          onChange={(value) => updateSelected("mobile_phone", value)}
+        />
+        <TextInput
+          label="Website"
+          value={selected.website}
+          onChange={(value) => updateSelected("website", value)}
+        />
       </div>
     </SectionCard>
   );

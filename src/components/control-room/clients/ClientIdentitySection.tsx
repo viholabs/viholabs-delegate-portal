@@ -45,9 +45,21 @@ export default function ClientIdentitySection({
           value={selected.vat_number}
           onChange={(value) => updateSelected("vat_number", value)}
         />
-        <DetailValue label="Profile type" value={selected.profile_type} />
-        <DetailValue label="Status" value={selected.status} />
-        <DetailValue label="State code" value={selected.state_code} />
+        <TextInput
+          label="Profile type"
+          value={selected.profile_type}
+          onChange={(value) => updateSelected("profile_type", value)}
+        />
+        <TextInput
+          label="Status"
+          value={selected.status}
+          onChange={(value) => updateSelected("status", value)}
+        />
+        <TextInput
+          label="State code"
+          value={selected.state_code}
+          onChange={(value) => updateSelected("state_code", value)}
+        />
         <DetailValue
           label="Holded contact ID"
           value={selected.holded_contact_id}

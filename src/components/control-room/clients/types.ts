@@ -23,6 +23,29 @@ export type AffiliateOption = {
   label: string | null;
 };
 
+export type PaymentMethodOption = {
+  id: string;
+  name: string;
+};
+
+export type PaymentTermOption = {
+  id: string;
+  name: string;
+  days: number;
+};
+
+export type PaymentMethodsResponse = {
+  ok: boolean;
+  data: PaymentMethodOption[];
+  error?: string;
+};
+
+export type PaymentTermsResponse = {
+  ok: boolean;
+  data: PaymentTermOption[];
+  error?: string;
+};
+
 export type ClientListItem = {
   id: string;
   name: string | null;

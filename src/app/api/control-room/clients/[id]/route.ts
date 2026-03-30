@@ -38,12 +38,48 @@ type ClientInvoiceView = {
 
 type SafeHoldedContact = Awaited<ReturnType<typeof getHoldedContactById>>;
 
+type ClientPatchPayload = {
+  name?: unknown;
+  legal_name?: unknown;
+  tax_id?: unknown;
+  vat_number?: unknown;
+
+  contact_email?: unknown;
+  billing_email?: unknown;
+  contact_phone?: unknown;
+  mobile_phone?: unknown;
+  website?: unknown;
+
+  fiscal_address_line1?: unknown;
+  fiscal_address_line2?: unknown;
+  fiscal_city?: unknown;
+  fiscal_region?: unknown;
+  fiscal_postal_code?: unknown;
+  fiscal_country?: unknown;
+
+  shipping_address_line1?: unknown;
+  shipping_address_line2?: unknown;
+  shipping_city?: unknown;
+  shipping_region?: unknown;
+  shipping_postal_code?: unknown;
+  shipping_country?: unknown;
+
+  payment_method_name?: unknown;
+  payment_terms_name?: unknown;
+  iban?: unknown;
+  bank_account_holder?: unknown;
+
+  profile_type?: unknown;
+  status?: unknown;
+  state_code?: unknown;
+};
+
 function getEnv(name: string): string {
   const value = process.env[name];
   if (!value || !value.trim()) {
     throw new Error(`Missing env: ${name}`);
   }
-  return value;
+  return value.trim();
 }
 
 function getSupabase() {
@@ -52,7 +88,26 @@ function getSupabase() {
     getEnv("SUPABASE_SERVICE_ROLE_KEY"),
     {
       auth: { persistSession: false },
-    },
+    }
+  );
+}
+
+function getHoldedApiKey(): string {
+  const candidates = [
+    process.env.HOLDED_API_KEY,
+    process.env.HOLDED_APIKEY,
+    process.env.NEXT_PRIVATE_HOLDED_API_KEY,
+    process.env.HOLDED_KEY,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  throw new Error(
+    "Missing Holded API key. Expected one of: HOLDED_API_KEY, HOLDED_APIKEY, NEXT_PRIVATE_HOLDED_API_KEY, HOLDED_KEY"
   );
 }
 
@@ -87,7 +142,7 @@ function asBoolean(value: unknown): boolean | null {
 
 function pickString(
   record: Record<string, unknown> | null,
-  keys: string[],
+  keys: string[]
 ): string | null {
   if (!record) return null;
 
@@ -101,7 +156,7 @@ function pickString(
 
 function pickNumber(
   record: Record<string, unknown> | null,
-  keys: string[],
+  keys: string[]
 ): number | null {
   if (!record) return null;
 
@@ -115,7 +170,7 @@ function pickNumber(
 
 function pickBoolean(
   record: Record<string, unknown> | null,
-  keys: string[],
+  keys: string[]
 ): boolean | null {
   if (!record) return null;
 
@@ -150,6 +205,31 @@ function normalizeDateForSort(value: string | null): number {
   if (!value) return 0;
   const time = Date.parse(value);
   return Number.isFinite(time) ? time : 0;
+}
+
+function normalizeNullableInput(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  return null;
+}
+
+function normalizeIban(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.replace(/\s+/g, "").toUpperCase();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function mapInvoiceRow(row: unknown): ClientInvoiceView {
@@ -192,7 +272,7 @@ function mapInvoiceRow(row: unknown): ClientInvoiceView {
 
 async function readClientCore(
   supabase: ReturnType<typeof getSupabase>,
-  clientId: string,
+  clientId: string
 ): Promise<Record<string, unknown> | null> {
   const { data, error } = await supabase
     .from("clients")
@@ -209,7 +289,7 @@ async function readClientCore(
 
 async function readDelegate(
   supabase: ReturnType<typeof getSupabase>,
-  holdedContactId: string | null,
+  holdedContactId: string | null
 ) {
   if (!holdedContactId) {
     return {
@@ -220,7 +300,9 @@ async function readDelegate(
 
   const { data: assignments, error: assignmentError } = await supabase
     .from("client_actor_assignments_g1")
-    .select("id, client_holded_contact_id, actor_id, assignment_role, valid_from, valid_to, source, created_at")
+    .select(
+      "id, client_holded_contact_id, actor_id, assignment_role, valid_from, valid_to, source, created_at"
+    )
     .eq("client_holded_contact_id", holdedContactId)
     .eq("assignment_role", "delegate")
     .order("valid_from", { ascending: false })
@@ -270,13 +352,13 @@ async function readDelegate(
 
 async function readRecommendationSafely(
   _supabase: ReturnType<typeof getSupabase>,
-  clientId: string,
+  clientId: string
 ) {
   console.warn(
     "[CONTROL_ROOM_CLIENT_DETAIL][RECOMMENDATION][SKIP_SCHEMA_UNKNOWN]",
     {
       clientId,
-    },
+    }
   );
 
   return {
@@ -287,7 +369,7 @@ async function readRecommendationSafely(
 
 async function readAffiliate(
   supabase: ReturnType<typeof getSupabase>,
-  clientId: string,
+  clientId: string
 ) {
   const { data: affiliateEvent, error: affiliateError } = await supabase
     .from("affiliate_attribution_events")
@@ -335,7 +417,7 @@ async function readAffiliate(
 
 async function readInvoices(
   supabase: ReturnType<typeof getSupabase>,
-  clientId: string,
+  clientId: string
 ): Promise<ClientInvoiceView[]> {
   const { data, error } = await supabase
     .from("invoices")
@@ -370,25 +452,13 @@ async function readHoldedContactSafely(params: {
       "[CONTROL_ROOM_CLIENT_DETAIL][HOLDED][SKIP] missing_holded_contact_id",
       {
         clientId,
-      },
+      }
     );
     return null;
   }
 
   try {
-    console.log("[CONTROL_ROOM_CLIENT_DETAIL][HOLDED][REQUEST]", {
-      clientId,
-      holdedContactId,
-    });
-
     const holded = await getHoldedContactById(holdedContactId);
-
-    console.log("[CONTROL_ROOM_CLIENT_DETAIL][HOLDED][OK]", {
-      clientId,
-      holdedContactId,
-      found: Boolean(holded),
-    });
-
     return holded;
   } catch (error) {
     const message =
@@ -408,7 +478,7 @@ function buildClientDetail(
   clientRow: Record<string, unknown>,
   holded: SafeHoldedContact | null,
   actors: ClientActorBundle,
-  invoices: ClientInvoiceView[],
+  invoices: ClientInvoiceView[]
 ) {
   const holdedContactId = asString(clientRow.holded_contact_id);
 
@@ -488,33 +558,6 @@ function buildClientDetail(
     "country",
   ]);
 
-  const localShippingAddress1 = pickString(clientRow, [
-    "shipping_address_line1",
-    "delivery_address_line1",
-  ]);
-  const localShippingAddress2 = pickString(clientRow, [
-    "shipping_address_line2",
-    "delivery_address_line2",
-  ]);
-  const localShippingCity = pickString(clientRow, [
-    "shipping_city",
-    "delivery_city",
-  ]);
-  const localShippingRegion = pickString(clientRow, [
-    "shipping_region",
-    "delivery_region",
-    "shipping_province",
-  ]);
-  const localShippingPostalCode = pickString(clientRow, [
-    "shipping_postal_code",
-    "delivery_postal_code",
-    "shipping_zip_code",
-  ]);
-  const localShippingCountry = pickString(clientRow, [
-    "shipping_country",
-    "delivery_country",
-  ]);
-
   const localPaymentMethodName = pickString(clientRow, [
     "payment_method_name",
     "payment_method",
@@ -546,54 +589,39 @@ function buildClientDetail(
 
     fiscal_address_line1: prefer(
       holded?.fiscal_address_line1 ?? null,
-      localFiscalAddress1,
+      localFiscalAddress1
     ),
     fiscal_address_line2: prefer(
       holded?.fiscal_address_line2 ?? null,
-      localFiscalAddress2,
+      localFiscalAddress2
     ),
     fiscal_city: prefer(holded?.fiscal_city ?? null, localFiscalCity),
     fiscal_region: prefer(holded?.fiscal_region ?? null, localFiscalRegion),
     fiscal_postal_code: prefer(
       holded?.fiscal_postal_code ?? null,
-      localFiscalPostalCode,
+      localFiscalPostalCode
     ),
     fiscal_country: prefer(holded?.fiscal_country ?? null, localFiscalCountry),
 
-    shipping_address_line1: prefer(
-      holded?.shipping_address_line1 ?? null,
-      localShippingAddress1,
-    ),
-    shipping_address_line2: prefer(
-      holded?.shipping_address_line2 ?? null,
-      localShippingAddress2,
-    ),
-    shipping_city: prefer(holded?.shipping_city ?? null, localShippingCity),
-    shipping_region: prefer(
-      holded?.shipping_region ?? null,
-      localShippingRegion,
-    ),
-    shipping_postal_code: prefer(
-      holded?.shipping_postal_code ?? null,
-      localShippingPostalCode,
-    ),
-    shipping_country: prefer(
-      holded?.shipping_country ?? null,
-      localShippingCountry,
-    ),
+    shipping_address_line1: holded?.shipping_address_line1 ?? null,
+    shipping_address_line2: holded?.shipping_address_line2 ?? null,
+    shipping_city: holded?.shipping_city ?? null,
+    shipping_region: holded?.shipping_region ?? null,
+    shipping_postal_code: holded?.shipping_postal_code ?? null,
+    shipping_country: holded?.shipping_country ?? null,
 
     payment_method_name: prefer(
       holded?.payment_method_name ?? null,
-      localPaymentMethodName,
+      localPaymentMethodName
     ),
     payment_terms_name: prefer(
       holded?.payment_terms_name ?? null,
-      localPaymentTermsName,
+      localPaymentTermsName
     ),
     iban: prefer(holded?.iban ?? null, localIban),
     bank_account_holder: prefer(
       holded?.bank_account_holder ?? null,
-      localBankHolder,
+      localBankHolder
     ),
 
     holded_contact_id: holdedContactId,
@@ -632,14 +660,181 @@ function buildClientDetail(
   };
 }
 
+function buildDbPatch(payload: ClientPatchPayload) {
+  return {
+    name: normalizeNullableInput(payload.name),
+    legal_name: normalizeNullableInput(payload.legal_name),
+    tax_id: normalizeNullableInput(payload.tax_id),
+    vat_number: normalizeNullableInput(payload.vat_number),
+
+    contact_email: normalizeNullableInput(payload.contact_email),
+    billing_email: normalizeNullableInput(payload.billing_email),
+    contact_phone: normalizeNullableInput(payload.contact_phone),
+
+    fiscal_address_line1: normalizeNullableInput(payload.fiscal_address_line1),
+    fiscal_address_line2: normalizeNullableInput(payload.fiscal_address_line2),
+    fiscal_city: normalizeNullableInput(payload.fiscal_city),
+    fiscal_region: normalizeNullableInput(payload.fiscal_region),
+    fiscal_postal_code: normalizeNullableInput(payload.fiscal_postal_code),
+    fiscal_country: normalizeNullableInput(payload.fiscal_country),
+
+    payment_method_name: normalizeNullableInput(payload.payment_method_name),
+    payment_terms_name: normalizeNullableInput(payload.payment_terms_name),
+    iban: normalizeIban(normalizeNullableInput(payload.iban)),
+    bank_account_holder: normalizeNullableInput(payload.bank_account_holder),
+
+    profile_type: normalizeNullableInput(payload.profile_type),
+    status: normalizeNullableInput(payload.status),
+    state_code: normalizeNullableInput(payload.state_code),
+  };
+}
+
+function buildHoldedPatch(payload: ClientPatchPayload) {
+  return {
+    name: normalizeNullableInput(payload.name),
+    legalName: normalizeNullableInput(payload.legal_name),
+    code: normalizeNullableInput(payload.tax_id),
+    vatnumber: normalizeNullableInput(payload.vat_number),
+
+    email: normalizeNullableInput(payload.contact_email),
+    invoiceEmail: normalizeNullableInput(payload.billing_email),
+    phone: normalizeNullableInput(payload.contact_phone),
+    mobile: normalizeNullableInput(payload.mobile_phone),
+    website: normalizeNullableInput(payload.website),
+
+    address: normalizeNullableInput(payload.fiscal_address_line1),
+    address2: normalizeNullableInput(payload.fiscal_address_line2),
+    city: normalizeNullableInput(payload.fiscal_city),
+    province: normalizeNullableInput(payload.fiscal_region),
+    postalCode: normalizeNullableInput(payload.fiscal_postal_code),
+    country: normalizeNullableInput(payload.fiscal_country),
+
+    shippingAddress: normalizeNullableInput(payload.shipping_address_line1),
+    shippingAddress2: normalizeNullableInput(payload.shipping_address_line2),
+    shippingCity: normalizeNullableInput(payload.shipping_city),
+    shippingProvince: normalizeNullableInput(payload.shipping_region),
+    shippingPostalCode: normalizeNullableInput(payload.shipping_postal_code),
+    shippingCountry: normalizeNullableInput(payload.shipping_country),
+
+    paymentMethod: normalizeNullableInput(payload.payment_method_name),
+    paymentTerms: normalizeNullableInput(payload.payment_terms_name),
+    iban: normalizeIban(normalizeNullableInput(payload.iban)),
+    bankAccountHolder: normalizeNullableInput(payload.bank_account_holder),
+  };
+}
+
+function stripUndefinedAndNull(
+  record: Record<string, string | null>
+): Record<string, string> {
+  const output: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value === "string") {
+      output[key] = value;
+    }
+  }
+
+  return output;
+}
+
+async function updateHoldedContact(params: {
+  holdedContactId: string;
+  payload: ClientPatchPayload;
+}) {
+  const apiKey = getHoldedApiKey();
+
+  const holdedPayload = stripUndefinedAndNull(buildHoldedPatch(params.payload));
+
+  const response = await fetch(
+    `https://api.holded.com/api/invoicing/v1/contacts/${params.holdedContactId}`,
+    {
+      method: "PUT",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        key: apiKey,
+      },
+      cache: "no-store",
+      body: JSON.stringify(holdedPayload),
+    }
+  );
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const isJson = contentType.toLowerCase().includes("application/json");
+  const payload = isJson ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `Holded update failed (${response.status}): ${
+        typeof payload === "string" ? payload : JSON.stringify(payload)
+      }`
+    );
+  }
+
+  return payload;
+}
+
+async function updateClientRow(
+  supabase: ReturnType<typeof getSupabase>,
+  clientId: string,
+  patch: ReturnType<typeof buildDbPatch>
+) {
+  const { error } = await supabase
+    .from("clients")
+    .update({
+      ...patch,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", clientId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function buildFreshDetail(
+  supabase: ReturnType<typeof getSupabase>,
+  clientId: string
+) {
+  const clientRow = await readClientCore(supabase, clientId);
+
+  if (!clientRow) {
+    throw new Error("Client not found after update");
+  }
+
+  const holdedContactId = asString(clientRow.holded_contact_id);
+
+  const [holded, delegate, recommendation, affiliate, invoices] =
+    await Promise.all([
+      readHoldedContactSafely({
+        clientId,
+        holdedContactId,
+      }),
+      readDelegate(supabase, holdedContactId),
+      readRecommendationSafely(supabase, clientId),
+      readAffiliate(supabase, clientId),
+      readInvoices(supabase, clientId),
+    ]);
+
+  return buildClientDetail(
+    clientRow,
+    holded,
+    {
+      delegate_id: delegate.delegate_id,
+      delegate_name: delegate.delegate_name,
+      recommended_by_client_id: recommendation.recommended_by_client_id,
+      recommended_by_client_name: recommendation.recommended_by_client_name,
+      affiliate_account_id: affiliate.affiliate_account_id,
+      affiliate_name: affiliate.affiliate_name,
+    },
+    invoices
+  );
+}
+
 export async function GET(_request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
     const supabase = getSupabase();
-
-    console.log("[CONTROL_ROOM_CLIENT_DETAIL][REQUEST]", {
-      clientId: id,
-    });
 
     const clientRow = await readClientCore(supabase, id);
 
@@ -649,7 +844,7 @@ export async function GET(_request: Request, context: RouteContext) {
           ok: false,
           error: "Client not found",
         },
-        { status: 404 },
+        { status: 404 }
       );
     }
 
@@ -678,7 +873,7 @@ export async function GET(_request: Request, context: RouteContext) {
         affiliate_account_id: affiliate.affiliate_account_id,
         affiliate_name: affiliate.affiliate_name,
       },
-      invoices,
+      invoices
     );
 
     return NextResponse.json({
@@ -689,7 +884,60 @@ export async function GET(_request: Request, context: RouteContext) {
     const message =
       error instanceof Error ? error.message : "Unexpected server error";
 
-    console.error("[CONTROL_ROOM_CLIENT_DETAIL][FATAL]", {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: message,
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: Request, context: RouteContext) {
+  try {
+    const { id } = await context.params;
+    const supabase = getSupabase();
+
+    const body = (await request.json()) as ClientPatchPayload;
+    const clientRow = await readClientCore(supabase, id);
+
+    if (!clientRow) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Client not found",
+        },
+        { status: 404 }
+      );
+    }
+
+    const holdedContactId = asString(clientRow.holded_contact_id);
+    const dbPatch = buildDbPatch(body);
+
+    if (holdedContactId) {
+      await updateHoldedContact({
+        holdedContactId,
+        payload: body,
+      });
+    }
+
+    await updateClientRow(supabase, id, dbPatch);
+
+    const data = await buildFreshDetail(supabase, id);
+
+    return NextResponse.json(
+      {
+        ok: true,
+        data,
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unexpected server error";
+
+    console.error("[CONTROL_ROOM_CLIENT_DETAIL][PATCH][FATAL]", {
       message,
     });
 
@@ -698,7 +946,7 @@ export async function GET(_request: Request, context: RouteContext) {
         ok: false,
         error: message,
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

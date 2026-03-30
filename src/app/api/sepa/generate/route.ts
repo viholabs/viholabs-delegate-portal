@@ -95,6 +95,7 @@ export async function POST(req: NextRequest) {
       line: rgb(0.82, 0.78, 0.72),
       accent: rgb(0.35, 0.18, 0.23),
       light: rgb(0.97, 0.95, 0.92),
+      white: rgb(1, 1, 1),
     };
 
     const marginX = 48;
@@ -102,10 +103,10 @@ export async function POST(req: NextRequest) {
     const contentWidth = pageWidth - marginX * 2;
     let y = page.getHeight() - 48;
 
-    const drawLine = (yPos: number) => {
+    const drawLine = (yPos: number, x1 = marginX, x2 = pageWidth - marginX) => {
       page.drawLine({
-        start: { x: marginX, y: yPos },
-        end: { x: pageWidth - marginX, y: yPos },
+        start: { x: x1, y: yPos },
+        end: { x: x2, y: yPos },
         thickness: 1,
         color: colors.line,
       });
@@ -181,10 +182,15 @@ export async function POST(req: NextRequest) {
       bold: true,
       color: colors.accent,
     });
-    drawText("Mandato SEPA Core / Core Direct Debit Mandate", marginX + 16, y - 40, {
-      size: 10.5,
-      color: colors.muted,
-    });
+    drawText(
+      "Mandato SEPA Core / Core Direct Debit Mandate",
+      marginX + 16,
+      y - 40,
+      {
+        size: 10.5,
+        color: colors.muted,
+      }
+    );
 
     y -= 78;
 
@@ -220,8 +226,6 @@ export async function POST(req: NextRequest) {
       ["Código interno cliente", String(client.id)],
       ["Cliente / razón social", compact(client.legal_name || client.name)],
       ["Nombre comercial", compact(client.name)],
-      ["Holded contact ID", compact(client.holded_contact_id)],
-      ["SEPA status actual", compact(client.sepa_status || "PENDING")],
     ];
 
     for (const [label, value] of traceRows) {
@@ -239,16 +243,28 @@ export async function POST(req: NextRequest) {
     y -= 18;
 
     const creditorRows = [
-      ["Acreedor", "VIHOLABS BIOTECH S.L."],
-      ["Dirección", "España"],
-      ["Identificador del acreedor", "Pendiente de completar en entorno corporativo"],
-      ["Finalidad", "Cobro de operaciones comerciales autorizadas por el cliente"],
+      ["Acreedor", "Viholabs Biotech, SL"],
+      ["Dirección", "Bac de Roda, 63. 08005 Barcelona"],
+      ["Identificador del acreedor", "B75950220"],
+      [
+        "Finalidad",
+        "Cobro de operaciones comerciales autorizadas por el cliente",
+      ],
     ];
 
     for (const [label, value] of creditorRows) {
       drawText(`${label}:`, marginX, y, { size: 10.5, bold: true });
-      drawText(value, marginX + 180, y, { size: 10.5 });
-      y -= 15;
+
+      const endY = drawWrappedText(
+        String(value),
+        marginX + 180,
+        y,
+        contentWidth - 180,
+        10.5,
+        14
+      );
+
+      y = endY - 4;
     }
 
     y -= 8;
@@ -260,7 +276,10 @@ export async function POST(req: NextRequest) {
     y -= 18;
 
     const debtorRows = [
-      ["Titular de la cuenta", compact(client.bank_account_holder || client.legal_name || client.name)],
+      [
+        "Titular de la cuenta",
+        compact(client.bank_account_holder || client.legal_name || client.name),
+      ],
       ["NIF / Tax ID", compact(client.tax_id || client.vat_number)],
       ["IBAN", iban],
       [
@@ -310,42 +329,41 @@ export async function POST(req: NextRequest) {
     const legalText =
       "Mediante la firma del presente mandato, el deudor autoriza a VIHOLABS BIOTECH S.L. a enviar instrucciones a la entidad del deudor para adeudar en su cuenta los importes derivados de la relación comercial existente, y a la entidad para efectuar los adeudos conforme a dichas instrucciones. El deudor conserva el derecho a solicitar el reembolso a su entidad en los términos y plazos previstos por la normativa SEPA aplicable.";
 
-    y = drawWrappedText(legalText, marginX, y, contentWidth, 10.5, 14) - 14;
+    y = drawWrappedText(legalText, marginX, y, contentWidth, 10.5, 14) - 18;
 
+    const signatureBoxHeight = 138;
     page.drawRectangle({
       x: marginX,
-      y: y - 92,
+      y: y - signatureBoxHeight,
       width: contentWidth,
-      height: 92,
+      height: signatureBoxHeight,
       borderColor: colors.line,
       borderWidth: 1,
-      color: rgb(1, 1, 1),
+      color: colors.white,
     });
 
     drawText("Lugar y fecha:", marginX + 14, y - 20, {
       size: 10.5,
       bold: true,
     });
-    drawLine(y - 34);
+    drawLine(y - 34, marginX + 110, pageWidth - marginX - 14);
 
-    drawText("Firma del titular / sello:", marginX + 14, y - 56, {
+    drawText("Firma del titular:", marginX + 14, y - 56, {
       size: 10.5,
       bold: true,
     });
-    drawLine(y - 72);
 
-    y -= 120;
-
-    drawText("5. Control documental interno", marginX, y, {
-      size: 12,
-      bold: true,
-      color: colors.accent,
+    page.drawRectangle({
+      x: marginX + 14,
+      y: y - 118,
+      width: contentWidth - 28,
+      height: 48,
+      borderColor: colors.line,
+      borderWidth: 1,
+      color: colors.white,
     });
-    y -= 18;
 
-    const auditText =
-      "Documento generado automáticamente por el Portal Operatiu VIHOLABS. Conservar firmado junto con la documentación contractual y administrativa del cliente. Este PDF constituye soporte documental interno y de trazabilidad.";
-    y = drawWrappedText(auditText, marginX, y, contentWidth, 10.5, 14) - 10;
+    y -= signatureBoxHeight + 18;
 
     drawLine(56);
     drawText(
@@ -399,9 +417,6 @@ export async function POST(req: NextRequest) {
     const message =
       error instanceof Error ? error.message : "Unexpected error";
 
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
