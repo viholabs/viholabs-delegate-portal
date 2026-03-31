@@ -3,6 +3,7 @@
 import type React from "react";
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginClient() {
   const sp = useSearchParams();
@@ -19,27 +20,63 @@ export default function LoginClient() {
     setMsg(null);
 
     try {
-      // 🔥 IMPORTANTE: navegación real, no fetch
-      const form = document.createElement("form");
-      form.method = "POST";
-      form.action = "/auth/password";
+      // 1) Login SSR (server) -> crea cookies
+      const r = await fetch("/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+        }),
+      });
 
-      const emailInput = document.createElement("input");
-      emailInput.name = "email";
-      emailInput.value = email.trim();
+      const j = await r.json().catch(() => ({} as any));
 
-      const passInput = document.createElement("input");
-      passInput.name = "password";
-      passInput.value = password;
+      if (!r.ok || !j?.ok) {
+        setLoading(false);
+        setMsg(j?.message ?? "No se pudo iniciar sesión. Revisa email y contraseña.");
+        return;
+      }
 
-      form.appendChild(emailInput);
-      form.appendChild(passInput);
-
-      document.body.appendChild(form);
-      form.submit();
+      // 2) Flujo canónico: callback resuelve actor + redirige por rol
+      window.location.assign("/auth/callback");
     } catch (err: any) {
       setMsg(err?.message ?? "Error desconocido");
       setLoading(false);
+    }
+  }
+
+  async function onForgotPassword() {
+    setLoading(true);
+    setMsg(null);
+
+    try {
+      const supabase = createClient();
+      const cleanEmail = email.trim();
+
+      if (!cleanEmail) {
+        setLoading(false);
+        setMsg("Escribe tu email arriba y luego pulsa “He olvidado la contraseña”.");
+        return;
+      }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        // En producción debe volver al callback, no a /login,
+        // para evitar orígenes incorrectos y mantener el flujo canónico.
+        redirectTo: `${window.location.origin}/auth/callback`,
+      });
+
+      if (error) {
+        setLoading(false);
+        setMsg(error.message);
+        return;
+      }
+
+      setLoading(false);
+      setMsg("Te hemos enviado un email para restablecer la contraseña (si el email existe).");
+    } catch (err: any) {
+      setLoading(false);
+      setMsg(err?.message ?? "Error desconocido");
     }
   }
 
@@ -56,25 +93,53 @@ export default function LoginClient() {
       {msg ? <p style={{ color: "crimson", marginBottom: 12 }}>{msg}</p> : null}
 
       <form onSubmit={onSubmit}>
-        <label>Email</label>
+        <label style={{ display: "block", marginBottom: 6 }}>Email</label>
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           type="email"
           required
+          placeholder="tu@email.com"
+          autoComplete="email"
+          style={{ width: "100%", padding: 10, marginBottom: 12 }}
         />
 
-        <label>Contraseña</label>
+        <label style={{ display: "block", marginBottom: 6 }}>Contraseña</label>
         <input
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           type="password"
           required
+          placeholder="••••••••"
+          autoComplete="current-password"
+          style={{ width: "100%", padding: 10, marginBottom: 12 }}
         />
 
-        <button type="submit" disabled={loading}>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{ padding: "10px 14px", width: "100%" }}
+        >
           {loading ? "Entrando..." : "Entrar"}
         </button>
+
+        <button
+          type="button"
+          onClick={onForgotPassword}
+          disabled={loading}
+          style={{
+            marginTop: 10,
+            padding: "10px 14px",
+            width: "100%",
+            opacity: 0.9,
+          }}
+        >
+          He olvidado la contraseña
+        </button>
+
+        <p style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
+          Acceso solo con email + contraseña.
+        </p>
       </form>
     </div>
   );
