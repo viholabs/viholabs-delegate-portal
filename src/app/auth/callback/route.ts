@@ -36,23 +36,38 @@ function safeNext(nextRaw: string | null) {
   return v;
 }
 
+function stripTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
+}
+
 /**
- * IMPORTANT (Codespaces / reverse proxy):
- * En entorns amb proxy, url.origin pot ser 0.0.0.0:3000 o localhost.
- * Fem servir x-forwarded-host/proto si existeixen per construir un origin real.
+ * IMPORTANT (prod / reverse proxy):
+ * Sempre prioritzem una base URL canònica pública.
+ * No confiem en req.url.origin si pot arribar com 0.0.0.0:3000 o localhost.
  */
 function getRequestOrigin(req: Request) {
-  const u = new URL(req.url);
+  const envSite = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (envSite) return stripTrailingSlash(envSite);
+
+  const envBase = process.env.APP_BASE_URL?.trim();
+  if (envBase) return stripTrailingSlash(envBase);
+
+  const envApp = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (envApp) return stripTrailingSlash(envApp);
 
   const xfHost = req.headers.get("x-forwarded-host");
-  const xfProto = req.headers.get("x-forwarded-proto");
+  const xfProto = req.headers.get("x-forwarded-proto") || "https";
 
   if (xfHost) {
-    const proto = xfProto || "https";
-    return `${proto}://${xfHost}`;
+    return `${xfProto}://${xfHost}`;
   }
 
-  return u.origin;
+  const host = req.headers.get("host");
+  if (host) {
+    return `${xfProto}://${host}`;
+  }
+
+  return stripTrailingSlash(new URL(req.url).origin);
 }
 
 function getAdminSupabase() {
@@ -182,7 +197,7 @@ export async function GET(req: Request) {
     secure,
   });
 
-  // ✅ NEW: rol real del sistema per filtrar tabs correctament
+  // ✅ rol real del sistema per filtrar tabs correctament
   res.cookies.set(ROLE_COOKIE, String(actorRole ?? "").trim().toUpperCase(), {
     path: "/",
     httpOnly: false, // UI needs it

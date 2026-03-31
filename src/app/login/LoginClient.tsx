@@ -38,7 +38,7 @@ export default function LoginClient() {
         return;
       }
 
-      // 2) Flux canònic: callback resol actor + redirigeix per rol
+      // 2) Flujo canónico: callback resuelve actor + redirige por rol
       window.location.assign("/auth/callback");
     } catch (err: any) {
       setMsg(err?.message ?? "Error desconocido");
@@ -61,9 +61,9 @@ export default function LoginClient() {
       }
 
       const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-        // IMPORTANT: no toquem fluxos tancats; això només envia email.
-        // Si més endavant definim una pantalla de reset, ajustarem aquest redirectTo.
-        redirectTo: `${window.location.origin}/login`,
+        // En producción debe volver al callback, no a /login,
+        // para evitar orígenes incorrectos y mantener el flujo canónico.
+        redirectTo: `${window.location.origin}/auth/callback`,
       });
 
       if (error) {
@@ -144,4 +144,3 @@ export default function LoginClient() {
     </div>
   );
 }
-
