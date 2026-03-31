@@ -1,8 +1,45 @@
-// src/app/api/delegate/_utils.ts
-
 import { NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
-import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
+
+type ActorRow = {
+  id: string;
+  role: string | null;
+  status: string | null;
+  name: string | null;
+  email: string | null;
+  auth_user_id: string | null;
+};
+
+type ResolveActorOk = {
+  ok: true;
+  supaService: ReturnType<typeof createServiceClient>;
+  supaRls: ReturnType<typeof createRouteAuthClient>;
+  actor: ActorRow;
+  authUserId: string | null;
+  authMode: "cookies" | "bearer" | "internal_bearer";
+};
+
+type ResolveActorFail = {
+  ok: false;
+  status: number;
+  error: string;
+  stage?: string;
+};
+
+type ResolveActorResult = ResolveActorOk | ResolveActorFail;
+
+type EffectivePerms = {
+  isSuperAdmin: boolean;
+  has: (perm: string) => boolean;
+};
+
+type ResolveDelegateArgs = {
+  supaRls: ReturnType<typeof createRouteAuthClient>;
+  actor: { id: string; role: string | null };
+  delegateIdFromQuery?: string | null;
+  effectivePerms?: EffectivePerms | null;
+};
 
 export const runtime = "nodejs";
 
@@ -10,227 +47,315 @@ export function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
-type EffectivePerms = {
-  isSuperAdmin: boolean;
-  has: (perm: string) => boolean;
-};
-
-function getBearerToken(req: Request) {
-  const h = req.headers.get("authorization") || req.headers.get("Authorization");
-  if (!h) return null;
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
+function getEnv(name: string): string | null {
+  const value = process.env[name];
+  if (!value || !value.trim()) return null;
+  return value.trim();
 }
 
-function getEnvOrThrow() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function getSupabaseConfig() {
+  const url = getEnv("NEXT_PUBLIC_SUPABASE_URL") ?? getEnv("SUPABASE_URL");
+  const anon =
+    getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY") ?? getEnv("SUPABASE_ANON_KEY");
+  const service = getEnv("SUPABASE_SERVICE_ROLE_KEY");
 
   if (!url || !anon || !service) {
-    throw new Error("Missing SUPABASE env vars (URL/ANON/SERVICE_ROLE)");
+    throw new Error(
+      "Missing SUPABASE env vars (NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY/SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)"
+    );
   }
 
   return { url, anon, service };
 }
 
-/**
- * Cliente SERVICE ROLE: bypass RLS.
- * Úsalo SOLO para tareas internas (lookup actor, escrituras internas auditadas, motores).
- */
-export function getServiceClient() {
-  const { url, service } = getEnvOrThrow();
-  return createClient(url, service, { auth: { persistSession: false } });
-}
+function createServiceClient() {
+  const { url, service } = getSupabaseConfig();
 
-/**
- * Cliente RLS: usa ANON + JWT del usuario para que apliquen policies RLS.
- * Este es el cliente que deben usar los endpoints /api/delegate/* para leer datos
- * cuando vienen por Bearer token.
- */
-export function getRlsClientFromToken(token: string) {
-  const { url, anon } = getEnvOrThrow();
-  return createClient(url, anon, {
+  return createClient(url, service, {
     auth: { persistSession: false },
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
   });
 }
 
-/**
- * ✅ CANÓNICO (FUTURO-SOLIDO):
- * Resuelve el actor con DOS vías, en este orden:
- *  1) Cookies SSR (Next 15 + @supabase/ssr)  ← permite abrir endpoints en navegador
- *  2) Bearer token (compatibilidad con frontend actual y integraciones)
- *
- * Devuelve:
- *  - supaRls: cliente con RLS ON (cookies o token)
- *  - supaService: service role para escrituras internas
- *  - actor: actor de negocio resuelto por auth_user_id
- */
-export async function getActorFromRequest(req: Request) {
-  let stage = "init";
+function parseCookieHeader(req: Request): Array<{ name: string; value: string }> {
+  const raw = req.headers.get("cookie") ?? "";
+  if (!raw.trim()) return [];
 
-  try {
-    const supaService = getServiceClient();
+  return raw
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const idx = part.indexOf("=");
+      if (idx === -1) {
+        return { name: part, value: "" };
+      }
 
-    // -------------------------
-    // 1) Intento por COOKIES SSR
-    // -------------------------
-    stage = "cookies_auth";
-    try {
-      const supaRlsCookies = await createServerSupabaseClient();
-      const { data: uData, error: uErr } = await supaRlsCookies.auth.getUser();
-      const user = uData?.user;
+      const name = part.slice(0, idx).trim();
+      const value = part.slice(idx + 1).trim();
 
-      if (!uErr && user?.id) {
-        const authUserId = user.id;
-
-        stage = "cookies_lookup_actor";
-        const { data: actor, error: aErr } = await supaService
-          .from("actors")
-          .select("id, role, status, name, email, auth_user_id")
-          .eq("auth_user_id", authUserId)
-          .maybeSingle();
-
-        if (aErr) return { ok: false as const, status: 500, error: aErr.message };
-        if (!actor) return { ok: false as const, status: 403, error: "Actor not found" };
-
-        if (String(actor.status ?? "").toLowerCase() !== "active") {
-          return { ok: false as const, status: 403, error: "Actor inactive" };
-        }
-
+      try {
         return {
-          ok: true as const,
-          supaService,
-          supaRls: supaRlsCookies,
-          actor,
-          authUserId,
-          authMode: "cookies" as const,
+          name,
+          value: decodeURIComponent(value),
+        };
+      } catch {
+        return {
+          name,
+          value,
         };
       }
-    } catch {
-      // Si cookies no están disponibles en este contexto, seguimos al Bearer token
+    })
+    .filter((cookie) => cookie.name.length > 0);
+}
+
+function createRouteAuthClient(req: Request, bearerToken?: string | null) {
+  const { url, anon } = getSupabaseConfig();
+  const parsedCookies = parseCookieHeader(req);
+
+  return createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        return parsedCookies;
+      },
+      setAll() {
+        // No-op in route handlers.
+      },
+    },
+    global: bearerToken
+      ? {
+          headers: {
+            Authorization: `Bearer ${bearerToken}`,
+          },
+        }
+      : undefined,
+  });
+}
+
+function getBearerToken(req: Request): string | null {
+  const header =
+    req.headers.get("authorization") ?? req.headers.get("Authorization");
+
+  if (!header) return null;
+
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() ?? null;
+}
+
+async function lookupActiveActorByAuthUserId(
+  supaService: ReturnType<typeof createServiceClient>,
+  authUserId: string
+): Promise<{ actor: ActorRow | null; error: string | null }> {
+  const { data, error } = await supaService
+    .from("actors")
+    .select("id, role, status, name, email, auth_user_id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+
+  if (error) {
+    return { actor: null, error: error.message };
+  }
+
+  if (!data) {
+    return { actor: null, error: "Actor not found" };
+  }
+
+  if (String(data.status ?? "").toLowerCase() !== "active") {
+    return { actor: null, error: "Actor inactive" };
+  }
+
+  return { actor: data as ActorRow, error: null };
+}
+
+async function resolveFromCookies(
+  req: Request,
+  supaService: ReturnType<typeof createServiceClient>
+): Promise<ResolveActorResult | null> {
+  try {
+    const supaRls = createRouteAuthClient(req);
+    const { data, error } = await supaRls.auth.getUser();
+    const authUserId = data?.user?.id ?? null;
+
+    if (error || !authUserId) {
+      return null;
     }
 
-    // -------------------------
-    // 2) Fallback por BEARER token
-    // -------------------------
-    stage = "bearer_token";
-    const token = getBearerToken(req);
-    if (!token) {
-      return { ok: false as const, status: 401, error: "Missing Bearer token" };
-    }
+    const actorLookup = await lookupActiveActorByAuthUserId(
+      supaService,
+      authUserId
+    );
 
-    // -------------------------
-    // 2A) INTERNAL BEARER (CANONICAL SUPER_ADMIN bypass)
-    // -------------------------
-    stage = "internal_bearer";
-    const internal = String(process.env.VIHOLABS_INTERNAL_BEARER ?? "").trim();
-    if (internal && token === internal) {
-      // Deterministic: pick an ACTIVE SUPER_ADMIN actor from DB truth.
-      // NOTE: No schema changes. No heuristics beyond "role=SUPER_ADMIN & status=active".
-      const { data: actors, error: aErr } = await supaService
-        .from("actors")
-        .select("id, role, status, name, email, auth_user_id")
-        .eq("status", "active")
-        .in("role", ["SUPER_ADMIN", "super_admin"])
-        .limit(1);
-
-      if (aErr) return { ok: false as const, status: 500, error: aErr.message };
-      const actor = Array.isArray(actors) ? actors[0] : null;
-      if (!actor) return { ok: false as const, status: 403, error: "Super admin actor not found" };
-
+    if (actorLookup.error || !actorLookup.actor) {
       return {
-        ok: true as const,
-        supaService,
-        supaRls: supaService, // internal bearer = service role (bypass RLS)
-        actor,
-        authUserId: actor.auth_user_id ?? null,
-        authMode: "internal_bearer" as const,
+        ok: false,
+        status: actorLookup.error === "Actor not found" ? 403 : 500,
+        error: actorLookup.error ?? "Actor lookup failed",
+        stage: "cookies_lookup_actor",
       };
     }
 
-    const { url, anon } = getEnvOrThrow();
-
-    stage = "bearer_validate";
-    const supaAnon = createClient(url, anon, { auth: { persistSession: false } });
-    const { data: uData, error: uErr } = await supaAnon.auth.getUser(token);
-    const user = uData?.user;
-
-    if (uErr || !user?.id) {
-      return { ok: false as const, status: 401, error: "Invalid token" };
-    }
-
-    const authUserId = user.id;
-
-    stage = "bearer_lookup_actor";
-    const { data: actor, error: aErr } = await supaService
-      .from("actors")
-      .select("id, role, status, name, email, auth_user_id")
-      .eq("auth_user_id", authUserId)
-      .maybeSingle();
-
-    if (aErr) return { ok: false as const, status: 500, error: aErr.message };
-    if (!actor) return { ok: false as const, status: 403, error: "Actor not found" };
-
-    if (String(actor.status ?? "").toLowerCase() !== "active") {
-      return { ok: false as const, status: 403, error: "Actor inactive" };
-    }
-
-    stage = "bearer_rls_client";
-    const supaRls = getRlsClientFromToken(token);
-
     return {
-      ok: true as const,
+      ok: true,
       supaService,
       supaRls,
-      actor,
+      actor: actorLookup.actor,
       authUserId,
-      authMode: "bearer" as const,
+      authMode: "cookies",
     };
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Server error";
-    return { ok: false as const, status: 500, error: msg, stage };
+  } catch {
+    return null;
   }
 }
 
-type ResolveDelegateArgs = {
-  supaRls: any;
-  actor: { id: string; role: string | null };
-  delegateIdFromQuery?: string | null;
+async function resolveFromInternalBearer(
+  req: Request,
+  supaService: ReturnType<typeof createServiceClient>
+): Promise<ResolveActorResult | null> {
+  const token = getBearerToken(req);
+  const internalBearer = String(
+    process.env.VIHOLABS_INTERNAL_BEARER ?? ""
+  ).trim();
 
-  /**
-   * ✅ CANÓNICO (nuevo): si lo pasas, la “supervisión” se decide por permisos efectivos, NO por roles hardcoded.
-   * Mantiene compatibilidad: si no lo pasas, cae al comportamiento legacy por rol.
-   */
-  effectivePerms?: EffectivePerms | null;
-};
-
-/**
- * Resolver delegate_id:
- * - Self: delegates.actor_id = actor.id
- * - Supervision/impersonation: solo si viene delegateIdFromQuery y el actor tiene permisos efectivos de supervisión
- */
-export async function resolveDelegateIdOrThrow(args: ResolveDelegateArgs) {
-  const { supaRls, actor, delegateIdFromQuery, effectivePerms } = args;
-
-  // ✅ Nuevo: supervisión por permisos (Biblia: NO roles hardcoded)
-  if (delegateIdFromQuery && effectivePerms) {
-    const canImpersonate =
-      effectivePerms.isSuperAdmin ||
-      effectivePerms.has("actors.read") ||
-      effectivePerms.has("control_room.delegates.read") ||
-      effectivePerms.has("assignments.read");
-
-    if (canImpersonate) return delegateIdFromQuery;
+  if (!token || !internalBearer || token !== internalBearer) {
+    return null;
   }
 
-  // Legacy: compatibilidad (si aún hay endpoints antiguos que no pasan effectivePerms)
+  const { data, error } = await supaService
+    .from("actors")
+    .select("id, role, status, name, email, auth_user_id")
+    .eq("status", "active")
+    .in("role", ["SUPER_ADMIN", "super_admin"])
+    .limit(1);
+
+  if (error) {
+    return {
+      ok: false,
+      status: 500,
+      error: error.message,
+      stage: "internal_bearer_actor_lookup",
+    };
+  }
+
+  const actor = Array.isArray(data)
+    ? ((data[0] as ActorRow | undefined) ?? null)
+    : null;
+
+  if (!actor) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Super admin actor not found",
+      stage: "internal_bearer_actor_lookup",
+    };
+  }
+
+  return {
+    ok: true,
+    supaService,
+    supaRls: createRouteAuthClient(req, token),
+    actor,
+    authUserId: actor.auth_user_id ?? null,
+    authMode: "internal_bearer",
+  };
+}
+
+async function resolveFromBearer(
+  req: Request,
+  supaService: ReturnType<typeof createServiceClient>
+): Promise<ResolveActorResult | null> {
+  const token = getBearerToken(req);
+  if (!token) return null;
+
+  const supaRls = createRouteAuthClient(req, token);
+  const { data, error } = await supaRls.auth.getUser();
+  const authUserId = data?.user?.id ?? null;
+
+  if (error || !authUserId) {
+    return {
+      ok: false,
+      status: 401,
+      error: "Invalid token",
+      stage: "bearer_validate",
+    };
+  }
+
+  const actorLookup = await lookupActiveActorByAuthUserId(
+    supaService,
+    authUserId
+  );
+
+  if (actorLookup.error || !actorLookup.actor) {
+    return {
+      ok: false,
+      status: actorLookup.error === "Actor not found" ? 403 : 500,
+      error: actorLookup.error ?? "Actor lookup failed",
+      stage: "bearer_lookup_actor",
+    };
+  }
+
+  return {
+    ok: true,
+    supaService,
+    supaRls,
+    actor: actorLookup.actor,
+    authUserId,
+    authMode: "bearer",
+  };
+}
+
+export async function getActorFromRequest(
+  req: Request
+): Promise<ResolveActorResult> {
+  let stage = "init";
+
+  try {
+    const supaService = createServiceClient();
+
+    stage = "cookies_auth";
+    const byCookies = await resolveFromCookies(req, supaService);
+    if (byCookies) return byCookies;
+
+    stage = "internal_bearer";
+    const byInternalBearer = await resolveFromInternalBearer(req, supaService);
+    if (byInternalBearer) return byInternalBearer;
+
+    stage = "bearer_auth";
+    const byBearer = await resolveFromBearer(req, supaService);
+    if (byBearer) return byBearer;
+
+    return {
+      ok: false,
+      status: 401,
+      error: "Missing Bearer token",
+      stage,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 500,
+      error: error instanceof Error ? error.message : "Server error",
+      stage,
+    };
+  }
+}
+
+export async function resolveDelegateIdForActor(
+  args: ResolveDelegateArgs
+): Promise<string> {
+  const { supaRls, actor, delegateIdFromQuery, effectivePerms } = args;
+
+  if (
+    delegateIdFromQuery &&
+    effectivePerms &&
+    (effectivePerms.isSuperAdmin ||
+      effectivePerms.has("actors.read") ||
+      effectivePerms.has("control_room.delegates.read") ||
+      effectivePerms.has("assignments.read"))
+  ) {
+    return delegateIdFromQuery;
+  }
+
   const role = String(actor.role ?? "").toUpperCase();
+
   if (
     delegateIdFromQuery &&
     (role === "SUPER_ADMIN" ||
@@ -241,14 +366,25 @@ export async function resolveDelegateIdOrThrow(args: ResolveDelegateArgs) {
     return delegateIdFromQuery;
   }
 
-  // Delegate normal: delegates.actor_id = actor.id
-  const { data: d, error: dErr } = await supaRls
+  const { data, error } = await supaRls
     .from("delegates")
     .select("id, actor_id, active")
     .eq("actor_id", actor.id)
     .maybeSingle();
 
-  if (dErr) throw new Error(dErr.message);
-  if (!d?.id) throw new Error("Delegate not found for actor");
-  return d.id as string;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data?.id) {
+    throw new Error("Delegate not found for actor");
+  }
+
+  return String(data.id);
+}
+
+export async function resolveDelegateIdOrThrow(
+  args: ResolveDelegateArgs
+): Promise<string> {
+  return resolveDelegateIdForActor(args);
 }
