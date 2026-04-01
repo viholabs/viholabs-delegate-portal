@@ -32,7 +32,7 @@ jobs:
             echo "HOST=$(hostname)"
             echo "***"
 
-            APP_DIR="/var/www/viholabs-delegate-portal"
+            APP_DIR="/var/www/portal"
 
             echo "=== 1) Verify path ==="
             if [ ! -d "$APP_DIR" ]; then
@@ -75,10 +75,13 @@ jobs:
             echo "=== 5) Install deps (frozen) ==="
             pnpm install --frozen-lockfile
 
-            echo "=== 6) Build ==="
+            echo "=== 6) Type check ==="
+            pnpm tsc --noEmit
+
+            echo "=== 7) Build ==="
             pnpm build
 
-            echo "=== 7) Restart (pm2 canonical) ==="
+            echo "=== 8) Restart (pm2 canonical) ==="
             if ! command -v pm2 >/dev/null 2>&1; then
               echo "FATAL: pm2 not found, cannot restart"
               exit 5
@@ -93,13 +96,26 @@ jobs:
               exit 5
             fi
 
-            echo "=== 8) Post-check ==="
+            echo "=== 9) Post-check ==="
             pm2 ls || true
 
-            echo "=== 9) Health-check (status) ==="
-            CODE="$(curl -sS -o /tmp/whoami.json -w "%{http_code}" https://portal.viholabs.com/api/auth/whoami)"
-            echo "HEALTH_HTTP_CODE=$CODE"
-            head -c 200 /tmp/whoami.json; echo
+            echo "=== 10) Health-check (retry) ==="
+            CODE=""
+            for i in 1 2 3 4 5; do
+              CODE="$(curl -sS -o /tmp/whoami.json -w "%{http_code}" https://portal.viholabs.com/api/auth/whoami || true)"
+              echo "TRY $i -> HTTP $CODE"
+
+              if [ "$CODE" = "200" ]; then
+                echo "HEALTHCHECK_OK"
+                break
+              fi
+
+              sleep 3
+            done
+
+            head -c 200 /tmp/whoami.json || true
+            echo
+
             test "$CODE" = "200"
 
             echo "=== VIHOLABS DEPLOY END ==="
