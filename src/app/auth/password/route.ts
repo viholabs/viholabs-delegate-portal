@@ -76,12 +76,17 @@ function redirectToLogin(req: Request, errorCode: string) {
   const origin = getRequestOrigin(req);
   const url = new URL("/login", origin);
   url.searchParams.set("error", errorCode);
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(url, { status: 303 });
 }
 
 function redirectToCallback(req: Request) {
   const origin = getRequestOrigin(req);
-  return NextResponse.redirect(new URL("/auth/callback", origin));
+  const url = new URL("/auth/callback", origin);
+
+  // CLAVE:
+  // 303 See Other fuerza que el siguiente request sea GET.
+  // Evita que el browser reenvíe POST a /auth/callback y provoque 405.
+  return NextResponse.redirect(url, { status: 303 });
 }
 
 export async function POST(req: Request) {
@@ -111,7 +116,6 @@ export async function POST(req: Request) {
 
     const jsonResponse = NextResponse.json({ ok: true }, { status: 200 });
     const redirectResponse = redirectToCallback(req);
-
     const response = mode === "form" ? redirectResponse : jsonResponse;
 
     const supabase = createServerClient(url, anon, {
