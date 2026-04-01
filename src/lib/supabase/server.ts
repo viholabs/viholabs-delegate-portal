@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
 type CookieToSet = {
   name: string;
@@ -7,8 +8,13 @@ type CookieToSet = {
   options?: CookieOptions;
 };
 
-export async function createClient() {
+type CreateClientOptions = {
+  response?: NextResponse;
+};
+
+export async function createClient(options?: CreateClientOptions) {
   const cookieStore = await cookies();
+  const response = options?.response;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -23,13 +29,16 @@ export async function createClient() {
     cookies: {
       getAll: () => cookieStore.getAll(),
       setAll: (cookiesToSet: CookieToSet[]) => {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => {
+        for (const { name, value, options } of cookiesToSet) {
+          try {
             cookieStore.set(name, value, options);
-          });
-        } catch {
-          // En Server Components puede fallar si intentas setear cookies fuera de un handler.
-          // En route handlers sí funciona.
+          } catch {
+            // En algunos contextos Next puede no permitir escribir aquí.
+          }
+
+          if (response) {
+            response.cookies.set(name, value, options);
+          }
         }
       },
     },
