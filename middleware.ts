@@ -1,12 +1,4 @@
-// middleware.ts
-
-/**
- * AUDIT TRACE
- * Date: 2026-03-09
- * Actor: CHATGPT
- * Reason: Canonical auth routing guard for root entry and login flows
- * Scope: Routing/auth guard only. No business logic, no data mutations.
- */
+// /var/www/portal/middleware.ts
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
@@ -54,12 +46,10 @@ function isForbiddenRolePortal(pathname: string) {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 0) Canon guard: no portals by role
   if (isForbiddenRolePortal(pathname)) {
     return new NextResponse("Not Found", { status: 404 });
   }
 
-  // 1) Public auth/static routes pass through
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
@@ -71,25 +61,42 @@ export async function middleware(req: NextRequest) {
     return new NextResponse("Missing Supabase env vars", { status: 500 });
   }
 
-  const res = NextResponse.next();
+  let response = NextResponse.next({
+    request: {
+      headers: req.headers,
+    },
+  });
+
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return req.cookies.getAll();
+      },
+      setAll(cookiesToSet: CookieToSet[]) {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          req.cookies.set(name, value);
+        });
+
+        response = NextResponse.next({
+          request: {
+            headers: req.headers,
+          },
+        });
+
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options);
+        });
+      },
+    },
+  });
 
   try {
-    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-      cookies: {
-        getAll: () => req.cookies.getAll(),
-        setAll: (cookiesToSet: CookieToSet[]) => {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            res.cookies.set(name, value, options);
-          });
-        },
-      },
-    });
-
     const {
       data: { user },
+      error,
     } = await supabase.auth.getUser();
 
-    if (!user) {
+    if (error || !user) {
       const loginUrl = req.nextUrl.clone();
       loginUrl.pathname = "/login";
       loginUrl.searchParams.set("error", "unauthorized");
@@ -97,7 +104,7 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    return res;
+    return response;
   } catch {
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = "/login";
