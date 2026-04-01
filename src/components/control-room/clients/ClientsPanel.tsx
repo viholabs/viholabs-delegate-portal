@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { fetchJsonWithAuth } from "@/lib/fetch-with-auth";
 
 import ClientCommercialSection from "./ClientCommercialSection";
 import ClientContactSection from "./ClientContactSection";
@@ -113,15 +114,13 @@ export default function ClientsPanel() {
       setClientsLoading(true);
       setClientsError(null);
 
-      const res = await fetch("/api/delegate/clients", {
+      const json = await fetchJsonWithAuth<ListResponse>("/api/delegate/clients", {
         method: "GET",
         cache: "no-store",
       });
 
-      const json = await readJsonSafe<ListResponse>(res);
-
-      if (!res.ok || !Array.isArray(json?.items)) {
-        throw new Error(json?.error || "No se pudieron cargar los clientes");
+      if (!Array.isArray(json?.items)) {
+        throw new Error("No se pudieron cargar los clientes");
       }
 
       setClients(json.items);
@@ -355,7 +354,10 @@ export default function ClientsPanel() {
         selected.payment_terms_name,
         originalSelected.payment_terms_name
       ) &&
-      sameNullable(normalizeIban(selected.iban), normalizeIban(originalSelected.iban)) &&
+      sameNullable(
+        normalizeIban(selected.iban),
+        normalizeIban(originalSelected.iban)
+      ) &&
       sameNullable(
         selected.bank_account_holder,
         originalSelected.bank_account_holder
@@ -379,7 +381,8 @@ export default function ClientsPanel() {
 
     if (!res.ok || !json?.ok || !json.data) {
       throw new Error(
-        json?.error || (await readErrorMessage(res, "No se pudieron guardar los cambios"))
+        json?.error ||
+          (await readErrorMessage(res, "No se pudieron guardar los cambios"))
       );
     }
 

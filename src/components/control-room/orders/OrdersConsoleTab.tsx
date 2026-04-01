@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { fetchJsonWithAuth, fetchWithAuth } from "@/lib/fetch-with-auth";
 import { applyBundleBySku } from "./BundleResolver";
 
 import type {
@@ -131,67 +132,16 @@ export default function OrdersConsoleTab() {
     const q = selectedDelegateId
       ? `?delegateId=${encodeURIComponent(selectedDelegateId)}`
       : "";
-    const res = await fetchJson(`/api/delegate/clients${q}`);
 
-    if (!res.ok) {
-      setClientsLoad("error");
-      setClients([]);
-      setSelectedClientId("");
-      return;
-    }
-
-    const rows =
-      (Array.isArray(res.json?.clients) ? res.json.clients : null) ??
-      (Array.isArray(res.json?.items) ? res.json.items : []);
-
-    const normalized: ClientRow[] = rows
-      .map((c: any) => ({
-        id: safeStr(c?.id),
-        name: c?.name ?? null,
-        tax_id: c?.tax_id ?? null,
-        delegate_id: c?.delegate_id ?? null,
-        holded_contact_id: c?.holded_contact_id ?? null,
-        delegate_name: c?.delegate_name ?? null,
-        delegate_email: c?.delegate_email ?? null,
-        delegate_valid_from: c?.delegate_valid_from ?? null,
-        delegate_source: c?.delegate_source ?? null,
-      }))
-      .filter((c: ClientRow) => !!c.id);
-
-    setClients(normalized);
-    setClientsLoad("ok");
-    setSelectedClientId((prev) => {
-      if (
-        preferredClientId &&
-        normalized.some((c) => c.id === preferredClientId)
-      ) {
-        return preferredClientId;
-      }
-      return normalized.some((c) => c.id === prev) ? prev : "";
-    });
-  }
-
-  useEffect(() => {
-    let alive = true;
-
-    (async () => {
-      const q = selectedDelegateId
-        ? `?delegateId=${encodeURIComponent(selectedDelegateId)}`
-        : "";
-      setClientsLoad("loading");
-      const res = await fetchJson(`/api/delegate/clients${q}`);
-      if (!alive) return;
-
-      if (!res.ok) {
-        setClientsLoad("error");
-        setClients([]);
-        setSelectedClientId("");
-        return;
-      }
+    try {
+      const json = await fetchJsonWithAuth<any>(`/api/delegate/clients${q}`, {
+        method: "GET",
+        cache: "no-store",
+      });
 
       const rows =
-        (Array.isArray(res.json?.clients) ? res.json.clients : null) ??
-        (Array.isArray(res.json?.items) ? res.json.items : []);
+        (Array.isArray(json?.clients) ? json.clients : null) ??
+        (Array.isArray(json?.items) ? json.items : []);
 
       const normalized: ClientRow[] = rows
         .map((c: any) => ({
@@ -209,9 +159,67 @@ export default function OrdersConsoleTab() {
 
       setClients(normalized);
       setClientsLoad("ok");
-      setSelectedClientId((prev) =>
-        normalized.some((c) => c.id === prev) ? prev : "",
-      );
+      setSelectedClientId((prev) => {
+        if (
+          preferredClientId &&
+          normalized.some((c) => c.id === preferredClientId)
+        ) {
+          return preferredClientId;
+        }
+        return normalized.some((c) => c.id === prev) ? prev : "";
+      });
+    } catch {
+      setClientsLoad("error");
+      setClients([]);
+      setSelectedClientId("");
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      const q = selectedDelegateId
+        ? `?delegateId=${encodeURIComponent(selectedDelegateId)}`
+        : "";
+      setClientsLoad("loading");
+
+      try {
+        const json = await fetchJsonWithAuth<any>(`/api/delegate/clients${q}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!alive) return;
+
+        const rows =
+          (Array.isArray(json?.clients) ? json.clients : null) ??
+          (Array.isArray(json?.items) ? json.items : []);
+
+        const normalized: ClientRow[] = rows
+          .map((c: any) => ({
+            id: safeStr(c?.id),
+            name: c?.name ?? null,
+            tax_id: c?.tax_id ?? null,
+            delegate_id: c?.delegate_id ?? null,
+            holded_contact_id: c?.holded_contact_id ?? null,
+            delegate_name: c?.delegate_name ?? null,
+            delegate_email: c?.delegate_email ?? null,
+            delegate_valid_from: c?.delegate_valid_from ?? null,
+            delegate_source: c?.delegate_source ?? null,
+          }))
+          .filter((c: ClientRow) => !!c.id);
+
+        setClients(normalized);
+        setClientsLoad("ok");
+        setSelectedClientId((prev) =>
+          normalized.some((c) => c.id === prev) ? prev : "",
+        );
+      } catch {
+        if (!alive) return;
+        setClientsLoad("error");
+        setClients([]);
+        setSelectedClientId("");
+      }
     })();
 
     return () => {
@@ -549,7 +557,7 @@ export default function OrdersConsoleTab() {
     const missingIbanForGiro = isGiro && !payload.iban;
 
     try {
-      const r = await fetch("/api/delegate/clients", {
+      const r = await fetchWithAuth("/api/delegate/clients", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
