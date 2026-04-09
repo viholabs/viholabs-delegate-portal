@@ -351,19 +351,70 @@ async function readDelegate(
 }
 
 async function readRecommendationSafely(
-  _supabase: ReturnType<typeof getSupabase>,
+  supabase: ReturnType<typeof getSupabase>,
   clientId: string
 ) {
-  console.warn(
-    "[CONTROL_ROOM_CLIENT_DETAIL][RECOMMENDATION][SKIP_SCHEMA_UNKNOWN]",
-    {
-      clientId,
-    }
-  );
+  const { data: recommendations, error: recommendationError } = await supabase
+    .from("client_recommendations")
+    .select(
+      "id, recommender_client_id, referred_client_id, percentage, active, valid_from, valid_to, notes, created_at, updated_at, mode, state_code"
+    )
+    .eq("referred_client_id", clientId)
+    .order("active", { ascending: false })
+    .order("valid_from", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (recommendationError) {
+    throw new Error(recommendationError.message);
+  }
+
+  const rows = Array.isArray(recommendations)
+    ? recommendations.map((row) => toRecord(row)).filter(Boolean) as Record<string, unknown>[]
+    : [];
+
+  if (rows.length === 0) {
+    return {
+      recommended_by_client_id: null,
+      recommended_by_client_name: null,
+    };
+  }
+
+  const activeOpenRow =
+    rows.find((row) => {
+      const active = row.active === true;
+      const validTo = pickString(row, ["valid_to"]);
+      const stateCode = pickString(row, ["state_code"]);
+      return active && !validTo && stateCode === "OPEN";
+    }) ?? null;
+
+  const fallbackRow = rows[0] ?? null;
+  const chosenRow = activeOpenRow ?? fallbackRow;
+
+  const recommenderClientId = pickString(chosenRow, ["recommender_client_id"]);
+
+  if (!recommenderClientId) {
+    return {
+      recommended_by_client_id: null,
+      recommended_by_client_name: null,
+    };
+  }
+
+  const { data: recommenderClient, error: recommenderClientError } = await supabase
+    .from("clients")
+    .select("id, name")
+    .eq("id", recommenderClientId)
+    .maybeSingle();
+
+  if (recommenderClientError) {
+    throw new Error(recommenderClientError.message);
+  }
+
+  const recommenderClientRecord = toRecord(recommenderClient);
 
   return {
-    recommended_by_client_id: null,
-    recommended_by_client_name: null,
+    recommended_by_client_id: recommenderClientId,
+    recommended_by_client_name: asString(recommenderClientRecord?.name),
   };
 }
 

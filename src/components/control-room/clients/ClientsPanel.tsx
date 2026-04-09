@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchJsonWithAuth } from "@/lib/fetch-with-auth";
 
 import ClientCommercialSection from "./ClientCommercialSection";
 import ClientContactSection from "./ClientContactSection";
@@ -114,13 +113,18 @@ export default function ClientsPanel() {
       setClientsLoading(true);
       setClientsError(null);
 
-      const json = await fetchJsonWithAuth<ListResponse>("/api/delegate/clients", {
+      const res = await fetch("/api/delegate/clients", {
         method: "GET",
         cache: "no-store",
+        credentials: "include",
       });
 
-      if (!Array.isArray(json?.items)) {
-        throw new Error("No se pudieron cargar los clientes");
+      const json = await readJsonSafe<ListResponse>(res);
+
+      if (!res.ok || !Array.isArray(json?.items)) {
+        throw new Error(
+          json?.error || "No se pudieron cargar los clientes"
+        );
       }
 
       setClients(json.items);
@@ -796,6 +800,9 @@ export default function ClientsPanel() {
             <ClientIdentitySection
               selected={selected}
               updateSelected={updateSelected}
+              canEditStatus={Boolean(
+                assignmentsViewer?.canManageClientAssignments
+              )}
             />
 
             <ClientContactSection

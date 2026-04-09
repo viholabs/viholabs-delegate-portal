@@ -10,12 +10,65 @@ type Props = {
     key: K,
     value: ClientDetailViewModel[K]
   ) => void;
+  canEditStatus: boolean;
 };
+
+const STATUS_OPTIONS = [
+  { value: "ACTIVE", label: "ACTIVE" },
+  { value: "INACTIVE", label: "INACTIVE" },
+  { value: "PENDING_VALIDATION", label: "PENDING_VALIDATION" },
+  { value: "PENDING_REVIEW", label: "PENDING_REVIEW" },
+  { value: "VALID", label: "VALID" },
+  { value: "INVALID", label: "INVALID" },
+  { value: "ARCHIVED", label: "ARCHIVED" },
+];
+
+function fieldWrapStyle() {
+  return {
+    display: "grid",
+    gap: 6,
+  } as const;
+}
+
+function labelStyle() {
+  return {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#6B7280",
+    letterSpacing: 0.2,
+    textTransform: "uppercase" as const,
+  };
+}
+
+function selectStyle(disabled: boolean) {
+  return {
+    width: "100%",
+    minHeight: 44,
+    borderRadius: 12,
+    border: "1px solid #D6D3D1",
+    background: disabled ? "rgba(0,0,0,0.03)" : "#FFFFFF",
+    color: "#1F2937",
+    padding: "10px 12px",
+    fontSize: 14,
+    outline: "none",
+  } as const;
+}
+
+function helpStyle() {
+  return {
+    fontSize: 12,
+    lineHeight: 1.45,
+    color: "#6B7280",
+  } as const;
+}
 
 export default function ClientIdentitySection({
   selected,
   updateSelected,
+  canEditStatus,
 }: Props) {
+  const statusDisabled = !canEditStatus;
+
   return (
     <SectionCard title="Identidad" subtitle="Datos maestros del cliente.">
       <div
@@ -50,11 +103,34 @@ export default function ClientIdentitySection({
           value={selected.profile_type}
           onChange={(value) => updateSelected("profile_type", value)}
         />
-        <TextInput
-          label="Status"
-          value={selected.status}
-          onChange={(value) => updateSelected("status", value)}
-        />
+
+        <div style={fieldWrapStyle()}>
+          <label style={labelStyle()}>Status</label>
+          <select
+            value={selected.status ?? ""}
+            disabled={statusDisabled}
+            onChange={(event) =>
+              updateSelected(
+                "status",
+                (event.target.value || null) as ClientDetailViewModel["status"]
+              )
+            }
+            style={selectStyle(statusDisabled)}
+          >
+            <option value="">Sin status</option>
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div style={helpStyle()}>
+            {canEditStatus
+              ? "Puedes modificar el status de este cliente."
+              : "Tu perfil puede ver el status, pero no editarlo."}
+          </div>
+        </div>
+
         <TextInput
           label="State code"
           value={selected.state_code}

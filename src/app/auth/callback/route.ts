@@ -109,7 +109,7 @@ export async function GET(req: Request) {
   const provisionalPath = requestedNext || "/control-room/shell";
   const response = NextResponse.redirect(new URL(provisionalPath, origin));
 
-  const supabase = await createSsrClient({ response });
+  const supabase = await createSsrClient();
   const code = url.searchParams.get("code");
 
   if (code) {

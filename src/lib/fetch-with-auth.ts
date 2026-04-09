@@ -1,4 +1,3 @@
-// src/lib/fetch-with-auth.ts <<'EOF'
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
@@ -55,35 +54,37 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-async function getAccessToken(): Promise<string> {
-  const supabase = getBrowserSupabase();
+async function tryGetAccessToken(): Promise<string | null> {
+  try {
+    const supabase = getBrowserSupabase();
 
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession();
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
 
-  if (error) {
-    throw new Error(`No se pudo leer la sesión de Supabase: ${error.message}`);
+    if (error) {
+      return null;
+    }
+
+    const token = session?.access_token?.trim();
+    return token || null;
+  } catch {
+    return null;
   }
-
-  const token = session?.access_token?.trim();
-
-  if (!token) {
-    throw new Error("No hay access token de Supabase en el navegador");
-  }
-
-  return token;
 }
 
 export async function fetchWithAuth(
   input: RequestInfo | URL,
   init: RequestInit = {}
 ): Promise<Response> {
-  const token = await getAccessToken();
+  const token = await tryGetAccessToken();
 
   const headers = new Headers(init.headers ?? {});
-  headers.set("Authorization", `Bearer ${token}`);
+
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
 
   if (!headers.has("Accept")) {
     headers.set("Accept", "application/json");

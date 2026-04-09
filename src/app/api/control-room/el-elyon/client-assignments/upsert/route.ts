@@ -40,6 +40,21 @@ type ClientRow = {
   holded_contact_id: string | null;
 };
 
+type ClientRecommendationRow = {
+  id: string;
+  recommender_client_id: string | null;
+  referred_client_id: string | null;
+  percentage: number | null;
+  active: boolean | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  mode: string | null;
+  state_code: string | null;
+};
+
 type UpsertBody =
   | {
       clientHoldedContactId: string;
@@ -106,6 +121,14 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
   );
+}
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 async function requireAuthorized(req: NextRequest) {
@@ -280,16 +303,31 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const currentRows = currentOpenResult.data ?? [];
+      const currentRows = (currentOpenResult.data ?? []) as ClientRecommendationRow[];
+      const currentOpenSamePair =
+        recommenderClientId
+          ? currentRows.find(
+              (row) => String(row.recommender_client_id ?? "").trim() === recommenderClientId,
+            ) ?? null
+          : null;
+
+      if (currentOpenSamePair) {
+        return json(200, {
+          ok: true,
+          changed: false,
+          assignmentRole,
+          mode: "noop",
+        });
+      }
 
       if (currentRows.length > 0) {
         const closeResult = await supa
           .from("client_recommendations")
           .update({
             active: false,
-            valid_to: new Date().toISOString().slice(0, 10),
-            updated_at: new Date().toISOString(),
-            state_code: "CLOSED",
+            valid_to: todayIsoDate(),
+            updated_at: nowIso(),
+            state_code: "INACTIVE",
           })
           .eq("referred_client_id", clientData.id)
           .eq("active", true)
@@ -335,12 +373,61 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      const historicalPairResult = await supa
+        .from("client_recommendations")
+        .select(
+          "id, recommender_client_id, referred_client_id, percentage, active, valid_from, valid_to, notes, created_at, updated_at, mode, state_code",
+        )
+        .eq("recommender_client_id", recommenderClientId)
+        .eq("referred_client_id", clientData.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (historicalPairResult.error) {
+        return json(500, {
+          ok: false,
+          error: historicalPairResult.error.message,
+        });
+      }
+
+      const historicalPair = (historicalPairResult.data ?? null) as ClientRecommendationRow | null;
+
+      if (historicalPair?.id) {
+        const reopenResult = await supa
+          .from("client_recommendations")
+          .update({
+            percentage: 7,
+            active: true,
+            valid_from: todayIsoDate(),
+            valid_to: null,
+            notes: "EL-ELYON manual upsert",
+            mode: "deduct",
+            updated_at: nowIso(),
+            state_code: "OPEN",
+          })
+          .eq("id", historicalPair.id);
+
+        if (reopenResult.error) {
+          return json(500, {
+            ok: false,
+            error: reopenResult.error.message,
+          });
+        }
+
+        return json(200, {
+          ok: true,
+          changed: true,
+          assignmentRole,
+          mode: "reopen",
+        });
+      }
+
       const insertResult = await supa.from("client_recommendations").insert({
         recommender_client_id: recommenderClientId,
         referred_client_id: clientData.id,
         percentage: 7,
         active: true,
-        valid_from: new Date().toISOString().slice(0, 10),
+        valid_from: todayIsoDate(),
         valid_to: null,
         notes: "EL-ELYON manual upsert",
         mode: "deduct",
@@ -389,7 +476,7 @@ export async function POST(req: NextRequest) {
       const closeResult = await supa
         .from("client_actor_assignments_g1")
         .update({
-          valid_to: new Date().toISOString().slice(0, 10),
+          valid_to: todayIsoDate(),
         })
         .eq("client_holded_contact_id", clientHoldedContactId)
         .eq("assignment_role", assignmentRole)
@@ -445,7 +532,7 @@ export async function POST(req: NextRequest) {
       actor_id: targetActorId,
       client_holded_contact_id: clientHoldedContactId,
       assignment_role: assignmentRole,
-      valid_from: new Date().toISOString().slice(0, 10),
+      valid_from: todayIsoDate(),
       valid_to: null,
       source: `el-elyon:${actorId}`,
     });

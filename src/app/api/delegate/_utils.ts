@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 
@@ -14,7 +15,7 @@ type ActorRow = {
 type ResolveActorOk = {
   ok: true;
   supaService: ReturnType<typeof createServiceClient>;
-  supaRls: ReturnType<typeof createRouteAuthClient>;
+  supaRls: Awaited<ReturnType<typeof createRouteAuthClient>>;
   actor: ActorRow;
   authUserId: string | null;
   authMode: "cookies" | "bearer" | "internal_bearer";
@@ -35,10 +36,25 @@ type EffectivePerms = {
 };
 
 type ResolveDelegateArgs = {
-  supaRls: ReturnType<typeof createRouteAuthClient>;
+  supaRls: Awaited<ReturnType<typeof createRouteAuthClient>>;
   actor: { id: string; role: string | null };
   delegateIdFromQuery?: string | null;
   effectivePerms?: EffectivePerms | null;
+};
+
+type CookieToSet = {
+  name: string;
+  value: string;
+  options?: {
+    domain?: string;
+    path?: string;
+    maxAge?: number;
+    expires?: Date;
+    httpOnly?: boolean;
+    secure?: boolean;
+    sameSite?: "lax" | "strict" | "none" | boolean;
+    priority?: "low" | "medium" | "high";
+  };
 };
 
 export const runtime = "nodejs";
@@ -76,49 +92,27 @@ function createServiceClient() {
   });
 }
 
-function parseCookieHeader(req: Request): Array<{ name: string; value: string }> {
-  const raw = req.headers.get("cookie") ?? "";
-  if (!raw.trim()) return [];
-
-  return raw
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const idx = part.indexOf("=");
-      if (idx === -1) {
-        return { name: part, value: "" };
-      }
-
-      const name = part.slice(0, idx).trim();
-      const value = part.slice(idx + 1).trim();
-
-      try {
-        return {
-          name,
-          value: decodeURIComponent(value),
-        };
-      } catch {
-        return {
-          name,
-          value,
-        };
-      }
-    })
-    .filter((cookie) => cookie.name.length > 0);
-}
-
-function createRouteAuthClient(req: Request, bearerToken?: string | null) {
+async function createRouteAuthClient(bearerToken?: string | null) {
   const { url, anon } = getSupabaseConfig();
-  const parsedCookies = parseCookieHeader(req);
+  const cookieStore = await cookies();
 
   return createServerClient(url, anon, {
     cookies: {
       getAll() {
-        return parsedCookies;
+        return cookieStore.getAll().map((cookie) => ({
+          name: cookie.name,
+          value: cookie.value,
+        }));
       },
-      setAll() {
-        // No-op in route handlers.
+      setAll(cookiesToSet: CookieToSet[]) {
+        for (const { name, value, options } of cookiesToSet) {
+          try {
+            cookieStore.set(name, value, options);
+          } catch {
+            // En algunos contextos no se podrá mutar la cookie store.
+            // No rompemos el flujo por ello.
+          }
+        }
       },
     },
     global: bearerToken
@@ -167,11 +161,11 @@ async function lookupActiveActorByAuthUserId(
 }
 
 async function resolveFromCookies(
-  req: Request,
+  _req: Request,
   supaService: ReturnType<typeof createServiceClient>
 ): Promise<ResolveActorResult | null> {
   try {
-    const supaRls = createRouteAuthClient(req);
+    const supaRls = await createRouteAuthClient();
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
@@ -251,7 +245,7 @@ async function resolveFromInternalBearer(
   return {
     ok: true,
     supaService,
-    supaRls: createRouteAuthClient(req, token),
+    supaRls: await createRouteAuthClient(token),
     actor,
     authUserId: actor.auth_user_id ?? null,
     authMode: "internal_bearer",
@@ -265,7 +259,7 @@ async function resolveFromBearer(
   const token = getBearerToken(req);
   if (!token) return null;
 
-  const supaRls = createRouteAuthClient(req, token);
+  const supaRls = await createRouteAuthClient(token);
   const { data, error } = await supaRls.auth.getUser();
   const authUserId = data?.user?.id ?? null;
 
@@ -325,8 +319,8 @@ export async function getActorFromRequest(
     return {
       ok: false,
       status: 401,
-      error: "Missing Bearer token",
-      stage,
+      error: "Authentication required",
+      stage: "no_session",
     };
   } catch (error) {
     return {

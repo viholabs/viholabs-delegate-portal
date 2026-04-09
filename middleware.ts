@@ -1,5 +1,3 @@
-// /var/www/portal/middleware.ts
-
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
@@ -62,9 +60,7 @@ export async function middleware(req: NextRequest) {
   }
 
   let response = NextResponse.next({
-    request: {
-      headers: req.headers,
-    },
+    request: req,
   });
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -73,14 +69,12 @@ export async function middleware(req: NextRequest) {
         return req.cookies.getAll();
       },
       setAll(cookiesToSet: CookieToSet[]) {
-        cookiesToSet.forEach(({ name, value, options }) => {
+        cookiesToSet.forEach(({ name, value }) => {
           req.cookies.set(name, value);
         });
 
         response = NextResponse.next({
-          request: {
-            headers: req.headers,
-          },
+          request: req,
         });
 
         cookiesToSet.forEach(({ name, value, options }) => {
