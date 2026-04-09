@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 
 type ActorRow = {
   id: string;
@@ -12,10 +11,12 @@ type ActorRow = {
   auth_user_id: string | null;
 };
 
+type RouteAuthClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
+
 type ResolveActorOk = {
   ok: true;
   supaService: ReturnType<typeof createServiceClient>;
-  supaRls: Awaited<ReturnType<typeof createRouteAuthClient>>;
+  supaRls: RouteAuthClient;
   actor: ActorRow;
   authUserId: string | null;
   authMode: "cookies" | "bearer" | "internal_bearer";
@@ -36,25 +37,10 @@ type EffectivePerms = {
 };
 
 type ResolveDelegateArgs = {
-  supaRls: Awaited<ReturnType<typeof createRouteAuthClient>>;
+  supaRls: RouteAuthClient;
   actor: { id: string; role: string | null };
   delegateIdFromQuery?: string | null;
   effectivePerms?: EffectivePerms | null;
-};
-
-type CookieToSet = {
-  name: string;
-  value: string;
-  options?: {
-    domain?: string;
-    path?: string;
-    maxAge?: number;
-    expires?: Date;
-    httpOnly?: boolean;
-    secure?: boolean;
-    sameSite?: "lax" | "strict" | "none" | boolean;
-    priority?: "low" | "medium" | "high";
-  };
 };
 
 export const runtime = "nodejs";
@@ -92,39 +78,6 @@ function createServiceClient() {
   });
 }
 
-async function createRouteAuthClient(bearerToken?: string | null) {
-  const { url, anon } = getSupabaseConfig();
-  const cookieStore = await cookies();
-
-  return createServerClient(url, anon, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll().map((cookie) => ({
-          name: cookie.name,
-          value: cookie.value,
-        }));
-      },
-      setAll(cookiesToSet: CookieToSet[]) {
-        for (const { name, value, options } of cookiesToSet) {
-          try {
-            cookieStore.set(name, value, options);
-          } catch {
-            // En algunos contextos no se podrá mutar la cookie store.
-            // No rompemos el flujo por ello.
-          }
-        }
-      },
-    },
-    global: bearerToken
-      ? {
-          headers: {
-            Authorization: `Bearer ${bearerToken}`,
-          },
-        }
-      : undefined,
-  });
-}
-
 function getBearerToken(req: Request): string | null {
   const header =
     req.headers.get("authorization") ?? req.headers.get("Authorization");
@@ -133,6 +86,23 @@ function getBearerToken(req: Request): string | null {
 
   const match = header.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() ?? null;
+}
+
+function createBearerAuthClient(token: string) {
+  const { url, anon } = getSupabaseConfig();
+
+  return createClient(url, anon, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  });
 }
 
 async function lookupActiveActorByAuthUserId(
@@ -161,11 +131,10 @@ async function lookupActiveActorByAuthUserId(
 }
 
 async function resolveFromCookies(
-  _req: Request,
   supaService: ReturnType<typeof createServiceClient>
 ): Promise<ResolveActorResult | null> {
   try {
-    const supaRls = await createRouteAuthClient();
+    const supaRls = await createServerSupabaseClient();
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
@@ -245,7 +214,7 @@ async function resolveFromInternalBearer(
   return {
     ok: true,
     supaService,
-    supaRls: await createRouteAuthClient(token),
+    supaRls: (createBearerAuthClient(token) as unknown) as RouteAuthClient,
     actor,
     authUserId: actor.auth_user_id ?? null,
     authMode: "internal_bearer",
@@ -259,7 +228,7 @@ async function resolveFromBearer(
   const token = getBearerToken(req);
   if (!token) return null;
 
-  const supaRls = await createRouteAuthClient(token);
+  const supaRls = createBearerAuthClient(token);
   const { data, error } = await supaRls.auth.getUser();
   const authUserId = data?.user?.id ?? null;
 
@@ -289,7 +258,7 @@ async function resolveFromBearer(
   return {
     ok: true,
     supaService,
-    supaRls,
+    supaRls: (supaRls as unknown) as RouteAuthClient,
     actor: actorLookup.actor,
     authUserId,
     authMode: "bearer",
@@ -305,7 +274,7 @@ export async function getActorFromRequest(
     const supaService = createServiceClient();
 
     stage = "cookies_auth";
-    const byCookies = await resolveFromCookies(req, supaService);
+    const byCookies = await resolveFromCookies(supaService);
     if (byCookies) return byCookies;
 
     stage = "internal_bearer";
