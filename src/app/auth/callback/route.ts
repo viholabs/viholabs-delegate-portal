@@ -9,7 +9,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { createClient as createSsrClient } from "@/lib/supabase/server";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import {
   MODE_COOKIE,
@@ -20,6 +20,12 @@ import {
 import { entryForActor } from "@/lib/auth/roles";
 
 const ROLE_COOKIE = "viholabs_role";
+
+type CookieToSet = {
+  name: string;
+  value: string;
+  options?: CookieOptions;
+};
 
 function safeNext(nextRaw: string | null) {
   if (!nextRaw) return null;
@@ -78,6 +84,20 @@ function getAdminSupabase() {
   return createAdminClient(url, key, { auth: { persistSession: false } });
 }
 
+function getSupabaseAuthConfig() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anon =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+
+  if (!url || !anon) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY/SUPABASE_ANON_KEY"
+    );
+  }
+
+  return { url, anon };
+}
+
 function defaultModeForRole(roleRaw: unknown): ModeCode {
   const role = String(roleRaw ?? "").trim().toUpperCase();
 
@@ -101,6 +121,43 @@ function redirectToLogin(origin: string, errorCode: string) {
   return NextResponse.redirect(loginUrl);
 }
 
+function createRouteSupabase(req: Request, response: NextResponse) {
+  const { url, anon } = getSupabaseAuthConfig();
+
+  return createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        const cookieHeader = req.headers.get("cookie") ?? "";
+        if (!cookieHeader.trim()) return [];
+
+        return cookieHeader
+          .split(";")
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .map((part) => {
+            const idx = part.indexOf("=");
+            if (idx === -1) return { name: part, value: "" };
+
+            const name = part.slice(0, idx).trim();
+            const value = part.slice(idx + 1).trim();
+
+            try {
+              return { name, value: decodeURIComponent(value) };
+            } catch {
+              return { name, value };
+            }
+          })
+          .filter((cookie) => cookie.name.length > 0);
+      },
+      setAll(cookiesToSet: CookieToSet[]) {
+        for (const { name, value, options } of cookiesToSet) {
+          response.cookies.set(name, value, options);
+        }
+      },
+    },
+  });
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const origin = getRequestOrigin(req);
@@ -109,7 +166,7 @@ export async function GET(req: Request) {
   const provisionalPath = requestedNext || "/control-room/shell";
   const response = NextResponse.redirect(new URL(provisionalPath, origin));
 
-  const supabase = await createSsrClient();
+  const supabase = createRouteSupabase(req, response);
   const code = url.searchParams.get("code");
 
   if (code) {
@@ -119,10 +176,10 @@ export async function GET(req: Request) {
     }
   }
 
-  const { data } = await supabase.auth.getUser();
+  const { data, error: userError } = await supabase.auth.getUser();
   const user = data?.user;
 
-  if (!user) {
+  if (userError || !user) {
     return redirectToLogin(origin, "auth_required");
   }
 
