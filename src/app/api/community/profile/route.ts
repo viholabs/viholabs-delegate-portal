@@ -155,7 +155,6 @@ export async function GET(req: NextRequest) {
     .from("actors")
     .select("id, role, status")
     .eq("auth_user_id", a.userId)
-    .eq("status", "active")
     .limit(1)
     .maybeSingle();
 
