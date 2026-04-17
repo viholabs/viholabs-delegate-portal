@@ -4,6 +4,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createSsrClient } from "@/lib/supabase/server";
 import { createClient as createJsClient } from "@supabase/supabase-js";
 
+function getServiceKey() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error("Missing env: SUPABASE_SERVICE_ROLE_KEY");
+  return key;
+}
+
+function createServiceClient() {
+  return createJsClient(getSupabaseUrl(), getServiceKey(), {
+    auth: { persistSession: false },
+  });
+}
+
 export const runtime = "nodejs";
 
 function json(status: number, body: any) {
@@ -138,7 +150,8 @@ export async function GET(req: NextRequest) {
     return json(500, { ok: false, error: error.message });
   }
 
-  const { data: actorRow, error: actorError } = await a.supabase
+  const supaService = createServiceClient();
+  const { data: actorRow, error: actorError } = await supaService
     .from("actors")
     .select("id, role, status")
     .eq("auth_user_id", a.userId)
