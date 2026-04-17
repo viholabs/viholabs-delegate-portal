@@ -30,6 +30,7 @@ function actorLooksSupervisor(args: {
     eff.has("actors.read") ||
     role === "MELQUISEDEC" ||
     role === "SUPER_ADMIN" ||
+    role === "CEO" ||
     role === "ADMINISTRATIVE" ||
     role === "COORDINATOR_COMMERCIAL" ||
     role === "COORDINATOR_CECT" ||

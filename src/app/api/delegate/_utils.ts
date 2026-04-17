@@ -133,8 +133,14 @@ async function lookupActiveActorByAuthUserId(
 async function resolveFromCookies(
   supaService: ReturnType<typeof createServiceClient>
 ): Promise<ResolveActorResult | null> {
+  let supaRls: RouteAuthClient | undefined;
   try {
-    const supaRls = await createServerSupabaseClient();
+    supaRls = await createServerSupabaseClient();
+  } catch {
+    return null;
+  }
+
+  try {
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
@@ -164,7 +170,8 @@ async function resolveFromCookies(
       authUserId,
       authMode: "cookies",
     };
-  } catch {
+  } catch (err) {
+    console.error("[_utils] resolveFromCookies error:", err);
     return null;
   }
 }

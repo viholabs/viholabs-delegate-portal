@@ -27,6 +27,7 @@ function canSeeDelegatesTab(role: unknown, isMelquisedec: boolean): boolean {
     "melquisedec",
     "superadmin",
     "super_admin",
+    "ceo",
     "administrative",
     "administrativa",
     "coordinador_comercial",
