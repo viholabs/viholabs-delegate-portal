@@ -56,7 +56,8 @@ jobs:
             git status -sb || true
 
             echo "=== 3) Pull main deterministically ==="
-            git fetch origin main
+            git remote prune origin || true
+            git fetch --prune origin
             git checkout main
             git reset --hard origin/main
 
