@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerClient } from "@supabase/ssr";
 
 type ActorRow = {
   id: string;
@@ -11,7 +11,7 @@ type ActorRow = {
   auth_user_id: string | null;
 };
 
-type RouteAuthClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
+type RouteAuthClient = ReturnType<typeof createClientFromRequest>;
 
 type ResolveActorOk = {
   ok: true;
@@ -78,6 +78,31 @@ function createServiceClient() {
   });
 }
 
+function createClientFromRequest(req: Request) {
+  const { url, anon } = getSupabaseConfig();
+  const cookieHeader = req.headers.get("cookie") ?? "";
+
+  const parsed: { name: string; value: string }[] = cookieHeader
+    .split(";")
+    .map((c) => {
+      const idx = c.indexOf("=");
+      if (idx === -1) return null;
+      return { name: c.slice(0, idx).trim(), value: c.slice(idx + 1).trim() };
+    })
+    .filter((c): c is { name: string; value: string } => c !== null && c.name.length > 0);
+
+  return createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        return parsed;
+      },
+      setAll() {
+        // read-only context — token refresh handled by middleware
+      },
+    },
+  });
+}
+
 function getBearerToken(req: Request): string | null {
   const header =
     req.headers.get("authorization") ?? req.headers.get("Authorization");
@@ -131,16 +156,11 @@ async function lookupActiveActorByAuthUserId(
 }
 
 async function resolveFromCookies(
+  req: Request,
   supaService: ReturnType<typeof createServiceClient>
 ): Promise<ResolveActorResult | null> {
-  let supaRls: RouteAuthClient | undefined;
   try {
-    supaRls = await createServerSupabaseClient();
-  } catch {
-    return null;
-  }
-
-  try {
+    const supaRls = createClientFromRequest(req);
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
@@ -281,7 +301,7 @@ export async function getActorFromRequest(
     const supaService = createServiceClient();
 
     stage = "cookies_auth";
-    const byCookies = await resolveFromCookies(supaService);
+    const byCookies = await resolveFromCookies(req, supaService);
     if (byCookies) return byCookies;
 
     stage = "internal_bearer";
