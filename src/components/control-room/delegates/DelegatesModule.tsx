@@ -6,7 +6,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import DelegatesList, { DelegatesKpiStrip } from "./DelegatesList";
 import type { DelegateListRow } from "./types";
 import { currentMonth, formatMonthLabel, safeText } from "./utils";
@@ -31,12 +30,6 @@ function getApiError(payload: ApiResponse | null): string {
   return "Error desconocido";
 }
 
-async function getAccessToken(): Promise<string | null> {
-  const supabase = createClient();
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
-
 export default function DelegatesModule() {
   const [month, setMonth] = useState<string>(currentMonth());
   const [loading, setLoading] = useState<boolean>(true);
@@ -49,22 +42,10 @@ export default function DelegatesModule() {
     setError(null);
 
     try {
-      const token = await getAccessToken();
-
-      if (!token) {
-        setDelegates([]);
-        setActorRole("—");
-        setError("Sesión no disponible");
-        setLoading(false);
-        return;
-      }
-
       const response = await fetch("/api/control-room/delegates", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: "include",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ month: targetMonth }),
       });
 
