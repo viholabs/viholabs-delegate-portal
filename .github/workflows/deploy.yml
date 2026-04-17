@@ -87,7 +87,7 @@ jobs:
             echo "NODE_OPTIONS=${NODE_OPTIONS} (RAM=${MEM_MB}MB)"
             pnpm build
 
-            echo "=== 8) Restart (pm2 canonical) ==="
+            echo "=== 8) Restart (pm2 ecosystem) ==="
             if ! command -v pm2 >/dev/null 2>&1; then
               echo "FATAL: pm2 not found, cannot restart"
               exit 5
@@ -95,12 +95,8 @@ jobs:
 
             pm2 ls || true
 
-            if pm2 describe portal >/dev/null 2>&1; then
-              pm2 restart portal --update-env
-            else
-              echo "FATAL: pm2 process 'portal' not found"
-              exit 5
-            fi
+            pm2 startOrRestart /var/www/portal/ecosystem.config.js --update-env
+            pm2 save
 
             echo "=== 9) Post-check ==="
             pm2 ls || true
