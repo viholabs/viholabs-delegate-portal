@@ -108,7 +108,7 @@ jobs:
             echo "=== 10) Health-check (retry) ==="
             CODE=""
             for i in 1 2 3 4 5; do
-              CODE="$(curl -sS -o /tmp/whoami.json -w "%{http_code}" https://portal.portal.com/api/auth/whoami || true)"
+              CODE="$(curl -sS -o /tmp/whoami.json -w "%{http_code}" https://portal.viholabs.com/api/auth/whoami || true)"
               echo "TRY $i -> HTTP $CODE"
 
               if [ "$CODE" = "200" ]; then
@@ -136,7 +136,7 @@ jobs:
             echo "- Repo: \`${GITHUB_REPOSITORY}\`"
             echo "- Ref: \`${GITHUB_REF_NAME}\`"
             echo "- SHA: \`${GITHUB_SHA}\`"
-            echo "- Target: \`portal.portal.com\`"
+            echo "- Target: \`portal.viholabs.com\`"
             echo "- Health: \`/api/auth/whoami\` returned 200"
           } >> "$GITHUB_STEP_SUMMARY"
 
