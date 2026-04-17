@@ -95,10 +95,10 @@ jobs:
 
             pm2 ls || true
 
-            if pm2 describe viholabs >/dev/null 2>&1; then
-              pm2 restart viholabs --update-env
+            if pm2 describe portal >/dev/null 2>&1; then
+              pm2 restart portal --update-env
             else
-              echo "FATAL: pm2 process 'viholabs' not found"
+              echo "FATAL: pm2 process 'portal' not found"
               exit 5
             fi
 
@@ -108,7 +108,7 @@ jobs:
             echo "=== 10) Health-check (retry) ==="
             CODE=""
             for i in 1 2 3 4 5; do
-              CODE="$(curl -sS -o /tmp/whoami.json -w "%{http_code}" https://portal.viholabs.com/api/auth/whoami || true)"
+              CODE="$(curl -sS -o /tmp/whoami.json -w "%{http_code}" https://portal.portal.com/api/auth/whoami || true)"
               echo "TRY $i -> HTTP $CODE"
 
               if [ "$CODE" = "200" ]; then
@@ -136,7 +136,7 @@ jobs:
             echo "- Repo: \`${GITHUB_REPOSITORY}\`"
             echo "- Ref: \`${GITHUB_REF_NAME}\`"
             echo "- SHA: \`${GITHUB_SHA}\`"
-            echo "- Target: \`portal.viholabs.com\`"
+            echo "- Target: \`portal.portal.com\`"
             echo "- Health: \`/api/auth/whoami\` returned 200"
           } >> "$GITHUB_STEP_SUMMARY"
 
