@@ -9,12 +9,51 @@ import PortalShell, {
 import ComunidadViholabs from "@/components/portal/ComunidadViholabs";
 import { useCommunityProfile } from "@/components/portal/community/useCommunityProfile";
 
+function normalizeRole(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "_");
+}
+
+function canSeeDelegatesTab(role: unknown, isMelquisedec: boolean): boolean {
+  if (isMelquisedec) return true;
+
+  const normalized = normalizeRole(role);
+
+  return [
+    "melquisedec",
+    "superadmin",
+    "super_admin",
+    "administrative",
+    "administrativa",
+    "coordinador_comercial",
+    "commercial_coordinator",
+    "kol",
+    "delegate",
+  ].includes(normalized);
+}
+
+function canSeeElElyonTab(role: unknown, isMelquisedec: boolean): boolean {
+  if (isMelquisedec) return true;
+
+  const normalized = normalizeRole(role);
+
+  return normalized === "melquisedec";
+}
+
 export default function ControlRoomShell({
   children,
 }: {
   children: ReactNode;
 }) {
   const { profile, loading, isMelquisedec } = useCommunityProfile();
+
+  const role = String(profile.role ?? "");
+  const showDelegatesTab = canSeeDelegatesTab(role, isMelquisedec);
+  const showElElyonTab = canSeeElElyonTab(role, isMelquisedec);
 
   const tabs: PortalShellTab[] = [
     {
@@ -32,14 +71,23 @@ export default function ControlRoomShell({
       label: "Facturación",
       hint: "Documentos",
     },
-    {
-      href: "/control-room/shell?tab=recursos",
-      label: "Recursos",
-      hint: "Herramientas",
-    },
   ];
 
-  if (isMelquisedec || String(profile.role ?? "").toLowerCase() === "melquisedec") {
+  if (showDelegatesTab) {
+    tabs.push({
+      href: "/control-room/delegates",
+      label: "Delegados",
+      hint: "Red comercial",
+    });
+  }
+
+  tabs.push({
+    href: "/control-room/shell?tab=recursos",
+    label: "Recursos",
+    hint: "Herramientas",
+  });
+
+  if (showElElyonTab) {
     tabs.push({
       href: "/control-room/shell?tab=el-elyon",
       label: "El-Elyon",

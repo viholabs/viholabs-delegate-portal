@@ -120,56 +120,63 @@ function normalizeExplicitHoldedStatus(detail: Record<string, unknown>): string 
   return null;
 }
 
-function extractDueDate(detail: Record<string, unknown>): string | null {
-  const multipleDueDate =
-    typeof detail["multipledueDate"] === "object" && detail["multipledueDate"] !== null
-      ? (detail["multipledueDate"] as Record<string, unknown>)
-      : null;
 
-  const multipleDueDateAlt =
-    typeof detail["multipleDueDate"] === "object" && detail["multipleDueDate"] !== null
-      ? (detail["multipleDueDate"] as Record<string, unknown>)
-      : null;
+const PAYMENT_EPSILON = 0.01; // tolerate floating-point noise from Holded (e.g. 5.68e-14)
 
-  return (
-    unixToDateYmd(detail["dueDate"]) ??
-    unixToDateYmd(multipleDueDate?.["date"]) ??
-    unixToDateYmd(multipleDueDateAlt?.["date"]) ??
-    unixToDateYmd(detail["forecastDate"])
-  );
-}
-
-function computeDesiredStateCode(detail: Record<string, unknown>): string {
-  const explicit = normalizeExplicitHoldedStatus(detail);
-
-  if (explicit === "CANCELLED") {
-    return "CANCELLED";
-  }
-
+function extractPaidInfo(detail: Record<string, unknown>): { isPaid: boolean; paidDate: string | null } {
   const total = asNumber(detail["total"]) ?? 0;
   const paymentsTotal = asNumber(detail["paymentsTotal"]) ?? 0;
   const paymentsPending = asNumber(detail["paymentsPending"]) ?? 0;
 
   const isPaid =
     paymentsTotal > 0 &&
-    (paymentsPending <= 0 || paymentsTotal >= total);
+    (paymentsPending < PAYMENT_EPSILON || paymentsTotal >= total - PAYMENT_EPSILON);
+
+  let paidDate: string | null = null;
+  const paymentsDetail = Array.isArray(detail["paymentsDetail"])
+    ? (detail["paymentsDetail"] as Record<string, unknown>[])
+    : [];
+
+  for (const payment of paymentsDetail) {
+    const candidate =
+      unixToDateYmd(payment?.["date"]) ??
+      unixToDateYmd(payment?.["paidAt"]) ??
+      unixToDateYmd(payment?.["createdAt"]);
+    if (candidate && (!paidDate || candidate > paidDate)) {
+      paidDate = candidate;
+    }
+  }
+
+  return { isPaid, paidDate };
+}
+
+function extractDocumentType(detail: Record<string, unknown>): "invoice" | "creditnote" {
+  const docType = asString(detail["docType"]) ?? asString(detail["type"]) ?? "";
+  const number = asString(detail["docNumber"]) ?? asString(detail["number"]) ?? "";
+  if (
+    docType.toLowerCase().includes("credit") ||
+    docType.toLowerCase() === "creditnote" ||
+    number.toUpperCase().startsWith("CN")
+  ) {
+    return "creditnote";
+  }
+  return "invoice";
+}
+
+function computeDesiredStateCode(detail: Record<string, unknown>): string {
+  const explicit = normalizeExplicitHoldedStatus(detail);
+
+  if (explicit === "CANCELLED") {
+    return "OPEN"; // No CANCELLED in system_states; keep open for manual review
+  }
+
+  const { isPaid } = extractPaidInfo(detail);
 
   if (isPaid || explicit === "PAID") {
-    return "PAID";
+    return "SETTLED";
   }
 
-  const dueDate = extractDueDate(detail);
-  const today = todayYmdUtc();
-
-  if (paymentsPending > 0 && dueDate !== null && dueDate < today) {
-    return "OVERDUE";
-  }
-
-  if (explicit === "OVERDUE") {
-    return "OVERDUE";
-  }
-
-  return "PENDING";
+  return "OPEN";
 }
 
 async function fetchHoldedInvoiceDetail(invoiceId: string) {
@@ -253,10 +260,12 @@ export async function POST(
     const supabase = getServiceSupabase();
     const detail = await fetchHoldedInvoiceDetail(normalizedInvoiceId);
     const nextStateCode = computeDesiredStateCode(detail);
+    const { isPaid: nextIsPaid, paidDate: nextPaidDate } = extractPaidInfo(detail);
+    const nextDocumentType = extractDocumentType(detail);
 
     const { data: existingInvoice, error: findError } = await supabase
       .from("invoices")
-      .select("id, invoice_number, external_invoice_id, state_code, is_paid, paid_date, updated_at")
+      .select("id, invoice_number, external_invoice_id, state_code, is_paid, paid_date, document_type, updated_at")
       .eq("source_provider", "holded")
       .eq("external_invoice_id", normalizedInvoiceId)
       .maybeSingle();
@@ -277,14 +286,23 @@ export async function POST(
       typeof existingInvoice.state_code === "string"
         ? existingInvoice.state_code
         : null;
+    const currentIsPaid = existingInvoice.is_paid === true;
+    const currentPaidDate = typeof existingInvoice.paid_date === "string" ? existingInvoice.paid_date : null;
 
-    if (currentStateCode === nextStateCode) {
+    const needsUpdate =
+      currentStateCode !== nextStateCode ||
+      currentIsPaid !== nextIsPaid ||
+      currentPaidDate !== nextPaidDate;
+
+    if (!needsUpdate) {
       return json(200, {
         ok: true,
         invoiceId: normalizedInvoiceId,
         updated: false,
         current_state_code: currentStateCode,
         next_state_code: nextStateCode,
+        is_paid: currentIsPaid,
+        paid_date: currentPaidDate,
         invoice_number: existingInvoice.invoice_number ?? null,
         holded_snapshot: {
           status: detail["status"] ?? null,
@@ -300,10 +318,13 @@ export async function POST(
       .from("invoices")
       .update({
         state_code: nextStateCode,
+        is_paid: nextIsPaid,
+        paid_date: nextIsPaid ? nextPaidDate : null,
+        document_type: nextDocumentType,
         updated_at: new Date().toISOString(),
       })
       .eq("id", existingInvoice.id)
-      .select("id, invoice_number, external_invoice_id, state_code, updated_at");
+      .select("id, invoice_number, external_invoice_id, state_code, is_paid, paid_date, updated_at");
 
     if (updateError) {
       throw updateError;
@@ -315,6 +336,8 @@ export async function POST(
       updated: true,
       current_state_code: currentStateCode,
       next_state_code: nextStateCode,
+      is_paid: nextIsPaid,
+      paid_date: nextIsPaid ? nextPaidDate : null,
       invoice_number: existingInvoice.invoice_number ?? null,
       updated_row: Array.isArray(updatedRows) ? updatedRows[0] ?? null : updatedRows ?? null,
       holded_snapshot: {

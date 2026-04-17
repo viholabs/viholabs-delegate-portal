@@ -53,11 +53,13 @@ export function computeCanonicalPaidState(input: PaidStateInput): PaidStateResul
     return { is_paid: null, reason: "missing_payments_pending" };
   }
 
-  if (payments_pending !== 0) {
+  const EPSILON = 0.01; // tolerate floating-point noise from Holded (e.g. 5.68e-14)
+
+  if (payments_pending > EPSILON) {
     return { is_paid: false, reason: "payments_pending_nonzero" };
   }
 
-  if (payments_total < total_gross) {
+  if (payments_total < total_gross - EPSILON) {
     return { is_paid: false, reason: "payments_total_less_than_total" };
   }
 

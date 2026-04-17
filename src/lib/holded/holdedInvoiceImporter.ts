@@ -2,6 +2,14 @@
 
 import { holdedFetch } from "./holdedFetch";
 import { computeCanonicalPaidState } from "./holdedPaidState";
+import { getHoldedContactById } from "./getHoldedContactById";
+import {
+  asString,
+  asNumber,
+  asRecord,
+  unixToDateYmd,
+} from "./holdedPrimitives";
+import { classifyLineTypeBySku } from "./holdedLineClassifier";
 
 export type HoldedSummaryDoc = {
   id?: string;
@@ -40,6 +48,8 @@ export type HoldedContactLookup = (
       delegateId: string | null;
       mappingExists: boolean;
       clientExists: boolean;
+      autoCreatedClient?: boolean;
+      autoCreatedMapping?: boolean;
     }
   | null
 >;
@@ -61,6 +71,7 @@ export type CanonicalInvoiceRow = {
   total_gross: number | null;
   is_paid: boolean | null;
   paid_date: string | null;
+  document_type: "invoice" | "creditnote";
   state_code: string | null;
   external_modified_at: string | null;
   source_meta: Record<string, unknown>;
@@ -122,44 +133,6 @@ type SupabaseLike = {
   from: (table: string) => any;
 };
 
-const SALE_SKUS = new Set<string>(["VIHO-OBE-SPRAY-002"]);
-
-const PROMO_SKUS = new Set<string>([
-  "VIHO-OBE-PROMO-001",
-  "VIHO-OBE-PROMO-002",
-  "VIHO-OBE-PROMO-003",
-  "VIHO-OBE-PROMO-CP-12M",
-  "VIHO-OBE-PROMO-PLUS-4M",
-]);
-
-const NEUTRAL_SKUS = new Set<string>(["VIHO-BOOK-BASCULA"]);
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return typeof v === "object" && v !== null && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : null;
-}
-
-function asString(v: unknown): string | null {
-  if (typeof v === "string") {
-    const t = v.trim();
-    return t.length ? t : null;
-  }
-  if (typeof v === "number" && Number.isFinite(v)) {
-    return String(v);
-  }
-  return null;
-}
-
-function asNumber(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const n = Number(v.replace(",", "."));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const set = new Set<string>();
   for (const v of values) {
@@ -178,40 +151,9 @@ function pickFirstString(...values: unknown[]): string | null {
   return null;
 }
 
-function unixToDateYmd(unixOrString: unknown): string | null {
-  if (typeof unixOrString === "number" && Number.isFinite(unixOrString)) {
-    const ms = unixOrString > 9999999999 ? unixOrString : unixOrString * 1000;
-    const d = new Date(ms);
-    if (Number.isNaN(d.getTime())) return null;
-    return d.toISOString().slice(0, 10);
-  }
-
-  if (typeof unixOrString === "string" && unixOrString.trim()) {
-    const raw = unixOrString.trim();
-    const n = Number(raw);
-    if (Number.isFinite(n)) {
-      return unixToDateYmd(n);
-    }
-    const d = new Date(raw);
-    if (!Number.isNaN(d.getTime())) {
-      return d.toISOString().slice(0, 10);
-    }
-  }
-
-  return null;
-}
-
 function normalizeSku(v: unknown): string | null {
   const s = asString(v);
   return s ? s.trim().toUpperCase() : null;
-}
-
-function classifyLineTypeBySku(sku: string | null): InvoiceLineType {
-  if (!sku) return "neutral";
-  if (SALE_SKUS.has(sku)) return "sale";
-  if (PROMO_SKUS.has(sku)) return "promotion";
-  if (NEUTRAL_SKUS.has(sku)) return "neutral";
-  return "neutral";
 }
 
 function buildSafeSummaryFromDetail(detail: HoldedDetailDoc): HoldedSummaryDoc {
@@ -689,6 +631,8 @@ function buildSourceMeta(params: {
   mappingExists: boolean;
   clientExists: boolean;
   externalModifiedAt: string | null;
+  autoCreatedClient: boolean;
+  autoCreatedMapping: boolean;
 }): Record<string, unknown> {
   const { summary, detail } = params;
 
@@ -730,8 +674,8 @@ function buildSourceMeta(params: {
     holded_contact_client_mapping_exists: params.mappingExists,
     mapped_client_exists: params.clientExists,
     name_fallback_used: false,
-    auto_created_client_from_holded: false,
-    auto_created_holded_contact_client_map_g1: false,
+    auto_created_client_from_holded: params.autoCreatedClient,
+    auto_created_holded_contact_client_map_g1: params.autoCreatedMapping,
   };
 }
 
@@ -743,6 +687,8 @@ export async function resolveClientForHoldedDocument(args: {
     holdedContactExists: boolean;
     mappingExists: boolean;
     clientExists: boolean;
+    autoCreatedClient: boolean;
+    autoCreatedMapping: boolean;
   }
 > {
   const { holdedContactId, resolveByHoldedContactId } = args;
@@ -755,6 +701,8 @@ export async function resolveClientForHoldedDocument(args: {
       holdedContactExists: false,
       mappingExists: false,
       clientExists: false,
+      autoCreatedClient: false,
+      autoCreatedMapping: false,
     };
   }
 
@@ -768,6 +716,8 @@ export async function resolveClientForHoldedDocument(args: {
       holdedContactExists: false,
       mappingExists: false,
       clientExists: false,
+      autoCreatedClient: false,
+      autoCreatedMapping: false,
     };
   }
 
@@ -779,6 +729,8 @@ export async function resolveClientForHoldedDocument(args: {
       holdedContactExists: found.holdedContactExists,
       mappingExists: found.mappingExists,
       clientExists: found.clientExists,
+      autoCreatedClient: found.autoCreatedClient === true,
+      autoCreatedMapping: found.autoCreatedMapping === true,
     };
   }
 
@@ -789,6 +741,8 @@ export async function resolveClientForHoldedDocument(args: {
     holdedContactExists: found.holdedContactExists,
     mappingExists: found.mappingExists,
     clientExists: found.clientExists,
+    autoCreatedClient: found.autoCreatedClient === true,
+    autoCreatedMapping: found.autoCreatedMapping === true,
   };
 }
 
@@ -1042,7 +996,23 @@ export async function buildHoldedImportDecision(args: {
     mappingExists: clientMatch.mappingExists,
     clientExists: clientMatch.clientExists,
     externalModifiedAt,
+    autoCreatedClient: clientMatch.autoCreatedClient,
+    autoCreatedMapping: clientMatch.autoCreatedMapping,
   });
+
+  // Derive document_type from docType fields: credit/refund/abon/rectific → creditnote
+  const rawDocType = pickFirstString(
+    summary.docType,
+    summary.documentType,
+    summary.type,
+    detail["docType"],
+    detail["documentType"],
+    detail["type"]
+  ) ?? "";
+  const documentType: "invoice" | "creditnote" = normalizeDocType(rawDocType) === "creditnote"
+    || invoiceNumber.toUpperCase().startsWith("CN")
+    ? "creditnote"
+    : "invoice";
 
   const invoice: CanonicalInvoiceRow = {
     source_provider: "holded",
@@ -1059,6 +1029,7 @@ export async function buildHoldedImportDecision(args: {
     total_gross: totals.total_gross,
     is_paid: paidState.is_paid,
     paid_date: paidState.is_paid === true ? payments.paid_date : null,
+    document_type: documentType,
     state_code: desiredStateCode,
     external_modified_at: externalModifiedAt,
     source_meta: sourceMeta,
@@ -1082,6 +1053,8 @@ export async function buildHoldedImportDecision(args: {
       holded_contact_exists: clientMatch.holdedContactExists,
       holded_contact_client_mapping_exists: clientMatch.mappingExists,
       mapped_client_exists: clientMatch.clientExists,
+      auto_created_client_from_holded: clientMatch.autoCreatedClient,
+      auto_created_holded_contact_client_map_g1: clientMatch.autoCreatedMapping,
       computed_is_paid: paidState.is_paid,
       computed_paid_reason: paidState.reason,
       desired_state_code: desiredStateCode,
@@ -1096,6 +1069,121 @@ export async function buildHoldedImportDecision(args: {
   };
 }
 
+async function resolveDelegateIdByHoldedContactId(
+  supabase: SupabaseLike,
+  holdedContactId: string
+): Promise<string | null> {
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from("client_actor_assignments_g1")
+    .select("actor_id, valid_to, valid_from, created_at")
+    .eq("client_holded_contact_id", holdedContactId)
+    .eq("assignment_role", "delegate")
+    .order("valid_from", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (assignmentsError) throw assignmentsError;
+
+  const rows = Array.isArray(assignments) ? assignments : [];
+
+  const active =
+    rows.find((row) => {
+      const record = asRecord(row);
+      const validTo = asString(record?.["valid_to"]);
+      return !validTo;
+    }) ?? rows[0] ?? null;
+
+  const activeRecord = asRecord(active);
+  return asString(activeRecord?.["actor_id"]);
+}
+
+async function createClientFromHoldedContact(args: {
+  supabase: SupabaseLike;
+  holdedContactId: string;
+}): Promise<{ clientId: string | null; created: boolean }> {
+  const { supabase, holdedContactId } = args;
+
+  const holdedContact = await getHoldedContactById(holdedContactId);
+
+  const fallbackName = `HOLDed ${holdedContactId}`;
+
+  const insertPayload: Record<string, unknown> = {
+    holded_contact_id: holdedContactId,
+    name: holdedContact?.name ?? fallbackName,
+    legal_name: holdedContact?.legal_name ?? holdedContact?.name ?? fallbackName,
+    tax_id: holdedContact?.tax_id ?? null,
+    vat_number: holdedContact?.vat_number ?? null,
+    contact_email: holdedContact?.contact_email ?? null,
+    billing_email: holdedContact?.billing_email ?? null,
+    contact_phone: holdedContact?.contact_phone ?? null,
+    mobile_phone: holdedContact?.mobile_phone ?? null,
+    website: holdedContact?.website ?? null,
+    fiscal_address_line1: holdedContact?.fiscal_address_line1 ?? null,
+    fiscal_address_line2: holdedContact?.fiscal_address_line2 ?? null,
+    fiscal_city: holdedContact?.fiscal_city ?? null,
+    fiscal_region: holdedContact?.fiscal_region ?? null,
+    fiscal_postal_code: holdedContact?.fiscal_postal_code ?? null,
+    fiscal_country: holdedContact?.fiscal_country ?? null,
+    shipping_address_line1: holdedContact?.shipping_address_line1 ?? null,
+    shipping_address_line2: holdedContact?.shipping_address_line2 ?? null,
+    shipping_city: holdedContact?.shipping_city ?? null,
+    shipping_region: holdedContact?.shipping_region ?? null,
+    shipping_postal_code: holdedContact?.shipping_postal_code ?? null,
+    shipping_country: holdedContact?.shipping_country ?? null,
+    payment_method_name: holdedContact?.payment_method_name ?? null,
+    payment_terms_name: holdedContact?.payment_terms_name ?? null,
+    iban: holdedContact?.iban ?? null,
+    bank_account_holder: holdedContact?.bank_account_holder ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data: insertedClient, error: insertClientError } = await supabase
+    .from("clients")
+    .insert([insertPayload])
+    .select("id")
+    .single();
+
+  if (insertClientError) throw insertClientError;
+
+  return {
+    clientId: asString(insertedClient?.id),
+    created: true,
+  };
+}
+
+async function ensureHoldedContactClientMapping(args: {
+  supabase: SupabaseLike;
+  holdedContactId: string;
+  clientId: string;
+}): Promise<boolean> {
+  const { supabase, holdedContactId, clientId } = args;
+
+  const { data: existingMap, error: existingMapError } = await supabase
+    .from("holded_contact_client_map_g1")
+    .select("holded_contact_id, client_id")
+    .eq("holded_contact_id", holdedContactId)
+    .maybeSingle();
+
+  if (existingMapError) throw existingMapError;
+
+  if (existingMap?.client_id) {
+    return false;
+  }
+
+  const { error: insertMapError } = await supabase
+    .from("holded_contact_client_map_g1")
+    .insert([
+      {
+        holded_contact_id: holdedContactId,
+        client_id: clientId,
+      },
+    ]);
+
+  if (insertMapError) throw insertMapError;
+
+  return true;
+}
+
 async function resolveByHoldedContactIdFromSupabase(
   supabase: SupabaseLike,
   holdedContactId: string
@@ -1105,11 +1193,16 @@ async function resolveByHoldedContactIdFromSupabase(
   delegateId: string | null;
   mappingExists: boolean;
   clientExists: boolean;
+  autoCreatedClient: boolean;
+  autoCreatedMapping: boolean;
 } | null> {
   const normalizedHoldedContactId = asString(holdedContactId);
   if (!normalizedHoldedContactId) {
     return null;
   }
+
+  let autoCreatedClient = false;
+  let autoCreatedMapping = false;
 
   const { data: holdedContactRow, error: holdedContactError } = await supabase
     .from("holded_contacts")
@@ -1126,10 +1219,12 @@ async function resolveByHoldedContactIdFromSupabase(
       delegateId: null,
       mappingExists: false,
       clientExists: false,
+      autoCreatedClient: false,
+      autoCreatedMapping: false,
     };
   }
 
-  const { data: mapRow, error: mapError } = await supabase
+  const { data: existingMapRow, error: mapError } = await supabase
     .from("holded_contact_client_map_g1")
     .select("client_id")
     .eq("holded_contact_id", normalizedHoldedContactId)
@@ -1137,40 +1232,96 @@ async function resolveByHoldedContactIdFromSupabase(
 
   if (mapError) throw mapError;
 
-  if (!mapRow?.client_id) {
+  let mappedClientId = asString(existingMapRow?.client_id);
+
+  let clientRow: any = null;
+
+  if (mappedClientId) {
+    const { data: mappedClient, error: mappedClientError } = await supabase
+      .from("clients")
+      .select("id, holded_contact_id")
+      .eq("id", mappedClientId)
+      .maybeSingle();
+
+    if (mappedClientError) throw mappedClientError;
+    clientRow = mappedClient ?? null;
+  }
+
+  if (!clientRow?.id) {
+    const { data: existingClientByHoldedId, error: existingClientByHoldedIdError } =
+      await supabase
+        .from("clients")
+        .select("id, holded_contact_id")
+        .eq("holded_contact_id", normalizedHoldedContactId)
+        .maybeSingle();
+
+    if (existingClientByHoldedIdError) throw existingClientByHoldedIdError;
+    clientRow = existingClientByHoldedId ?? null;
+  }
+
+  if (!clientRow?.id) {
+    const createdClient = await createClientFromHoldedContact({
+      supabase,
+      holdedContactId: normalizedHoldedContactId,
+    });
+
+    if (!createdClient.clientId) {
+      return {
+        holdedContactExists: true,
+        clientId: null,
+        delegateId: null,
+        mappingExists: false,
+        clientExists: false,
+        autoCreatedClient: false,
+        autoCreatedMapping: false,
+      };
+    }
+
+    autoCreatedClient = createdClient.created;
+
+    const { data: createdClientRow, error: createdClientReadError } = await supabase
+      .from("clients")
+      .select("id, holded_contact_id")
+      .eq("id", createdClient.clientId)
+      .maybeSingle();
+
+    if (createdClientReadError) throw createdClientReadError;
+    clientRow = createdClientRow ?? null;
+  }
+
+  const clientId = asString(clientRow?.id);
+
+  if (!clientId) {
     return {
       holdedContactExists: true,
       clientId: null,
       delegateId: null,
       mappingExists: false,
       clientExists: false,
+      autoCreatedClient,
+      autoCreatedMapping: false,
     };
   }
 
-  const { data: clientRow, error: clientError } = await supabase
-    .from("clients")
-    .select("id, delegate_id")
-    .eq("id", mapRow.client_id)
-    .maybeSingle();
+  autoCreatedMapping = await ensureHoldedContactClientMapping({
+    supabase,
+    holdedContactId: normalizedHoldedContactId,
+    clientId,
+  });
 
-  if (clientError) throw clientError;
-
-  if (!clientRow?.id) {
-    return {
-      holdedContactExists: true,
-      clientId: mapRow.client_id ?? null,
-      delegateId: null,
-      mappingExists: true,
-      clientExists: false,
-    };
-  }
+  const delegateId = await resolveDelegateIdByHoldedContactId(
+    supabase,
+    normalizedHoldedContactId
+  );
 
   return {
     holdedContactExists: true,
-    clientId: clientRow.id ?? null,
-    delegateId: clientRow.delegate_id ?? null,
+    clientId,
+    delegateId,
     mappingExists: true,
     clientExists: true,
+    autoCreatedClient,
+    autoCreatedMapping,
   };
 }
 
@@ -1197,13 +1348,19 @@ async function updateExistingHoldedInvoiceFields(args: {
   supabase: SupabaseLike;
   externalInvoiceId: string;
   nextStateCode: string;
+  isPaid: boolean | null;
+  paidDate: string | null;
+  documentType: "invoice" | "creditnote";
 }) {
-  const { supabase, externalInvoiceId, nextStateCode } = args;
+  const { supabase, externalInvoiceId, nextStateCode, isPaid, paidDate, documentType } = args;
 
   const { error } = await supabase
     .from("invoices")
     .update({
       state_code: nextStateCode,
+      is_paid: isPaid,
+      paid_date: isPaid === true ? paidDate : null,
+      document_type: documentType,
       updated_at: new Date().toISOString(),
     })
     .eq("source_provider", "holded")
@@ -1354,15 +1511,29 @@ export async function importOneHoldedInvoiceById(
             ? existingInvoice.state_code
             : "OPEN";
 
-        if (nextStateCode !== currentStateCode) {
+        const nextIsPaid = acceptedDecision.invoice.is_paid;
+        const currentIsPaid = existingInvoice.is_paid ?? null;
+        const nextPaidDate = acceptedDecision.invoice.paid_date;
+        const currentPaidDate = existingInvoice.paid_date ?? null;
+        const nextDocType = acceptedDecision.invoice.document_type;
+
+        const hasChange =
+          nextStateCode !== currentStateCode ||
+          nextIsPaid !== currentIsPaid ||
+          nextPaidDate !== currentPaidDate;
+
+        if (hasChange) {
           await updateExistingHoldedInvoiceFields({
             supabase: parsed.supabase,
             externalInvoiceId: acceptedDecision.invoice.external_invoice_id,
             nextStateCode,
+            isPaid: nextIsPaid,
+            paidDate: nextPaidDate,
+            documentType: nextDocType,
           });
 
           parsed.logger.info(
-            `[HOLDED][ONE][STATE_UPDATED] ${acceptedDecision.invoice.invoice_number} :: ${acceptedDecision.invoice.external_invoice_id} :: ${currentStateCode} -> ${nextStateCode}`
+            `[HOLDED][ONE][STATE_UPDATED] ${acceptedDecision.invoice.invoice_number} :: ${acceptedDecision.invoice.external_invoice_id} :: ${currentStateCode} -> ${nextStateCode} | is_paid: ${currentIsPaid} -> ${nextIsPaid}`
           );
         } else {
           parsed.logger.info(

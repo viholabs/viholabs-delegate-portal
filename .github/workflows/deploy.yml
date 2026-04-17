@@ -79,6 +79,11 @@ jobs:
             pnpm tsc --noEmit
 
             echo "=== 7) Build ==="
+            MEM_MB=$(awk '/MemTotal/ { printf "%.0f\n", $2/1024 }' /proc/meminfo 2>/dev/null || echo 2048)
+            HEAP_MB=$(( MEM_MB * 60 / 100 ))
+            HEAP_MB=$(( HEAP_MB < 1024 ? 1024 : HEAP_MB ))
+            export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+            echo "NODE_OPTIONS=${NODE_OPTIONS} (RAM=${MEM_MB}MB)"
             pnpm build
 
             echo "=== 8) Restart (pm2 canonical) ==="

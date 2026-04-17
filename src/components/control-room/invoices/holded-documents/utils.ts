@@ -37,12 +37,26 @@ export function sortRows(rows: HoldedInvoiceRow[]) {
 
 export function toNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+
   if (typeof value === "string") {
     const normalized = value.replace(",", ".");
     const n = Number(normalized);
     return Number.isFinite(n) ? n : 0;
   }
+
   return 0;
+}
+
+function norm(value: unknown): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function normText(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
 }
 
 export function money(value: unknown, currency = "EUR") {
@@ -115,16 +129,28 @@ export function lineSku(item: Record<string, any>) {
   );
 }
 
+function canonicalLineRole(item: Record<string, any>): "sale" | "promo" | "neutral" {
+  const sku = norm(item?.sku ?? item?.product_sku ?? item?.reference ?? "");
+  const text = normText(item?.name ?? item?.description ?? "");
+  const lineType = normText(item?.line_type ?? item?.lineType ?? item?.kind ?? "");
+
+  // Excepció canònica
+  if (sku === "0" || text === "estandar" || text === "estándar" || text === "standard") {
+    return "neutral";
+  }
+
+  if (lineType === "sale") return "sale";
+  if (lineType === "promotion") return "promo";
+
+  return "neutral";
+}
+
 export function unitsSale(item: Record<string, any>) {
-  const kind = String(item?.kind ?? "").toUpperCase();
-  if (kind === "SALE") return toNumber(item?.units);
-  return 0;
+  return canonicalLineRole(item) === "sale" ? toNumber(item?.units) : 0;
 }
 
 export function unitsPromo(item: Record<string, any>) {
-  const kind = String(item?.kind ?? "").toUpperCase();
-  if (kind === "PROMO") return toNumber(item?.units);
-  return 0;
+  return canonicalLineRole(item) === "promo" ? toNumber(item?.units) : 0;
 }
 
 export function affiliateLabel(value: string | null | undefined) {

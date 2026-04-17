@@ -123,6 +123,15 @@ export default function HoldedInvoiceDrawer({
   const paymentDate = paymentDateRaw ? fmtDate(paymentDateRaw) : "—";
   const paymentMethod = safeText(paymentMethodRaw, "No informado");
 
+  const summaryUnits = detailItems.reduce(
+    (acc, item) => {
+      acc.sold += unitsSale(item);
+      acc.promo += unitsPromo(item);
+      return acc;
+    },
+    { sold: 0, promo: 0 }
+  );
+
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
@@ -254,7 +263,7 @@ export default function HoldedInvoiceDrawer({
                     Unidades
                   </div>
                   <div className="mt-1 text-base font-semibold text-neutral-900">
-                    Venta {toNumber(detail?.units?.sold)} · Promo {toNumber(detail?.units?.promo)}
+                    Venta {summaryUnits.sold} · Promo {summaryUnits.promo}
                   </div>
                 </div>
               </div>

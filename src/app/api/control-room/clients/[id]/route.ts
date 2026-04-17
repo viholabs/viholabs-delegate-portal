@@ -21,6 +21,7 @@ type ClientActorBundle = {
 type ClientInvoiceView = {
   id: string;
   invoice_id: string | null;
+  external_invoice_id: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
   due_date: string | null;
@@ -72,6 +73,13 @@ type ClientPatchPayload = {
   profile_type?: unknown;
   status?: unknown;
   state_code?: unknown;
+};
+
+type HoldedInvoiceLiveMeta = {
+  due_date: string | null;
+  paid_date: string | null;
+  is_paid: boolean | null;
+  state_code: string | null;
 };
 
 function getEnv(name: string): string {
@@ -133,7 +141,16 @@ function asString(value: unknown): string | null {
 }
 
 function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const n = Number(value.replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  return null;
 }
 
 function asBoolean(value: unknown): boolean | null {
@@ -232,12 +249,126 @@ function normalizeIban(value: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function unixToDateYmd(unixOrString: unknown): string | null {
+  if (typeof unixOrString === "number" && Number.isFinite(unixOrString)) {
+    const ms = unixOrString > 9999999999 ? unixOrString : unixOrString * 1000;
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  }
+
+  if (typeof unixOrString === "string" && unixOrString.trim()) {
+    const raw = unixOrString.trim();
+    const n = Number(raw);
+
+    if (Number.isFinite(n)) {
+      return unixToDateYmd(n);
+    }
+
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
+  return null;
+}
+
+async function fetchHoldedInvoiceDetail(
+  externalInvoiceId: string
+): Promise<Record<string, unknown> | null> {
+  const apiKey = getHoldedApiKey();
+
+  const response = await fetch(
+    `https://api.holded.com/api/invoicing/v1/documents/invoice/${encodeURIComponent(
+      externalInvoiceId
+    )}`,
+    {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        key: apiKey,
+      },
+      cache: "no-store",
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as unknown;
+  return toRecord(payload);
+}
+
+function computeHoldedInvoiceLiveMeta(
+  detail: Record<string, unknown>
+): HoldedInvoiceLiveMeta {
+  const multipleDueDate = toRecord(detail["multipledueDate"]);
+  const multipleDueDateAlt = toRecord(detail["multipleDueDate"]);
+
+  const dueDate =
+    unixToDateYmd(detail["dueDate"]) ??
+    unixToDateYmd(multipleDueDate?.["date"]) ??
+    unixToDateYmd(multipleDueDateAlt?.["date"]) ??
+    unixToDateYmd(detail["forecastDate"]);
+
+  const total = asNumber(detail["total"]) ?? 0;
+  const paymentsTotal =
+    asNumber(detail["paymentsTotal"]) ??
+    asNumber(detail["payments_total"]) ??
+    0;
+  const paymentsPending =
+    asNumber(detail["paymentsPending"]) ??
+    asNumber(detail["payments_pending"]) ??
+    0;
+
+  const paymentsDetail = Array.isArray(detail["paymentsDetail"])
+    ? (detail["paymentsDetail"] as Array<Record<string, unknown>>)
+    : [];
+
+  let latestPaidDate: string | null = null;
+
+  for (const payment of paymentsDetail) {
+    const dateCandidate =
+      unixToDateYmd(payment?.["date"]) ??
+      unixToDateYmd(payment?.["paidAt"]) ??
+      unixToDateYmd(payment?.["createdAt"]);
+
+    if (dateCandidate && (!latestPaidDate || dateCandidate > latestPaidDate)) {
+      latestPaidDate = dateCandidate;
+    }
+  }
+
+  const isPaid =
+    paymentsTotal > 0 &&
+    (paymentsPending <= 0 || paymentsTotal >= total);
+
+  const rawStatus = asString(detail["status"])?.toLowerCase() ?? null;
+
+  const stateCode = isPaid
+    ? "SETTLED"
+    : rawStatus === "cancelled" ||
+        rawStatus === "canceled" ||
+        rawStatus === "anulado"
+      ? "INVALID"
+      : "OPEN";
+
+  return {
+    due_date: dueDate,
+    paid_date: latestPaidDate,
+    is_paid: isPaid,
+    state_code: stateCode,
+  };
+}
+
 function mapInvoiceRow(row: unknown): ClientInvoiceView {
   const record = toRecord(row);
 
   return {
     id: pickString(record, ["id"]) ?? "",
     invoice_id: pickString(record, ["invoice_id", "id"]),
+    external_invoice_id: pickString(record, ["external_invoice_id"]),
     invoice_number: pickString(record, [
       "invoice_number",
       "doc_number",
@@ -370,7 +501,9 @@ async function readRecommendationSafely(
   }
 
   const rows = Array.isArray(recommendations)
-    ? recommendations.map((row) => toRecord(row)).filter(Boolean) as Record<string, unknown>[]
+    ? recommendations
+        .map((row) => toRecord(row))
+        .filter(Boolean) as Record<string, unknown>[]
     : [];
 
   if (rows.length === 0) {
@@ -466,6 +599,47 @@ async function readAffiliate(
   };
 }
 
+async function enrichInvoiceWithHoldedLiveData(
+  invoice: ClientInvoiceView
+): Promise<ClientInvoiceView> {
+  if (invoice.source_provider !== "holded") {
+    return invoice;
+  }
+
+  const externalInvoiceId = asString(invoice.external_invoice_id);
+  if (!externalInvoiceId) {
+    return invoice;
+  }
+
+  try {
+    const holdedDetail = await fetchHoldedInvoiceDetail(externalInvoiceId);
+    if (!holdedDetail) {
+      return invoice;
+    }
+
+    const liveMeta = computeHoldedInvoiceLiveMeta(holdedDetail);
+
+    return {
+      ...invoice,
+      due_date: liveMeta.due_date ?? invoice.due_date,
+      paid_date: liveMeta.paid_date ?? invoice.paid_date,
+      is_paid:
+        typeof liveMeta.is_paid === "boolean"
+          ? liveMeta.is_paid
+          : invoice.is_paid,
+      state_code: liveMeta.state_code ?? invoice.state_code,
+    };
+  } catch (error) {
+    console.error("[CONTROL_ROOM_CLIENT_DETAIL][INVOICES][HOLDED_LIVE_ERROR]", {
+      invoiceId: invoice.id,
+      externalInvoiceId,
+      message: error instanceof Error ? error.message : "Unknown Holded error",
+    });
+
+    return invoice;
+  }
+}
+
 async function readInvoices(
   supabase: ReturnType<typeof getSupabase>,
   clientId: string
@@ -483,13 +657,19 @@ async function readInvoices(
     return [];
   }
 
-  return data
+  const baseInvoices = data
     .map((row) => mapInvoiceRow(row))
     .sort((a, b) => {
       const aTime = normalizeDateForSort(a.invoice_date);
       const bTime = normalizeDateForSort(b.invoice_date);
       return bTime - aTime;
     });
+
+  const enrichedInvoices = await Promise.all(
+    baseInvoices.map((invoice) => enrichInvoiceWithHoldedLiveData(invoice))
+  );
+
+  return enrichedInvoices;
 }
 
 async function readHoldedContactSafely(params: {

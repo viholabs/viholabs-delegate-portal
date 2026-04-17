@@ -1,0 +1,49 @@
+name: HOLDed — Sync Paid States (every 4h)
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: holded-sync-paid-states
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      MAX_ITEMS: "200"
+      PREVIEW: "false"
+
+    steps:
+      - name: Checkout (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run paid-state sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
+          MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          PREVIEW: ${{ env.PREVIEW }}
+        run: |
+          set -euo pipefail
+          pnpm exec -- tsx scripts/holded-sync-paid-states.ts

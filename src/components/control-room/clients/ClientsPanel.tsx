@@ -71,7 +71,7 @@ function sameNullable(a: string | null, b: string | null) {
   return (a ?? "").trim() === (b ?? "").trim();
 }
 
-export default function ClientsPanel() {
+export default function ClientsPanel({ initialClientId }: { initialClientId?: string | null }) {
   const [clients, setClients] = useState<ClientListItem[]>([]);
   const [clientsLoading, setClientsLoading] = useState(true);
   const [clientsError, setClientsError] = useState<string | null>(null);
@@ -643,6 +643,15 @@ export default function ClientsPanel() {
       loadPaymentTerms(),
     ]);
   }, []);
+
+  // Auto-abrir cliente si se recibe initialClientId (deep-link desde ficha de delegado)
+  useEffect(() => {
+    if (initialClientId) {
+      void openClient(initialClientId);
+    }
+    // Solo al montar — si el id cambia es una nueva navegación intencional
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialClientId]);
 
   const filteredClients = useMemo(() => {
     const q = search.trim().toLowerCase();

@@ -382,7 +382,19 @@ export async function GET(req: NextRequest) {
       roles: Array.from(roleMap.get(actorRow.id) ?? []),
     }));
 
-    const delegates = eligibleActors.filter((row) => row.roles.includes("delegate"));
+    // Operational delegates: those with at least one active client assignment.
+    // This excludes test/inactive actors from the dropdown in ClientCommercialSection.
+    // Safety valve: if none have assignments (fresh install), fall back to all with role.
+    const assignedDelegateIds = new Set(
+      activeAssignments
+        .filter((a) => a.assignment_role === "delegate")
+        .map((a) => a.actor_id)
+    );
+    const delegates = eligibleActors.filter(
+      (row) =>
+        row.roles.includes("delegate") &&
+        (assignedDelegateIds.size === 0 || assignedDelegateIds.has(row.id))
+    );
 
     const kols = eligibleActors.filter((row) => row.roles.includes("kol"));
 

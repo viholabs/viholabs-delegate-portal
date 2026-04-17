@@ -50,3 +50,23 @@ export function entryForRole(_role: unknown) {
 export function entryForActor(_input: { role: unknown; commission_level?: unknown }) {
   return "/control-room/shell";
 }
+
+/**
+ * ✅ Canonical supervisor role check
+ *
+ * Returns true when the actor role has cross-delegate visibility
+ * (can see all delegates, all clients, all invoices).
+ *
+ * Use this function everywhere instead of inline role string comparisons.
+ */
+export function isSupervisorRole(role: unknown): boolean {
+  const r = normalizeRole(role);
+  return (
+    r === "SUPER_ADMIN" ||
+    r === "MELQUISEDEC" ||
+    r === "ADMINISTRATIVE" ||
+    r === "COORDINATOR_COMMERCIAL" ||
+    r === "COORDINATOR_CECT" ||
+    r === "KOL"
+  );
+}

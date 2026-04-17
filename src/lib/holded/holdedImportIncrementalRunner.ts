@@ -98,6 +98,33 @@ function forcePositive(n: number): number {
 }
 
 function normalizeInvoiceItemLineType(row: any): "sale" | "promotion" {
+  const sku =
+    row?.sku === null || row?.sku === undefined
+      ? ""
+      : String(row.sku).trim().toUpperCase();
+
+  const description =
+    typeof row?.description === "string"
+      ? row.description.trim().toLowerCase()
+      : "";
+
+  // SKU catalog is authoritative — checked first before any line_type passthrough.
+  // Holded marks promo packs as "sale" because they carry a price; the SKU wins.
+  const looksPromotionBySku =
+    sku.includes("PROMO") || sku.includes("FOC") || sku === "0";
+
+  const looksPromotionByDescription =
+    description.includes("promo") ||
+    description.includes("promoción") ||
+    description.includes("promocion") ||
+    description.includes("gratis") ||
+    description.includes("free");
+
+  if (looksPromotionBySku || looksPromotionByDescription) {
+    return "promotion";
+  }
+
+  // Only trust line_type passthrough after SKU/description checks pass
   const raw =
     typeof row?.line_type === "string"
       ? row.line_type.trim().toLowerCase()
@@ -123,16 +150,6 @@ function normalizeInvoiceItemLineType(row: any): "sale" | "promotion" {
     0
   );
 
-  const sku =
-    row?.sku === null || row?.sku === undefined
-      ? ""
-      : String(row.sku).trim().toUpperCase();
-
-  const description =
-    typeof row?.description === "string"
-      ? row.description.trim().toLowerCase()
-      : "";
-
   const isEconomicallyZero =
     units === 0 &&
     unitNetPrice === 0 &&
@@ -141,17 +158,7 @@ function normalizeInvoiceItemLineType(row: any): "sale" | "promotion" {
     lineVatAmount === 0 &&
     lineGrossAmount === 0;
 
-  const looksPromotionBySku =
-    sku.includes("PROMO") || sku.includes("FOC") || sku === "0";
-
-  const looksPromotionByDescription =
-    description.includes("promo") ||
-    description.includes("promoción") ||
-    description.includes("promocion") ||
-    description.includes("gratis") ||
-    description.includes("free");
-
-  if (isEconomicallyZero || looksPromotionBySku || looksPromotionByDescription) {
+  if (isEconomicallyZero) {
     return "promotion";
   }
 
@@ -410,7 +417,7 @@ async function loadExistingInvoicesByExternalId(args: {
   const { data, error } = await args.supabase
     .from("invoices")
     .select(
-      "id, external_invoice_id, source_provider, state_code, is_paid, paid_date, external_modified_at"
+      "id, external_invoice_id, source_provider, state_code, is_paid, paid_date, document_type, external_modified_at"
     )
     .eq("source_provider", "holded")
     .in("external_invoice_id", ids);
@@ -434,22 +441,40 @@ async function updateExistingInvoiceFieldsIfNeeded(args: {
   invoiceId: string;
   currentStateCode: string | null;
   nextStateCode: string | null;
+  currentIsPaid: boolean | null;
+  nextIsPaid: boolean | null;
+  currentPaidDate: string | null;
+  nextPaidDate: string | null;
+  nextDocumentType: "invoice" | "creditnote" | null;
 }) {
   const currentStateCode = normalizeInvoiceStateCode(args.currentStateCode);
   const nextStateCode = normalizeInvoiceStateCode(args.nextStateCode);
+  const nextIsPaid = args.nextIsPaid === true;
+  const currentIsPaid = args.currentIsPaid === true;
 
   if (!args.invoiceId) {
     return { updated: false };
   }
 
-  if (nextStateCode === currentStateCode) {
+  const needsUpdate =
+    nextStateCode !== currentStateCode ||
+    nextIsPaid !== currentIsPaid ||
+    (nextIsPaid && args.nextPaidDate !== args.currentPaidDate);
+
+  if (!needsUpdate) {
     return { updated: false };
   }
 
   const patch: Record<string, unknown> = {
     state_code: nextStateCode,
+    is_paid: nextIsPaid,
+    paid_date: nextIsPaid ? (args.nextPaidDate ?? null) : null,
     updated_at: new Date().toISOString(),
   };
+
+  if (args.nextDocumentType) {
+    patch.document_type = args.nextDocumentType;
+  }
 
   const { error } = await args.supabase
     .from("invoices")
@@ -587,6 +612,11 @@ export async function importHoldedDocumentsIncremental(args: {
       invoiceId: existingInvoice.id,
       currentStateCode: existingInvoice.state_code ?? null,
       nextStateCode: sanitizedInvoice.state_code ?? null,
+      currentIsPaid: existingInvoice.is_paid ?? null,
+      nextIsPaid: sanitizedInvoice.is_paid ?? null,
+      currentPaidDate: existingInvoice.paid_date ?? null,
+      nextPaidDate: sanitizedInvoice.paid_date ?? null,
+      nextDocumentType: (sanitizedInvoice as any).document_type ?? null,
     });
 
     if (result.updated) {
@@ -624,6 +654,9 @@ export async function importHoldedDocumentsIncremental(args: {
 
   const itemRows: any[] = [];
 
+  // Collect external IDs of existing invoices that need item re-sync
+  const existingIdsToResyncItems: Array<{ externalId: string; invoiceId: string }> = [];
+
   for (const acceptedDoc of normalizedAccepted) {
     const externalInvoiceId = toNullableString(
       acceptedDoc?.sanitizedInvoice?.external_invoice_id
@@ -633,6 +666,12 @@ export async function importHoldedDocumentsIncremental(args: {
 
     const existingInvoice = existingInvoicesByExternalId.get(externalInvoiceId);
     if (existingInvoice?.id) {
+      // Re-sync line items for existing invoices so SKU-based classification
+      // is always applied with the current classifier (fixes stale line_type values).
+      existingIdsToResyncItems.push({
+        externalId: externalInvoiceId,
+        invoiceId: existingInvoice.id,
+      });
       continue;
     }
 
@@ -651,6 +690,34 @@ export async function importHoldedDocumentsIncremental(args: {
     }
   }
 
+  // Re-sync items for existing invoices: delete stale rows, insert fresh ones
+  let resynced = 0;
+  for (const { externalId, invoiceId } of existingIdsToResyncItems) {
+    const acceptedDoc = normalizedAccepted.find(
+      (d: any) => toNullableString(d?.sanitizedInvoice?.external_invoice_id) === externalId
+    );
+    const sanitizedItems: any[] = Array.isArray(acceptedDoc?.sanitizedItems)
+      ? acceptedDoc.sanitizedItems
+      : [];
+
+    if (sanitizedItems.length === 0) continue;
+
+    const { error: deleteErr } = await supabase
+      .from("invoice_items")
+      .delete()
+      .eq("invoice_id", invoiceId);
+
+    if (deleteErr) throw deleteErr;
+
+    const { error: insertErr } = await supabase
+      .from("invoice_items")
+      .insert(sanitizedItems.map((item: any) => ({ invoice_id: invoiceId, ...item })));
+
+    if (insertErr) throw insertErr;
+
+    resynced += 1;
+  }
+
   if (itemRows.length > 0) {
     const { error: insertItemsError } = await supabase
       .from("invoice_items")
@@ -662,7 +729,7 @@ export async function importHoldedDocumentsIncremental(args: {
   }
 
   logger.info(
-    `[HOLDED][OK] inserted_invoices=${invoiceRowsToInsert.length} existing_invoices=${existingAcceptedDocs.length} updated_invoices=${updatedInvoices} items=${itemRows.length} skipped=${skipped.length}`
+    `[HOLDED][OK] inserted_invoices=${invoiceRowsToInsert.length} existing_invoices=${existingAcceptedDocs.length} updated_invoices=${updatedInvoices} resynced_items=${resynced} new_items=${itemRows.length} skipped=${skipped.length}`
   );
 
   return {

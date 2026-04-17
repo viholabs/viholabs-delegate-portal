@@ -112,6 +112,60 @@ type InsertedClientRow = {
   sepa_status: string | null;
 };
 
+type AssignmentRow = {
+  client_holded_contact_id: string | null;
+  actor_id: string | null;
+  valid_from: string | null;
+  source: string | null;
+};
+
+type ActorRow = {
+  id: string | null;
+  name: string | null;
+  email: string | null;
+};
+
+type ClientItemResponse = {
+  id: string | null;
+  created_at: string | null;
+  actor_id: string | null;
+  delegate_id: string | null;
+  profile_type: string | null;
+  tax_id: string | null;
+  name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  status: string | null;
+  updated_at: string | null;
+  recommended_by_client_id: string | null;
+  name_raw: string | null;
+  legal_name: string | null;
+  billing_email: string | null;
+  fiscal_address_line1: string | null;
+  fiscal_address_line2: string | null;
+  fiscal_city: string | null;
+  fiscal_region: string | null;
+  fiscal_postal_code: string | null;
+  fiscal_country: string | null;
+  vat_number: string | null;
+  is_company: boolean | null;
+  state_code: string | null;
+  holded_contact_id: string | null;
+  payment_method_name: string | null;
+  payment_terms_name: string | null;
+  iban: string | null;
+  bank_account_holder: string | null;
+  sepa_status: string | null;
+  sepa_reference: string | null;
+  sepa_generated_at: string | null;
+  sepa_signed_at: string | null;
+  sepa_document_path: string | null;
+  delegate_name: string | null;
+  delegate_email: string | null;
+  delegate_valid_from: string | null;
+  delegate_source: string | null;
+};
+
 function isValidEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 }
@@ -287,6 +341,95 @@ async function createHoldedContact(args: {
   };
 }
 
+const CLIENT_SELECT_FIELDS = [
+  "id",
+  "created_at",
+  "actor_id",
+  "delegate_id",
+  "profile_type",
+  "tax_id",
+  "name",
+  "contact_email",
+  "contact_phone",
+  "status",
+  "updated_at",
+  "recommended_by_client_id",
+  "name_raw",
+  "legal_name",
+  "billing_email",
+  "fiscal_address_line1",
+  "fiscal_address_line2",
+  "fiscal_city",
+  "fiscal_region",
+  "fiscal_postal_code",
+  "fiscal_country",
+  "vat_number",
+  "is_company",
+  "state_code",
+  "holded_contact_id",
+  "payment_method_name",
+  "payment_terms_name",
+  "iban",
+  "bank_account_holder",
+  "sepa_status",
+  "sepa_reference",
+  "sepa_generated_at",
+  "sepa_signed_at",
+  "sepa_document_path",
+].join(",");
+
+function buildClientResponseItem(args: {
+  client: ClientListRow;
+  delegateActorId: string | null;
+  delegateName: string | null;
+  delegateEmail: string | null;
+  delegateValidFrom: string | null;
+  delegateSource: string | null;
+}): ClientItemResponse {
+  const { client, delegateActorId, delegateName, delegateEmail, delegateValidFrom, delegateSource } = args;
+
+  return {
+    id: client.id ?? null,
+    created_at: client.created_at ?? null,
+    actor_id: client.actor_id ?? null,
+    delegate_id: delegateActorId ?? null,
+    profile_type: client.profile_type ?? null,
+    tax_id: client.tax_id ?? null,
+    name: client.name ?? null,
+    contact_email: client.contact_email ?? null,
+    contact_phone: client.contact_phone ?? null,
+    status: client.status ?? null,
+    updated_at: client.updated_at ?? null,
+    recommended_by_client_id: client.recommended_by_client_id ?? null,
+    name_raw: client.name_raw ?? null,
+    legal_name: client.legal_name ?? null,
+    billing_email: client.billing_email ?? null,
+    fiscal_address_line1: client.fiscal_address_line1 ?? null,
+    fiscal_address_line2: client.fiscal_address_line2 ?? null,
+    fiscal_city: client.fiscal_city ?? null,
+    fiscal_region: client.fiscal_region ?? null,
+    fiscal_postal_code: client.fiscal_postal_code ?? null,
+    fiscal_country: client.fiscal_country ?? null,
+    vat_number: client.vat_number ?? null,
+    is_company: client.is_company ?? null,
+    state_code: client.state_code ?? null,
+    holded_contact_id: client.holded_contact_id ?? null,
+    payment_method_name: client.payment_method_name ?? null,
+    payment_terms_name: client.payment_terms_name ?? null,
+    iban: client.iban ?? null,
+    bank_account_holder: client.bank_account_holder ?? null,
+    sepa_status: client.sepa_status ?? null,
+    sepa_reference: client.sepa_reference ?? null,
+    sepa_generated_at: client.sepa_generated_at ?? null,
+    sepa_signed_at: client.sepa_signed_at ?? null,
+    sepa_document_path: client.sepa_document_path ?? null,
+    delegate_name: delegateName ?? null,
+    delegate_email: delegateEmail ?? null,
+    delegate_valid_from: delegateValidFrom ?? null,
+    delegate_source: delegateSource ?? null,
+  };
+}
+
 export async function GET(req: Request) {
   const r = await getActorFromRequest(req);
   if (!r.ok) return json(r.status, { ok: false, error: r.error });
@@ -346,69 +489,246 @@ export async function GET(req: Request) {
       delegateActorId = String(r.actor.id);
     }
 
-    stage = "query_clients";
-    let query = r.supaService
-      .from("clients")
-      .select(
-        [
-          "id",
-          "created_at",
-          "actor_id",
-          "delegate_id",
-          "profile_type",
-          "tax_id",
-          "name",
-          "contact_email",
-          "contact_phone",
-          "status",
-          "updated_at",
-          "recommended_by_client_id",
-          "name_raw",
-          "legal_name",
-          "billing_email",
-          "fiscal_address_line1",
-          "fiscal_address_line2",
-          "fiscal_city",
-          "fiscal_region",
-          "fiscal_postal_code",
-          "fiscal_country",
-          "vat_number",
-          "is_company",
-          "state_code",
-          "holded_contact_id",
-          "payment_method_name",
-          "payment_terms_name",
-          "iban",
-          "bank_account_holder",
-          "sepa_status",
-          "sepa_reference",
-          "sepa_generated_at",
-          "sepa_signed_at",
-          "sepa_document_path",
-        ].join(",")
-      )
-      .order("name", { ascending: true });
+    // -----------------------------------------------------------------------
+    // SUPERVISOR without a specific delegate filter
+    // → Query ALL clients directly so clients without assignment rows
+    //   (e.g. auto-created by the invoice importer) are always visible.
+    //   Assignments are loaded only for enrichment (delegate name/email).
+    // -----------------------------------------------------------------------
+    if (isSupervisor && !delegateActorId) {
+      stage = "query_clients_all";
+      const clientsResponse = await r.supaService
+        .from("clients")
+        .select(CLIENT_SELECT_FIELDS)
+        .order("name", { ascending: true });
+
+      if (clientsResponse.error) {
+        return json(500, { ok: false, stage, error: clientsResponse.error.message });
+      }
+
+      const clientRows = ((clientsResponse.data ?? []) as unknown[]) as ClientListRow[];
+
+      stage = "query_assignments_all";
+      const assignmentsResponse = await r.supaService
+        .from("client_actor_assignments_g1")
+        .select("client_holded_contact_id,actor_id,valid_from,source")
+        .eq("assignment_role", "delegate")
+        .is("valid_to", null);
+
+      const allAssignmentRows = ((assignmentsResponse.data ?? []) as unknown[]) as AssignmentRow[];
+      const assignmentByHci = new Map<string, { actor_id: string; valid_from: string | null; source: string | null }>();
+      const allActorIds = new Set<string>();
+
+      for (const row of allAssignmentRows) {
+        const hci = safeStr(row.client_holded_contact_id);
+        const aid = safeStr(row.actor_id);
+        if (hci && aid && !assignmentByHci.has(hci)) {
+          assignmentByHci.set(hci, { actor_id: aid, valid_from: row.valid_from ?? null, source: row.source ?? null });
+          allActorIds.add(aid);
+        }
+      }
+
+      // Also collect delegate_id from clients themselves as fallback
+      for (const client of clientRows) {
+        const did = safeStr(client.delegate_id);
+        if (did) allActorIds.add(did);
+      }
+
+      stage = "query_actors_all";
+      const actorsById = new Map<string, ActorRow>();
+      if (allActorIds.size > 0) {
+        const actorsResponse = await r.supaService
+          .from("actors")
+          .select("id,name,email")
+          .in("id", Array.from(allActorIds));
+
+        if (!actorsResponse.error) {
+          for (const actor of ((actorsResponse.data ?? []) as unknown[]) as ActorRow[]) {
+            const id = safeStr(actor.id);
+            if (id) actorsById.set(id, actor);
+          }
+        }
+      }
+
+      const mergedRows: ClientItemResponse[] = clientRows.map((client) => {
+        const hci = safeStr(client.holded_contact_id);
+        const assignment = hci ? assignmentByHci.get(hci) : undefined;
+        // Fallback to clients.delegate_id when no assignment row exists
+        const resolvedDelegateId = assignment?.actor_id ?? safeStr(client.delegate_id) ?? null;
+        const delegateActor = resolvedDelegateId ? actorsById.get(resolvedDelegateId) : undefined;
+
+        return buildClientResponseItem({
+          client,
+          delegateActorId: resolvedDelegateId,
+          delegateName: delegateActor?.name ?? null,
+          delegateEmail: delegateActor?.email ?? null,
+          delegateValidFrom: assignment?.valid_from ?? null,
+          delegateSource: assignment?.source ?? null,
+        });
+      });
+
+      const filteredRows = q
+        ? mergedRows.filter((c) => {
+            const nq = normalize(q);
+            return (
+              normalize(String(c.name ?? "")).includes(nq) ||
+              normalize(String(c.legal_name ?? "")).includes(nq) ||
+              normalize(String(c.tax_id ?? "")).includes(nq) ||
+              normalize(String(c.contact_email ?? "")).includes(nq)
+            );
+          })
+        : mergedRows;
+
+      filteredRows.sort((a, b) => safeStr(a.name).localeCompare(safeStr(b.name), "es"));
+
+      return NextResponse.json({ ok: true, delegateActorId, items: filteredRows });
+    }
+
+    // -----------------------------------------------------------------------
+    // DELEGATE mode (or supervisor filtering by specific delegate)
+    // → Assignment rows are required — only show clients with an active assignment.
+    // -----------------------------------------------------------------------
+    stage = "query_assignments";
+    let assignmentsQuery = r.supaService
+      .from("client_actor_assignments_g1")
+      .select("client_holded_contact_id,actor_id,valid_from,source")
+      .eq("assignment_role", "delegate")
+      .is("valid_to", null);
 
     if (delegateActorId) {
-      query = query.eq("delegate_id", delegateActorId);
+      assignmentsQuery = assignmentsQuery.eq("actor_id", delegateActorId);
     }
 
-    const queryResult = await query;
-    const queryError = queryResult.error;
-
-    if (queryError) {
-      return json(500, { ok: false, stage, error: queryError.message });
+    const assignmentsResponse = await assignmentsQuery;
+    if (assignmentsResponse.error) {
+      return json(500, {
+        ok: false,
+        stage,
+        error: assignmentsResponse.error.message,
+      });
     }
 
-    const rows = ((queryResult.data ?? []) as unknown[]) as ClientListRow[];
+    const assignmentRows = ((assignmentsResponse.data ?? []) as unknown[]) as AssignmentRow[];
+
+    const canonicalAssignments = assignmentRows.filter(
+      (row) => !!safeStr(row.client_holded_contact_id) && !!safeStr(row.actor_id)
+    );
+
+    if (!canonicalAssignments.length) {
+      return NextResponse.json({
+        ok: true,
+        delegateActorId,
+        items: [],
+      });
+    }
+
+    const holdedContactIds = Array.from(
+      new Set(
+        canonicalAssignments
+          .map((row) => safeStr(row.client_holded_contact_id))
+          .filter(Boolean)
+      )
+    );
+
+    const actorIds = Array.from(
+      new Set(
+        canonicalAssignments
+          .map((row) => safeStr(row.actor_id))
+          .filter(Boolean)
+      )
+    );
+
+    stage = "query_clients";
+    const clientsResponse = await r.supaService
+      .from("clients")
+      .select(CLIENT_SELECT_FIELDS)
+      .in("holded_contact_id", holdedContactIds)
+      .order("name", { ascending: true });
+
+    if (clientsResponse.error) {
+      return json(500, {
+        ok: false,
+        stage,
+        error: clientsResponse.error.message,
+      });
+    }
+
+    const clientRows = ((clientsResponse.data ?? []) as unknown[]) as ClientListRow[];
+
+    stage = "query_actors";
+    const actorsById = new Map<string, ActorRow>();
+    if (actorIds.length > 0) {
+      const actorsResponse = await r.supaService
+        .from("actors")
+        .select("id,name,email")
+        .in("id", actorIds);
+
+      if (actorsResponse.error) {
+        return json(500, {
+          ok: false,
+          stage,
+          error: actorsResponse.error.message,
+        });
+      }
+
+      const actors = ((actorsResponse.data ?? []) as unknown[]) as ActorRow[];
+      for (const actor of actors) {
+        const id = safeStr(actor.id);
+        if (id) actorsById.set(id, actor);
+      }
+    }
+
+    const assignmentByHoldedContactId = new Map<
+      string,
+      {
+        actor_id: string;
+        valid_from: string | null;
+        source: string | null;
+      }
+    >();
+
+    for (const row of canonicalAssignments) {
+      const holdedContactId = safeStr(row.client_holded_contact_id);
+      const actorId = safeStr(row.actor_id);
+      if (!holdedContactId || !actorId) continue;
+
+      if (!assignmentByHoldedContactId.has(holdedContactId)) {
+        assignmentByHoldedContactId.set(holdedContactId, {
+          actor_id: actorId,
+          valid_from: row.valid_from ?? null,
+          source: row.source ?? null,
+        });
+      }
+    }
+
+    const mergedRows: ClientItemResponse[] = clientRows
+      .map((client) => {
+        const holdedContactId = safeStr(client.holded_contact_id);
+        if (!holdedContactId) return null;
+
+        const assignment = assignmentByHoldedContactId.get(holdedContactId);
+        if (!assignment) return null;
+
+        const delegateActor = actorsById.get(assignment.actor_id);
+
+        return buildClientResponseItem({
+          client,
+          delegateActorId: assignment.actor_id,
+          delegateName: delegateActor?.name ?? null,
+          delegateEmail: delegateActor?.email ?? null,
+          delegateValidFrom: assignment.valid_from ?? null,
+          delegateSource: assignment.source ?? null,
+        });
+      })
+      .filter((row): row is ClientItemResponse => !!row);
 
     const filteredRows = q
-      ? rows.filter((c) => {
+      ? mergedRows.filter((c) => {
+          const nq = normalize(q);
           const byName = normalize(String(c.name ?? ""));
           const byLegalName = normalize(String(c.legal_name ?? ""));
           const byTaxId = normalize(String(c.tax_id ?? ""));
           const byEmail = normalize(String(c.contact_email ?? ""));
-          const nq = normalize(q);
 
           return (
             byName.includes(nq) ||
@@ -417,47 +737,16 @@ export async function GET(req: Request) {
             byEmail.includes(nq)
           );
         })
-      : rows;
+      : mergedRows;
+
+    filteredRows.sort((a, b) =>
+      safeStr(a.name).localeCompare(safeStr(b.name), "es")
+    );
 
     return NextResponse.json({
       ok: true,
       delegateActorId,
-      items: filteredRows.map((c) => ({
-        id: c.id ?? null,
-        created_at: c.created_at ?? null,
-        actor_id: c.actor_id ?? null,
-        delegate_id: c.delegate_id ?? null,
-        profile_type: c.profile_type ?? null,
-        tax_id: c.tax_id ?? null,
-        name: c.name ?? null,
-        contact_email: c.contact_email ?? null,
-        contact_phone: c.contact_phone ?? null,
-        status: c.status ?? null,
-        updated_at: c.updated_at ?? null,
-        recommended_by_client_id: c.recommended_by_client_id ?? null,
-        name_raw: c.name_raw ?? null,
-        legal_name: c.legal_name ?? null,
-        billing_email: c.billing_email ?? null,
-        fiscal_address_line1: c.fiscal_address_line1 ?? null,
-        fiscal_address_line2: c.fiscal_address_line2 ?? null,
-        fiscal_city: c.fiscal_city ?? null,
-        fiscal_region: c.fiscal_region ?? null,
-        fiscal_postal_code: c.fiscal_postal_code ?? null,
-        fiscal_country: c.fiscal_country ?? null,
-        vat_number: c.vat_number ?? null,
-        is_company: c.is_company ?? null,
-        state_code: c.state_code ?? null,
-        holded_contact_id: c.holded_contact_id ?? null,
-        payment_method_name: c.payment_method_name ?? null,
-        payment_terms_name: c.payment_terms_name ?? null,
-        iban: c.iban ?? null,
-        bank_account_holder: c.bank_account_holder ?? null,
-        sepa_status: c.sepa_status ?? null,
-        sepa_reference: c.sepa_reference ?? null,
-        sepa_generated_at: c.sepa_generated_at ?? null,
-        sepa_signed_at: c.sepa_signed_at ?? null,
-        sepa_document_path: c.sepa_document_path ?? null,
-      })),
+      items: filteredRows,
     });
   } catch (e: unknown) {
     return json(500, {

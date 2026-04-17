@@ -43,8 +43,8 @@ function SituationPanel() {
   );
 }
 
-function ClientsShellPanel() {
-  return <ClientsPanel />;
+function ClientsShellPanel({ clientId }: { clientId?: string | null }) {
+  return <ClientsPanel initialClientId={clientId} />;
 }
 
 function FacturacionPanel() {
@@ -79,6 +79,8 @@ export default function ShellPageClient() {
     return isShellTabId(tabParam) ? tabParam : "situation";
   }, [searchParams]);
 
+  const clientId = searchParams.get("clientId") ?? null;
+
   const [activeTab, setActiveTab] = useState<ShellTabId>(initialTab);
 
   useEffect(() => {
@@ -91,7 +93,7 @@ export default function ShellPageClient() {
         return <SituationPanel />;
 
       case "clients":
-        return <ClientsShellPanel />;
+        return <ClientsShellPanel clientId={clientId} />;
 
       case "facturacion":
         return <FacturacionPanel />;
