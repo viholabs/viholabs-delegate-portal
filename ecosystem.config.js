@@ -4,7 +4,7 @@ module.exports = {
   apps: [
     {
       name: "portal",
-      script: "node_modules/.bin/next",
+      script: "pnpm",
       args: "start",
       cwd: "/var/www/portal",
       instances: 1,
@@ -14,7 +14,6 @@ module.exports = {
       max_memory_restart: "512M",
       env: {
         NODE_ENV: "production",
-        PORT: "3000",
       },
     },
   ],

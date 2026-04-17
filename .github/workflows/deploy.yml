@@ -95,7 +95,11 @@ jobs:
 
             pm2 ls || true
 
-            pm2 startOrRestart /var/www/portal/ecosystem.config.js --update-env
+            # Delete old process so ecosystem.config.js recreates it with correct cwd/script
+            pm2 stop portal 2>/dev/null || true
+            pm2 delete portal 2>/dev/null || true
+
+            pm2 start /var/www/portal/ecosystem.config.js
             pm2 save
 
             echo "=== 9) Post-check ==="
