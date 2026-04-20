@@ -72,19 +72,9 @@ export async function middleware(req: NextRequest) {
         cookiesToSet.forEach(({ name, value }) => {
           req.cookies.set(name, value);
         });
-
-        // Rebuild Cookie header so downstream route handlers see refreshed tokens
-        const requestHeaders = new Headers(req.headers);
-        const cookieHeader = req.cookies
-          .getAll()
-          .map(({ name, value }) => `${name}=${value}`)
-          .join("; ");
-        requestHeaders.set("cookie", cookieHeader);
-
         response = NextResponse.next({
-          request: { headers: requestHeaders },
+          request: req,
         });
-
         cookiesToSet.forEach(({ name, value, options }) => {
           response.cookies.set(name, value, options);
         });
