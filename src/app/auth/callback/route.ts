@@ -176,6 +176,17 @@ export async function GET(req: Request) {
     }
   }
 
+  // CRITICAL: After exchange, get the session to ensure cookies were created
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  
+  if (sessionError || !sessionData?.session) {
+    console.error("[AUTH CALLBACK] Session not found after exchange", {
+      error: sessionError?.message,
+      hasCookies: req.headers.get("cookie")?.length ?? 0,
+    });
+    return redirectToLogin(origin, "session_missing");
+  }
+
   const { data, error: userError } = await supabase.auth.getUser();
   const user = data?.user;
 
