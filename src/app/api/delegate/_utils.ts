@@ -138,9 +138,13 @@ async function resolveFromCookies(
   try {
     supaRls = await createServerSupabaseClient();
   } catch (err) {
-    // next/headers unavailable in this context — skip
-    console.error("[_utils] createServerSupabaseClient failed:", err);
-    return null;
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      status: 500,
+      error: `SSR client init failed: ${reason}`,
+      stage: "cookies_init",
+    };
   }
 
   try {
