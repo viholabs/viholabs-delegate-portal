@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { createServerClient } from "@supabase/ssr";
+import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 
 type ActorRow = {
   id: string;
@@ -11,7 +11,7 @@ type ActorRow = {
   auth_user_id: string | null;
 };
 
-type RouteAuthClient = ReturnType<typeof createClientFromRequest>;
+type RouteAuthClient = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
 type ResolveActorOk = {
   ok: true;
@@ -78,31 +78,6 @@ function createServiceClient() {
   });
 }
 
-function createClientFromRequest(req: Request) {
-  const { url, anon } = getSupabaseConfig();
-  const cookieHeader = req.headers.get("cookie") ?? "";
-
-  const parsed: { name: string; value: string }[] = cookieHeader
-    .split(";")
-    .map((c) => {
-      const idx = c.indexOf("=");
-      if (idx === -1) return null;
-      return { name: c.slice(0, idx).trim(), value: c.slice(idx + 1).trim() };
-    })
-    .filter((c): c is { name: string; value: string } => c !== null && c.name.length > 0);
-
-  return createServerClient(url, anon, {
-    cookies: {
-      getAll() {
-        return parsed;
-      },
-      setAll() {
-        // read-only context — token refresh handled by middleware
-      },
-    },
-  });
-}
-
 function getBearerToken(req: Request): string | null {
   const header =
     req.headers.get("authorization") ?? req.headers.get("Authorization");
@@ -156,16 +131,31 @@ async function lookupActiveActorByAuthUserId(
 }
 
 async function resolveFromCookies(
-  req: Request,
   supaService: ReturnType<typeof createServiceClient>
 ): Promise<ResolveActorResult | null> {
+  let supaRls: RouteAuthClient | undefined;
+
   try {
-    const supaRls = createClientFromRequest(req);
+    supaRls = await createServerSupabaseClient();
+  } catch (err) {
+    // next/headers unavailable in this context — skip
+    console.error("[_utils] createServerSupabaseClient failed:", err);
+    return null;
+  }
+
+  try {
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
     if (error || !authUserId) {
-      return null;
+      // Surface the real error so the API response reveals the root cause
+      const reason = error?.message ?? "no user returned";
+      return {
+        ok: false,
+        status: 401,
+        error: `Cookie auth failed: ${reason}`,
+        stage: "cookies_getUser",
+      };
     }
 
     const actorLookup = await lookupActiveActorByAuthUserId(
@@ -191,8 +181,13 @@ async function resolveFromCookies(
       authMode: "cookies",
     };
   } catch (err) {
-    console.error("[_utils] resolveFromCookies error:", err);
-    return null;
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      status: 500,
+      error: `Cookie auth exception: ${reason}`,
+      stage: "cookies_exception",
+    };
   }
 }
 
@@ -301,7 +296,7 @@ export async function getActorFromRequest(
     const supaService = createServiceClient();
 
     stage = "cookies_auth";
-    const byCookies = await resolveFromCookies(req, supaService);
+    const byCookies = await resolveFromCookies(supaService);
     if (byCookies) return byCookies;
 
     stage = "internal_bearer";
