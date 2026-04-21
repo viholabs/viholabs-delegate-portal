@@ -82,10 +82,19 @@ function getBearerToken(req: Request): string | null {
   const header =
     req.headers.get("authorization") ?? req.headers.get("Authorization");
 
-  if (!header) return null;
+  if (header) {
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
 
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() ?? null;
+  // nginx strips Authorization on VPS — fall back to the cookie set by AuthInterceptorProvider
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const m = cookieHeader.match(/(?:^|;\s*)viholabs_auth_token=([^;]+)/);
+  if (m?.[1]) {
+    try { return decodeURIComponent(m[1]).trim(); } catch { return m[1].trim(); }
+  }
+
+  return null;
 }
 
 function createBearerAuthClient(token: string) {
@@ -133,65 +142,20 @@ async function lookupActiveActorByAuthUserId(
 async function resolveFromCookies(
   supaService: ReturnType<typeof createServiceClient>
 ): Promise<ResolveActorResult | null> {
-  let supaRls: RouteAuthClient | undefined;
-
   try {
-    supaRls = await createServerSupabaseClient();
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return {
-      ok: false,
-      status: 500,
-      error: `SSR client init failed: ${reason}`,
-      stage: "cookies_init",
-    };
-  }
-
-  try {
+    const supaRls = await createServerSupabaseClient();
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
-    if (error || !authUserId) {
-      // Surface the real error so the API response reveals the root cause
-      const reason = error?.message ?? "no user returned";
-      return {
-        ok: false,
-        status: 401,
-        error: `Cookie auth failed: ${reason}`,
-        stage: "cookies_getUser",
-      };
-    }
+    // Return null (not error) on failure — lets Bearer auth take over
+    if (error || !authUserId) return null;
 
-    const actorLookup = await lookupActiveActorByAuthUserId(
-      supaService,
-      authUserId
-    );
+    const actorLookup = await lookupActiveActorByAuthUserId(supaService, authUserId);
+    if (actorLookup.error || !actorLookup.actor) return null;
 
-    if (actorLookup.error || !actorLookup.actor) {
-      return {
-        ok: false,
-        status: actorLookup.error === "Actor not found" ? 403 : 500,
-        error: actorLookup.error ?? "Actor lookup failed",
-        stage: "cookies_lookup_actor",
-      };
-    }
-
-    return {
-      ok: true,
-      supaService,
-      supaRls,
-      actor: actorLookup.actor,
-      authUserId,
-      authMode: "cookies",
-    };
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return {
-      ok: false,
-      status: 500,
-      error: `Cookie auth exception: ${reason}`,
-      stage: "cookies_exception",
-    };
+    return { ok: true, supaService, supaRls, actor: actorLookup.actor, authUserId, authMode: "cookies" };
+  } catch {
+    return null;
   }
 }
 
@@ -299,17 +263,19 @@ export async function getActorFromRequest(
   try {
     const supaService = createServiceClient();
 
-    stage = "cookies_auth";
-    const byCookies = await resolveFromCookies(supaService);
-    if (byCookies) return byCookies;
+    // Bearer first: reads Authorization header OR viholabs_auth_token cookie
+    stage = "bearer_auth";
+    const byBearer = await resolveFromBearer(req, supaService);
+    if (byBearer) return byBearer;
 
     stage = "internal_bearer";
     const byInternalBearer = await resolveFromInternalBearer(req, supaService);
     if (byInternalBearer) return byInternalBearer;
 
-    stage = "bearer_auth";
-    const byBearer = await resolveFromBearer(req, supaService);
-    if (byBearer) return byBearer;
+    // SSR cookies last: unreliable on VPS/PM2 but kept as final fallback
+    stage = "cookies_auth";
+    const byCookies = await resolveFromCookies(supaService);
+    if (byCookies) return byCookies;
 
     return {
       ok: false,

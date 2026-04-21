@@ -12,13 +12,29 @@ import { createClient } from "@/lib/supabase/client";
 // generation, but window is undefined there).
 
 if (typeof window !== "undefined") {
-  // Singleton Supabase browser client — reuses the same instance
-  // used by fetchWithAuth and MotivationalDelegate, so no double init.
   let _supabase: ReturnType<typeof createClient> | null = null;
   function getSupabase() {
     if (!_supabase) _supabase = createClient();
     return _supabase;
   }
+
+  function setAuthCookie(token: string | null) {
+    if (token) {
+      document.cookie = `viholabs_auth_token=${token}; path=/; samesite=lax; max-age=3600`;
+    } else {
+      document.cookie = `viholabs_auth_token=; path=/; max-age=0`;
+    }
+  }
+
+  // Seed the cookie immediately from the cached session
+  getSupabase().auth.getSession().then(({ data: { session } }) => {
+    setAuthCookie(session?.access_token ?? null);
+  });
+
+  // Keep cookie fresh on token refresh
+  getSupabase().auth.onAuthStateChange((_event, session) => {
+    setAuthCookie(session?.access_token ?? null);
+  });
 
   const _originalFetch = window.fetch.bind(window);
 
@@ -42,16 +58,12 @@ if (typeof window !== "undefined") {
 
       if (!headers.has("Authorization")) {
         try {
-          const {
-            data: { session },
-          } = await getSupabase().auth.getSession();
-
+          const { data: { session } } = await getSupabase().auth.getSession();
           if (session?.access_token) {
             headers.set("Authorization", `Bearer ${session.access_token}`);
+            setAuthCookie(session.access_token);
           }
-        } catch {
-          // Cannot get session — proceed without token; server returns 401.
-        }
+        } catch { /* proceed without token */ }
       }
 
       return _originalFetch(input, { ...init, headers });
