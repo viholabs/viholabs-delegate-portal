@@ -20,7 +20,8 @@ dist/
 
 # --- VIHOLABS local-only (NEVER COMMIT) ---
 .env.local
-.env.example
+.env
+# .env.example is safe to commit (no real secrets)
 REPO_DUMP_*.txt
 REPO_DUMP_*.json
 docs/_local_backups/
