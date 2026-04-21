@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import AuthInterceptorProvider from "@/components/portal/AuthInterceptorProvider";
 
 export const metadata: Metadata = {
   title: "VIHOLABS Portal",
@@ -13,7 +14,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        <AuthInterceptorProvider>{children}</AuthInterceptorProvider>
+      </body>
     </html>
   );
 }

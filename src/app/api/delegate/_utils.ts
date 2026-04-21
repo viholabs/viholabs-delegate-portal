@@ -301,17 +301,23 @@ export async function getActorFromRequest(
   try {
     const supaService = createServiceClient();
 
-    stage = "cookies_auth";
-    const byCookies = await resolveFromCookies(req, supaService);
-    if (byCookies) return byCookies;
+    // Bearer first: the AuthInterceptorProvider guarantees all browser
+    // fetch() calls carry Authorization: Bearer. This path is reliable
+    // across all environments (VPS, local, tunnels).
+    stage = "bearer_auth";
+    const byBearer = await resolveFromBearer(req, supaService);
+    if (byBearer) return byBearer;
 
+    // Internal bearer: automation / server-to-server scripts.
     stage = "internal_bearer";
     const byInternalBearer = await resolveFromInternalBearer(req, supaService);
     if (byInternalBearer) return byInternalBearer;
 
-    stage = "bearer_auth";
-    const byBearer = await resolveFromBearer(req, supaService);
-    if (byBearer) return byBearer;
+    // Cookie auth: last resort for contexts without Bearer (e.g. direct
+    // browser navigation to an API URL, curl with cookies, etc.).
+    stage = "cookies_auth";
+    const byCookies = await resolveFromCookies(req, supaService);
+    if (byCookies) return byCookies;
 
     return {
       ok: false,
