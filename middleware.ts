@@ -96,6 +96,21 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
+    // Inject the validated access token as x-viholabs-token into the
+    // forwarded request. Route handlers read this header — it is set
+    // inside Next.js so nginx can never strip it.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const reqHeaders = new Headers(req.headers);
+      reqHeaders.set("x-viholabs-token", session.access_token);
+      const authedResponse = NextResponse.next({ request: { headers: reqHeaders } });
+      // Preserve session-refresh cookies written by setAll
+      response.cookies.getAll().forEach((c) =>
+        authedResponse.cookies.set(c.name, c.value, c)
+      );
+      return authedResponse;
+    }
+
     return response;
   } catch {
     const loginUrl = req.nextUrl.clone();

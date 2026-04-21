@@ -79,15 +79,19 @@ function createServiceClient() {
 }
 
 function getBearerToken(req: Request): string | null {
-  const header =
-    req.headers.get("authorization") ?? req.headers.get("Authorization");
+  // 1. x-viholabs-token: injected by Next.js middleware after session validation.
+  //    Runs inside Next.js — nginx cannot strip it. Most reliable path on VPS.
+  const internal = req.headers.get("x-viholabs-token");
+  if (internal?.trim()) return internal.trim();
 
+  // 2. Authorization header (may be stripped by nginx on VPS)
+  const header = req.headers.get("authorization") ?? req.headers.get("Authorization");
   if (header) {
     const match = header.match(/^Bearer\s+(.+)$/i);
     if (match?.[1]?.trim()) return match[1].trim();
   }
 
-  // nginx strips Authorization on VPS — fall back to the cookie set by AuthInterceptorProvider
+  // 3. viholabs_auth_token cookie set by AuthInterceptorProvider in the browser
   const cookieHeader = req.headers.get("cookie") ?? "";
   const m = cookieHeader.match(/(?:^|;\s*)viholabs_auth_token=([^;]+)/);
   if (m?.[1]) {

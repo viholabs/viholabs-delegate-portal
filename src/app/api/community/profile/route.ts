@@ -56,17 +56,24 @@ function getAnonKey() {
 }
 
 function readBearerToken(req: NextRequest): string {
+  // 1. x-viholabs-token: injected by Next.js middleware — nginx cannot strip it
+  const internal = req.headers.get("x-viholabs-token");
+  if (internal?.trim()) return internal.trim();
+
+  // 2. Authorization header (may be stripped by nginx)
   const authHeader = req.headers.get("authorization") || "";
   if (authHeader.toLowerCase().startsWith("bearer ")) {
     const t = authHeader.slice("bearer ".length).trim();
     if (t) return t;
   }
-  // nginx strips Authorization on VPS — read viholabs_auth_token cookie instead
+
+  // 3. viholabs_auth_token cookie (set by AuthInterceptorProvider in browser)
   const cookieHeader = req.headers.get("cookie") ?? "";
   const m = cookieHeader.match(/(?:^|;\s*)viholabs_auth_token=([^;]+)/);
   if (m?.[1]) {
     try { return decodeURIComponent(m[1]).trim(); } catch { return m[1].trim(); }
   }
+
   return "";
 }
 
