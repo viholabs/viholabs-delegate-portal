@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { DashboardCommercial } from "@/lib/crm/schemas";
+import { fetchWithAuth } from "@/lib/fetch-with-auth";
 
 export function useCommercialDashboard(month: string) {
   const [data, setData] = useState<DashboardCommercial | null>(null);
@@ -14,7 +15,7 @@ export function useCommercialDashboard(month: string) {
     setLoading(true);
     setError(null);
 
-    fetch(`/api/delegate/commercial?month=${encodeURIComponent(month)}`)
+    fetchWithAuth(`/api/delegate/commercial?month=${encodeURIComponent(month)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Error (${res.status}) cargando dashboard comercial`);
         return res.json();

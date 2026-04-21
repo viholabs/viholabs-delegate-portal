@@ -98,7 +98,11 @@ function createRlsClientFromRequest(req: Request) {
     .map((c) => {
       const eq = c.indexOf("=");
       if (eq < 0) return null;
-      return { name: c.slice(0, eq).trim(), value: c.slice(eq + 1).trim() };
+      const name = c.slice(0, eq).trim();
+      const rawVal = c.slice(eq + 1).trim();
+      let value = rawVal;
+      try { value = decodeURIComponent(rawVal); } catch { /* keep raw */ }
+      return { name, value };
     })
     .filter((c): c is { name: string; value: string } => c !== null && c.name.length > 0);
 
@@ -165,20 +169,11 @@ async function resolveFromCookies(
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
-    if (error || !authUserId) {
-      const reason = error?.message ?? "no user returned";
-      return {
-        ok: false,
-        status: 401,
-        error: `Cookie auth failed: ${reason}`,
-        stage: "cookies_getUser",
-      };
-    }
+    // If cookie auth fails for any reason, return null so Bearer auth can take over.
+    // Cookie storage issues (URL-encoding, AsyncLocalStorage) are non-fatal.
+    if (error || !authUserId) return null;
 
-    const actorLookup = await lookupActiveActorByAuthUserId(
-      supaService,
-      authUserId
-    );
+    const actorLookup = await lookupActiveActorByAuthUserId(supaService, authUserId);
 
     if (actorLookup.error || !actorLookup.actor) {
       return {
@@ -197,14 +192,8 @@ async function resolveFromCookies(
       authUserId,
       authMode: "cookies",
     };
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return {
-      ok: false,
-      status: 500,
-      error: `Cookie auth exception: ${reason}`,
-      stage: "cookies_exception",
-    };
+  } catch {
+    return null;
   }
 }
 
