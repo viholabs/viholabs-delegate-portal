@@ -56,10 +56,21 @@ function getAnonKey() {
 }
 
 function readBearerToken(req: NextRequest): string {
+  // 1. Authorization header (may be stripped by nginx on VPS)
   const authHeader = req.headers.get("authorization") || "";
-  const lower = authHeader.toLowerCase();
-  if (!lower.startsWith("bearer ")) return "";
-  return authHeader.slice("bearer ".length).trim();
+  if (authHeader.toLowerCase().startsWith("bearer ")) {
+    const t = authHeader.slice("bearer ".length).trim();
+    if (t) return t;
+  }
+
+  // 2. viholabs_auth_token cookie — set by AuthInterceptorProvider, never stripped by nginx
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const m = cookieHeader.match(/(?:^|;\s*)viholabs_auth_token=([^;]+)/);
+  if (m?.[1]) {
+    try { return decodeURIComponent(m[1]).trim(); } catch { return m[1].trim(); }
+  }
+
+  return "";
 }
 
 async function getAuthedClient(req: NextRequest): Promise<{
@@ -68,52 +79,30 @@ async function getAuthedClient(req: NextRequest): Promise<{
   authMode: "cookie" | "bearer" | "none";
   authError?: string;
 }> {
+  // Bearer first (reads Authorization header OR viholabs_auth_token cookie).
+  // Reliable on VPS — cookies are never stripped by nginx.
+  const token = readBearerToken(req);
+  if (token) {
+    const supabaseBearer = createJsClient(getSupabaseUrl(), getAnonKey(), {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await supabaseBearer.auth.getUser();
+    if (!error && data?.user?.id) {
+      return { supabase: supabaseBearer, userId: data.user.id, authMode: "bearer" };
+    }
+  }
+
+  // Fallback: SSR cookie client (works locally, unreliable on VPS with PM2)
   try {
     const supabaseCookie = await createSsrClient();
     const { data, error } = await supabaseCookie.auth.getUser();
-
     if (!error && data?.user?.id) {
-      return {
-        supabase: supabaseCookie,
-        userId: data.user.id,
-        authMode: "cookie",
-      };
+      return { supabase: supabaseCookie, userId: data.user.id, authMode: "cookie" };
     }
-  } catch {
-    // fallback to bearer
-  }
+  } catch { /* ignore */ }
 
-  const token = readBearerToken(req);
-  if (!token) {
-    return {
-      supabase: null,
-      userId: null,
-      authMode: "none",
-      authError: "missing_session",
-    };
-  }
-
-  const supabaseBearer = createJsClient(getSupabaseUrl(), getAnonKey(), {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const { data, error } = await supabaseBearer.auth.getUser();
-
-  if (error || !data?.user?.id) {
-    return {
-      supabase: supabaseBearer,
-      userId: null,
-      authMode: "none",
-      authError: "invalid_token",
-    };
-  }
-
-  return {
-    supabase: supabaseBearer,
-    userId: data.user.id,
-    authMode: "bearer",
-  };
+  return { supabase: null, userId: null, authMode: "none", authError: "missing_session" };
 }
 
 export async function GET(req: NextRequest) {
