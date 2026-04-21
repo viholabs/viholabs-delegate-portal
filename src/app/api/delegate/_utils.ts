@@ -314,6 +314,7 @@ export async function resolveDelegateIdForActor(
   if (
     delegateIdFromQuery &&
     (role === "SUPER_ADMIN" ||
+      role === "MELQUISEDEC" ||
       role === "ADMINISTRATIVE" ||
       role === "COORDINATOR_COMMERCIAL" ||
       role === "COORDINATOR_CECT")
