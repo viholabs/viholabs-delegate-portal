@@ -26,7 +26,7 @@ export type VihoRole =
 export function bridgeSystemRoleToVihoRole(roleRaw: unknown): VihoRole {
   const role = String(roleRaw ?? "").trim().toUpperCase();
 
-  if (role === "SUPER_ADMIN" || role === "MELQUISEDEC") return "MELQUISEDEC";
+  if (role === "SUPER_ADMIN") return "MELQUISEDEC";
   if (
     role === "COORDINATOR_COMMERCIAL" ||
     role === "COORDINATOR_CECT"

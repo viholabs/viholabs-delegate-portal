@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchWithAuth } from "@/lib/fetch-with-auth";
 import ClientCommercialSection from "./ClientCommercialSection";
 import ClientContactSection from "./ClientContactSection";
 import ClientDetailHeader from "./ClientDetailHeader";
@@ -114,9 +113,10 @@ export default function ClientsPanel({ initialClientId }: { initialClientId?: st
       setClientsLoading(true);
       setClientsError(null);
 
-      const res = await fetchWithAuth("/api/delegate/clients", {
+      const res = await fetch("/api/delegate/clients", {
         method: "GET",
         cache: "no-store",
+        credentials: "include",
       });
 
       const json = await readJsonSafe<ListResponse>(res);

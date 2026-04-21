@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { createServerClient } from "@supabase/ssr";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 
 type ActorRow = {
@@ -89,31 +88,6 @@ function getBearerToken(req: Request): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-function createRlsClientFromRequest(req: Request) {
-  const { url, anon } = getSupabaseConfig();
-
-  const cookieHeader = req.headers.get("cookie") ?? "";
-  const cookies: { name: string; value: string }[] = cookieHeader
-    .split(";")
-    .map((c) => {
-      const eq = c.indexOf("=");
-      if (eq < 0) return null;
-      const name = c.slice(0, eq).trim();
-      const rawVal = c.slice(eq + 1).trim();
-      let value = rawVal;
-      try { value = decodeURIComponent(rawVal); } catch { /* keep raw */ }
-      return { name, value };
-    })
-    .filter((c): c is { name: string; value: string } => c !== null && c.name.length > 0);
-
-  return createServerClient(url, anon, {
-    cookies: {
-      getAll() { return cookies; },
-      setAll() { /* read-only: middleware handles refresh */ },
-    },
-  });
-}
-
 function createBearerAuthClient(token: string) {
   const { url, anon } = getSupabaseConfig();
 
@@ -157,23 +131,41 @@ async function lookupActiveActorByAuthUserId(
 }
 
 async function resolveFromCookies(
-  req: Request,
   supaService: ReturnType<typeof createServiceClient>
 ): Promise<ResolveActorResult | null> {
-  const cookieHeader = req.headers.get("cookie") ?? "";
-  if (!cookieHeader.trim()) return null;
+  let supaRls: RouteAuthClient | undefined;
 
-  const supaRls = createRlsClientFromRequest(req) as unknown as RouteAuthClient;
+  try {
+    supaRls = await createServerSupabaseClient();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      status: 500,
+      error: `SSR client init failed: ${reason}`,
+      stage: "cookies_init",
+    };
+  }
 
   try {
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
-    // If cookie auth fails for any reason, return null so Bearer auth can take over.
-    // Cookie storage issues (URL-encoding, AsyncLocalStorage) are non-fatal.
-    if (error || !authUserId) return null;
+    if (error || !authUserId) {
+      // Surface the real error so the API response reveals the root cause
+      const reason = error?.message ?? "no user returned";
+      return {
+        ok: false,
+        status: 401,
+        error: `Cookie auth failed: ${reason}`,
+        stage: "cookies_getUser",
+      };
+    }
 
-    const actorLookup = await lookupActiveActorByAuthUserId(supaService, authUserId);
+    const actorLookup = await lookupActiveActorByAuthUserId(
+      supaService,
+      authUserId
+    );
 
     if (actorLookup.error || !actorLookup.actor) {
       return {
@@ -192,8 +184,14 @@ async function resolveFromCookies(
       authUserId,
       authMode: "cookies",
     };
-  } catch {
-    return null;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      status: 500,
+      error: `Cookie auth exception: ${reason}`,
+      stage: "cookies_exception",
+    };
   }
 }
 
@@ -301,23 +299,17 @@ export async function getActorFromRequest(
   try {
     const supaService = createServiceClient();
 
-    // Bearer first: the AuthInterceptorProvider guarantees all browser
-    // fetch() calls carry Authorization: Bearer. This path is reliable
-    // across all environments (VPS, local, tunnels).
-    stage = "bearer_auth";
-    const byBearer = await resolveFromBearer(req, supaService);
-    if (byBearer) return byBearer;
+    stage = "cookies_auth";
+    const byCookies = await resolveFromCookies(supaService);
+    if (byCookies) return byCookies;
 
-    // Internal bearer: automation / server-to-server scripts.
     stage = "internal_bearer";
     const byInternalBearer = await resolveFromInternalBearer(req, supaService);
     if (byInternalBearer) return byInternalBearer;
 
-    // Cookie auth: last resort for contexts without Bearer (e.g. direct
-    // browser navigation to an API URL, curl with cookies, etc.).
-    stage = "cookies_auth";
-    const byCookies = await resolveFromCookies(req, supaService);
-    if (byCookies) return byCookies;
+    stage = "bearer_auth";
+    const byBearer = await resolveFromBearer(req, supaService);
+    if (byBearer) return byBearer;
 
     return {
       ok: false,
@@ -356,7 +348,6 @@ export async function resolveDelegateIdForActor(
   if (
     delegateIdFromQuery &&
     (role === "SUPER_ADMIN" ||
-      role === "MELQUISEDEC" ||
       role === "ADMINISTRATIVE" ||
       role === "COORDINATOR_COMMERCIAL" ||
       role === "COORDINATOR_CECT")

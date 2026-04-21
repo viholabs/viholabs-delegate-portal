@@ -25,7 +25,6 @@ export function roleAllowsMode(roleRaw: unknown, mode: ModeCode): boolean {
   if (mode === "control-room") {
     return (
       role === "SUPER_ADMIN" ||
-      role === "MELQUISEDEC" ||
       role === "ADMINISTRATIVE" ||
       role === "COORDINATOR_COMMERCIAL" ||
       role === "COORDINATOR_CECT"
