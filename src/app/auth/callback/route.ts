@@ -150,6 +150,8 @@ function createRouteSupabase(req: Request, response: NextResponse) {
           .filter((cookie) => cookie.name.length > 0);
       },
       setAll(cookiesToSet: CookieToSet[]) {
+        console.log("[AUTH CALLBACK] Supabase setAll called with cookies:", 
+          cookiesToSet.map(c => c.name));
         for (const { name, value, options } of cookiesToSet) {
           response.cookies.set(name, value, options);
         }
@@ -177,6 +179,8 @@ export async function GET(req: Request) {
     if (error) {
       return redirectToLogin(origin, "auth_failed");
     }
+    console.log("[AUTH CALLBACK] After exchangeCodeForSession, cookies:", 
+      response.cookies.getAll().map(c => c.name));
   }
 
   // CRITICAL: After exchange, get the session to ensure cookies were created
@@ -261,11 +265,14 @@ export async function GET(req: Request) {
   });
 
   // NOW create the redirect response AFTER cookies are set
+  // CRITICAL: Pass the request with modified headers to preserve cookies
   const finalUrl = new URL(finalPath, origin);
   const redirectResponse = NextResponse.redirect(finalUrl, { status: 302 });
 
-  // Copy all cookies from response to redirect response
-  response.cookies.getAll().forEach((cookie) => {
+  // Copy ALL cookies (Supabase auth cookies + custom cookies)
+  const allCookies = response.cookies.getAll();
+  console.log("[AUTH CALLBACK] Final cookies to redirect:", allCookies.map(c => c.name));
+  allCookies.forEach((cookie) => {
     redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
   });
 
