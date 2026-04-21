@@ -2,51 +2,24 @@
 
 import { createClient } from "@/lib/supabase/client";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const COOKIE_NAME = "viholabs_auth_token";
+// ─── Module-level patch ────────────────────────────────────────────────────
+// This runs when the browser evaluates the JS bundle — BEFORE React
+// renders, hydrates, or runs any useEffect. That guarantees the interceptor
+// is in place before the very first API call from any child component.
+//
+// Guard: typeof window check prevents this from running during SSR
+// (Next.js "use client" modules still execute on the server for HTML
+// generation, but window is undefined there).
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-let _supabase: ReturnType<typeof createClient> | null = null;
-function getSupabase() {
-  if (!_supabase) _supabase = createClient();
-  return _supabase;
-}
-
-/**
- * Write (or clear) the viholabs_auth_token cookie.
- *
- * JWT access tokens are Base64URL encoded — characters A-Za-z0-9, -, _, .
- * None of these need URL-encoding, so the raw cookie value is the raw JWT.
- * This bypasses every cookie parsing/encoding issue on the server side.
- */
-function setAuthCookie(token: string | null) {
-  if (token) {
-    // max-age 3600 matches Supabase default access token lifetime.
-    // Will be renewed by the onAuthStateChange listener on refresh.
-    document.cookie = `${COOKIE_NAME}=${token}; path=/; samesite=lax; max-age=3600`;
-  } else {
-    document.cookie = `${COOKIE_NAME}=; path=/; max-age=0`;
-  }
-}
-
-// ─── Module-level setup (runs before React, before any useEffect) ─────────────
-// typeof window guard: Next.js still evaluates "use client" modules during SSR.
 if (typeof window !== "undefined") {
-  const supabase = getSupabase();
+  // Singleton Supabase browser client — reuses the same instance
+  // used by fetchWithAuth and MotivationalDelegate, so no double init.
+  let _supabase: ReturnType<typeof createClient> | null = null;
+  function getSupabase() {
+    if (!_supabase) _supabase = createClient();
+    return _supabase;
+  }
 
-  // 1. Seed the cookie immediately from the cached session (synchronous path
-  //    of getSession). Covers the common case where the session is in memory.
-  supabase.auth.getSession().then(({ data: { session } }) => {
-    setAuthCookie(session?.access_token ?? null);
-  });
-
-  // 2. Keep the cookie in sync whenever Supabase refreshes the token.
-  supabase.auth.onAuthStateChange((_event, session) => {
-    setAuthCookie(session?.access_token ?? null);
-  });
-
-  // 3. Patch window.fetch to inject Authorization header (works if nginx passes it).
-  //    The cookie above is the fallback for proxies that strip Authorization.
   const _originalFetch = window.fetch.bind(window);
 
   window.fetch = async function viholabsFetch(
@@ -71,14 +44,14 @@ if (typeof window !== "undefined") {
         try {
           const {
             data: { session },
-          } = await supabase.auth.getSession();
+          } = await getSupabase().auth.getSession();
 
           if (session?.access_token) {
             headers.set("Authorization", `Bearer ${session.access_token}`);
-            // Also refresh the cookie in case it was stale.
-            setAuthCookie(session.access_token);
           }
-        } catch { /* proceed without token */ }
+        } catch {
+          // Cannot get session — proceed without token; server returns 401.
+        }
       }
 
       return _originalFetch(input, { ...init, headers });
@@ -87,8 +60,12 @@ if (typeof window !== "undefined") {
     return _originalFetch(input, init);
   };
 }
+// ──────────────────────────────────────────────────────────────────────────
 
-// ─── Component (import trigger only) ─────────────────────────────────────────
+/**
+ * Mount this once at the root layout. The actual interceptor work happens
+ * above at module-load time; this component is just the import trigger.
+ */
 export default function AuthInterceptorProvider({
   children,
 }: {

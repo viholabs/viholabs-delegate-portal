@@ -83,24 +83,10 @@ function getBearerToken(req: Request): string | null {
   const header =
     req.headers.get("authorization") ?? req.headers.get("Authorization");
 
-  if (header) {
-    const match = header.match(/^Bearer\s+(.+)$/i);
-    if (match?.[1]?.trim()) return match[1].trim();
-  }
+  if (!header) return null;
 
-  // Fallback: read viholabs_auth_token cookie (set by AuthInterceptorProvider).
-  // This handles VPS/nginx setups that strip the Authorization header.
-  const cookieHeader = req.headers.get("cookie") ?? "";
-  const cookieMatch = cookieHeader.match(/(?:^|;\s*)viholabs_auth_token=([^;]+)/);
-  if (cookieMatch?.[1]) {
-    try {
-      return decodeURIComponent(cookieMatch[1]).trim();
-    } catch {
-      return cookieMatch[1].trim();
-    }
-  }
-
-  return null;
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() ?? null;
 }
 
 function createRlsClientFromRequest(req: Request) {
