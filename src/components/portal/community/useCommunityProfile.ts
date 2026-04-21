@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/fetch-with-auth";
 
 export type CommunityProfile = {
   id: string | null;
@@ -49,7 +50,7 @@ export function useCommunityProfile() {
       setError(null);
 
       try {
-        const res = await fetch("/api/community/profile", {
+        const res = await fetchWithAuth("/api/community/profile", {
           method: "GET",
           cache: "no-store",
         });
