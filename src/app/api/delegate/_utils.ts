@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 
 type ActorRow = {
@@ -88,6 +89,27 @@ function getBearerToken(req: Request): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
+function createRlsClientFromRequest(req: Request) {
+  const { url, anon } = getSupabaseConfig();
+
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const cookies: { name: string; value: string }[] = cookieHeader
+    .split(";")
+    .map((c) => {
+      const eq = c.indexOf("=");
+      if (eq < 0) return null;
+      return { name: c.slice(0, eq).trim(), value: c.slice(eq + 1).trim() };
+    })
+    .filter((c): c is { name: string; value: string } => c !== null && c.name.length > 0);
+
+  return createServerClient(url, anon, {
+    cookies: {
+      getAll() { return cookies; },
+      setAll() { /* read-only: middleware handles refresh */ },
+    },
+  });
+}
+
 function createBearerAuthClient(token: string) {
   const { url, anon } = getSupabaseConfig();
 
@@ -131,28 +153,19 @@ async function lookupActiveActorByAuthUserId(
 }
 
 async function resolveFromCookies(
+  req: Request,
   supaService: ReturnType<typeof createServiceClient>
 ): Promise<ResolveActorResult | null> {
-  let supaRls: RouteAuthClient | undefined;
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  if (!cookieHeader.trim()) return null;
 
-  try {
-    supaRls = await createServerSupabaseClient();
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    return {
-      ok: false,
-      status: 500,
-      error: `SSR client init failed: ${reason}`,
-      stage: "cookies_init",
-    };
-  }
+  const supaRls = createRlsClientFromRequest(req) as unknown as RouteAuthClient;
 
   try {
     const { data, error } = await supaRls.auth.getUser();
     const authUserId = data?.user?.id ?? null;
 
     if (error || !authUserId) {
-      // Surface the real error so the API response reveals the root cause
       const reason = error?.message ?? "no user returned";
       return {
         ok: false,
@@ -300,7 +313,7 @@ export async function getActorFromRequest(
     const supaService = createServiceClient();
 
     stage = "cookies_auth";
-    const byCookies = await resolveFromCookies(supaService);
+    const byCookies = await resolveFromCookies(req, supaService);
     if (byCookies) return byCookies;
 
     stage = "internal_bearer";
