@@ -164,7 +164,10 @@ export async function GET(req: Request) {
 
   const requestedNext = safeNext(url.searchParams.get("next"));
   const provisionalPath = requestedNext || "/control-room/shell";
-  const response = NextResponse.redirect(new URL(provisionalPath, origin));
+  
+  // CRITICAL FIX: Use NextResponse.next() to allow cookie setting, then redirect after
+  // (DO NOT create NextResponse.redirect() early - it prevents Set-Cookie headers)
+  const response = NextResponse.next({ request: req });
 
   const supabase = createRouteSupabase(req, response);
   const code = url.searchParams.get("code");
@@ -239,10 +242,10 @@ export async function GET(req: Request) {
   });
 
   const finalPath = requestedNext || actorEntry || "/control-room/shell";
-  response.headers.set("Location", new URL(finalPath, origin).toString());
 
   const secure = origin.startsWith("https://");
 
+  // Assign cookies BEFORE creating redirect
   response.cookies.set(MODE_COOKIE, modeToSet, {
     path: "/",
     httpOnly: false,
@@ -257,5 +260,14 @@ export async function GET(req: Request) {
     secure,
   });
 
-  return response;
+  // NOW create the redirect response AFTER cookies are set
+  const finalUrl = new URL(finalPath, origin);
+  const redirectResponse = NextResponse.redirect(finalUrl, { status: 302 });
+
+  // Copy all cookies from response to redirect response
+  response.cookies.getAll().forEach((cookie) => {
+    redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+  });
+
+  return redirectResponse;
 }
