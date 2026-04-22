@@ -227,12 +227,9 @@ async function resolveFromBearer(
   const authUserId = data?.user?.id ?? null;
 
   if (error || !authUserId) {
-    return {
-      ok: false,
-      status: 401,
-      error: "Invalid token",
-      stage: "bearer_validate",
-    };
+    // Token present but invalid/expired — fall through to SSR cookies rather
+    // than hard-failing. SSR may have a fresh session via refresh token.
+    return null;
   }
 
   const actorLookup = await lookupActiveActorByAuthUserId(
@@ -267,19 +264,22 @@ export async function getActorFromRequest(
   try {
     const supaService = createServiceClient();
 
-    // Bearer first: reads Authorization header OR viholabs_auth_token cookie
+    // 1. Bearer: x-viholabs-token (middleware) > Authorization > viholabs_auth_token cookie
+    //    Returns null on missing OR invalid token — always falls through on failure.
     stage = "bearer_auth";
     const byBearer = await resolveFromBearer(req, supaService);
-    if (byBearer) return byBearer;
+    if (byBearer?.ok) return byBearer;
 
+    // 2. Internal service bearer (server-to-server)
     stage = "internal_bearer";
     const byInternalBearer = await resolveFromInternalBearer(req, supaService);
-    if (byInternalBearer) return byInternalBearer;
+    if (byInternalBearer?.ok) return byInternalBearer;
 
-    // SSR cookies last: unreliable on VPS/PM2 but kept as final fallback
+    // 3. SSR cookies: Supabase session from next/headers (works when middleware
+    //    refreshed the session and cookies are readable in the route handler)
     stage = "cookies_auth";
     const byCookies = await resolveFromCookies(supaService);
-    if (byCookies) return byCookies;
+    if (byCookies?.ok) return byCookies;
 
     return {
       ok: false,

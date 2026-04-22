@@ -113,9 +113,20 @@ export async function middleware(req: NextRequest) {
       const reqHeaders = new Headers(req.headers);
       reqHeaders.set("x-viholabs-token", token);
       const authedResponse = NextResponse.next({ request: { headers: reqHeaders } });
+      // Copy session-refresh cookies set by Supabase setAll
       response.cookies.getAll().forEach((c) =>
         authedResponse.cookies.set(c.name, c.value, c)
       );
+      // Keep viholabs_auth_token in sync when Supabase rotates the access token
+      if (session?.access_token && session.access_token !== fallbackToken) {
+        authedResponse.cookies.set("viholabs_auth_token", session.access_token, {
+          path: "/",
+          httpOnly: false,
+          sameSite: "lax",
+          secure: req.nextUrl.protocol === "https:",
+          maxAge: 3600,
+        });
+      }
       return authedResponse;
     }
 
