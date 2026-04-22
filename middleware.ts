@@ -82,6 +82,10 @@ export async function middleware(req: NextRequest) {
     },
   });
 
+  // viholabs_auth_token is set by the auth callback and readable by JS.
+  // Use it as fallback when the Supabase SSR session is unavailable (VPS/PM2).
+  const fallbackToken = req.cookies.get("viholabs_auth_token")?.value?.trim() ?? "";
+
   try {
     const {
       data: { user },
@@ -89,6 +93,12 @@ export async function middleware(req: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (error || !user) {
+      // Supabase session missing — try viholabs_auth_token before redirecting.
+      if (fallbackToken) {
+        const reqHeaders = new Headers(req.headers);
+        reqHeaders.set("x-viholabs-token", fallbackToken);
+        return NextResponse.next({ request: { headers: reqHeaders } });
+      }
       const loginUrl = req.nextUrl.clone();
       loginUrl.pathname = "/login";
       loginUrl.searchParams.set("error", "unauthorized");
@@ -96,15 +106,13 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    // Inject the validated access token as x-viholabs-token into the
-    // forwarded request. Route handlers read this header — it is set
-    // inside Next.js so nginx can never strip it.
+    // Supabase session valid — inject the access token.
     const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
+    const token = session?.access_token ?? fallbackToken;
+    if (token) {
       const reqHeaders = new Headers(req.headers);
-      reqHeaders.set("x-viholabs-token", session.access_token);
+      reqHeaders.set("x-viholabs-token", token);
       const authedResponse = NextResponse.next({ request: { headers: reqHeaders } });
-      // Preserve session-refresh cookies written by setAll
       response.cookies.getAll().forEach((c) =>
         authedResponse.cookies.set(c.name, c.value, c)
       );
@@ -113,6 +121,12 @@ export async function middleware(req: NextRequest) {
 
     return response;
   } catch {
+    // On error, try fallback token before giving up.
+    if (fallbackToken) {
+      const reqHeaders = new Headers(req.headers);
+      reqHeaders.set("x-viholabs-token", fallbackToken);
+      return NextResponse.next({ request: { headers: reqHeaders } });
+    }
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.searchParams.set("error", "session_check_failed");

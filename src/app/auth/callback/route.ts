@@ -249,6 +249,16 @@ export async function GET(req: Request) {
 
   const secure = origin.startsWith("https://");
 
+  // viholabs_auth_token: readable by JS — middleware and API routes use it
+  // as a bearer fallback when Supabase SSR session cookies are not present.
+  response.cookies.set("viholabs_auth_token", sessionData.session.access_token, {
+    path: "/",
+    httpOnly: false,
+    sameSite: "lax",
+    secure,
+    maxAge: 3600,
+  });
+
   // Assign cookies BEFORE creating redirect
   response.cookies.set(MODE_COOKIE, modeToSet, {
     path: "/",
