@@ -15,15 +15,17 @@ import TabClientes from "./TabClientes";
 import TabComisiones from "./TabComisiones";
 import TabAuditoria from "./TabAuditoria";
 import TabEditar from "./TabEditar";
+import TabCRM from "./TabCRM";
 import type { DelegateDetailActor } from "../types";
 
-type Tab = "resumen" | "facturacion" | "liquidacion" | "clientes" | "comisiones" | "auditoria" | "editar";
+type Tab = "resumen" | "facturacion" | "liquidacion" | "clientes" | "crm" | "comisiones" | "auditoria" | "editar";
 
 const BASE_TABS: { id: Tab; label: string }[] = [
   { id: "resumen", label: "Resumen" },
   { id: "facturacion", label: "Facturación" },
   { id: "liquidacion", label: "Liquidación" },
   { id: "clientes", label: "Clientes" },
+  { id: "crm", label: "CRM" },
 ];
 
 // Tabs restringidos a Melquisedec
@@ -211,6 +213,12 @@ export default function DelegateDetailModule({ delegateId }: Props) {
         )}
         {activeTab === "clientes" && (
           <TabClientes clients={data.clients} month={month} />
+        )}
+        {activeTab === "crm" && (
+          <TabCRM
+            delegateId={delegate.id}
+            clients={[...(data.clients?.active ?? []), ...(data.clients?.inactive ?? [])].map((c: any) => ({ id: String(c.id), name: c.name ?? null }))}
+          />
         )}
         {activeTab === "comisiones" && canMelquisedec && (
           <TabComisiones

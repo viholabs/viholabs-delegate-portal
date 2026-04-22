@@ -7,6 +7,7 @@ import ControlRoomMission from "@/components/control-room/dashboard/ControlRoomM
 import ResourcesHubBlock from "@/components/control-room/resources/ResourcesHubBlock";
 import HoldedDocumentsTable from "@/components/control-room/invoices/HoldedDocumentsTable";
 import ClientsPanel from "@/components/control-room/clients/ClientsPanel";
+import CommissionAgentDashboard from "@/components/commission-agent/CommissionAgentDashboard";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -15,7 +16,8 @@ type ShellTabId =
   | "clients"
   | "facturacion"
   | "recursos"
-  | "el-elyon";
+  | "el-elyon"
+  | "comisiones-agente";
 
 function isShellTabId(value: string | null): value is ShellTabId {
   return (
@@ -23,7 +25,8 @@ function isShellTabId(value: string | null): value is ShellTabId {
     value === "clients" ||
     value === "facturacion" ||
     value === "recursos" ||
-    value === "el-elyon"
+    value === "el-elyon" ||
+    value === "comisiones-agente"
   );
 }
 
@@ -71,6 +74,14 @@ function ElElyonPanel() {
   );
 }
 
+function ComisionesAgentePanel() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <CommissionAgentDashboard />
+    </div>
+  );
+}
+
 export default function ShellPageClient() {
   const searchParams = useSearchParams();
 
@@ -103,6 +114,9 @@ export default function ShellPageClient() {
 
       case "el-elyon":
         return <ElElyonPanel />;
+
+      case "comisiones-agente":
+        return <ComisionesAgentePanel />;
 
       default:
         return <SituationPanel />;

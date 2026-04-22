@@ -45,6 +45,11 @@ function canSeeElElyonTab(role: unknown, isMelquisedec: boolean): boolean {
   return normalized === "melquisedec";
 }
 
+function canSeeCommissionAgentTab(role: unknown): boolean {
+  const normalized = normalizeRole(role);
+  return normalized === "commission_agent" || normalized === "distributor";
+}
+
 export default function ControlRoomShell({
   children,
 }: {
@@ -55,6 +60,7 @@ export default function ControlRoomShell({
   const role = String(profile.role ?? "");
   const showDelegatesTab = canSeeDelegatesTab(role, isMelquisedec);
   const showElElyonTab = canSeeElElyonTab(role, isMelquisedec);
+  const showCommissionAgentTab = canSeeCommissionAgentTab(role);
 
   const tabs: PortalShellTab[] = [
     {
@@ -87,6 +93,14 @@ export default function ControlRoomShell({
     label: "Recursos",
     hint: "Herramientas",
   });
+
+  if (showCommissionAgentTab) {
+    tabs.push({
+      href: "/control-room/shell?tab=comisiones-agente",
+      label: "Mis Comisiones",
+      hint: "Agente de comisión",
+    });
+  }
 
   if (showElElyonTab) {
     tabs.push({

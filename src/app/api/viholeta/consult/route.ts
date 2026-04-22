@@ -52,6 +52,60 @@ function toVectorLiteral(v: number[]): string {
   return "[" + v.join(",") + "]";
 }
 
+type ChunkSource = {
+  chunk_id?: string;
+  title?: string;
+  content?: string;
+  similarity?: number;
+  [key: string]: unknown;
+};
+
+async function generateAnswer(query: string, chunks: ChunkSource[]): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY || "";
+  if (!apiKey) {
+    return chunks.length > 0
+      ? `He encontrado ${chunks.length} fuente(s) relevante(s). Configura OPENAI_API_KEY para obtener respuestas generadas.`
+      : "No he encontrado información relevante para tu consulta en el corpus actual.";
+  }
+
+  const context = chunks
+    .map((c, i) => {
+      const title = c.title ? `[${c.title}]` : `[Fuente ${i + 1}]`;
+      return `${title}\n${c.content ?? ""}`;
+    })
+    .join("\n\n---\n\n");
+
+  const systemPrompt = chunks.length > 0
+    ? `Eres Viholeta, asistente experta de Viholabs Biotech. Responde en español, de forma concisa y profesional, basándote ÚNICAMENTE en las siguientes fuentes del corpus de conocimiento:\n\n${context}\n\nSi la información no está en las fuentes, dilo claramente.`
+    : `Eres Viholeta, asistente experta de Viholabs Biotech. No hay fuentes relevantes para esta consulta en el corpus actual. Indica al usuario que no tienes información específica sobre su pregunta y que puede contactar con el equipo de soporte.`;
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: query },
+      ],
+      max_tokens: 1024,
+      temperature: 0.2,
+    }),
+  });
+
+  const txt = await res.text();
+  if (!res.ok) throw new Error(`OpenAI error: ${txt}`);
+
+  const j = JSON.parse(txt);
+  const answer = j?.choices?.[0]?.message?.content;
+  if (!answer) throw new Error("Empty response from OpenAI");
+
+  return String(answer).trim();
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -111,9 +165,7 @@ export async function POST(req: NextRequest) {
 
     const retrieval_used = sources.length > 0;
 
-    const content_md = retrieval_used
-      ? `Consulta fundamentada en ${sources.length} fuentes.`
-      : "Consulta sin fuentes relevantes.";
+    const content_md = await generateAnswer(input_text, sources as ChunkSource[]);
 
     await supabase.from("viholeta_consult_cache").upsert({
       user_id,

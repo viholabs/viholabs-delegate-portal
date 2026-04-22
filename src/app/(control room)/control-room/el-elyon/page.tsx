@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import ElElyonSystemHealth from "@/components/control-room/el-elyon/ElElyonSystemHealth";
 import ElElyonAssignmentsWorkspace from "@/components/control-room/el-elyon/ElElyonAssignmentsWorkspace";
 import TechnicalTab from "@/components/control-room/technical/TechnicalTab";
+import ViewAsDelegatePanel from "@/components/control-room/el-elyon/ViewAsDelegatePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -216,6 +217,14 @@ export default function ElElyonPage() {
           description="Espacio central de gobierno para revisar y corregir asignaciones, precedencias y relaciones operativas sensibles con máxima trazabilidad."
         >
           <ElElyonAssignmentsWorkspace />
+        </SectionShell>
+
+        <SectionShell
+          eyebrow="Bloque 4"
+          title="Vista como delegado"
+          description="Supervisión directa: selecciona cualquier delegado y visualiza sus datos de negocio (KPIs, clientes, facturas) desde su perspectiva. Sin impersonación de sesión — lectura supervisada."
+        >
+          <ViewAsDelegatePanel />
         </SectionShell>
       </div>
     </main>
