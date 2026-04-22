@@ -1,22 +1,16 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
+// Read viholabs_auth_token from cookie — sync, no Supabase client, no getSession() race.
+// The cookie is written by the auth callback (server) and kept fresh by
+// AuthInterceptorProvider (onAuthStateChange) and the middleware (token rotation).
+function getTokenFromCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const m = document.cookie.match(/(?:^|;\s*)viholabs_auth_token=([^;]+)/);
+  if (!m?.[1]) return null;
+  try { return decodeURIComponent(m[1]).trim() || null; } catch { return m[1].trim() || null; }
+}
 
 type JsonRecord = Record<string, unknown>;
-
-let browserSupabase: ReturnType<typeof createClient> | null = null;
-
-function getBrowserSupabase() {
-  if (typeof window === "undefined") {
-    throw new Error("fetch-with-auth solo puede usarse en componentes cliente");
-  }
-
-  if (!browserSupabase) {
-    browserSupabase = createClient();
-  }
-
-  return browserSupabase;
-}
 
 function isJsonRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -24,71 +18,32 @@ function isJsonRecord(value: unknown): value is JsonRecord {
 
 function extractErrorMessage(value: unknown, fallback: string): string {
   if (isJsonRecord(value)) {
-    const errorValue = value.error;
-    if (typeof errorValue === "string" && errorValue.trim()) {
-      return errorValue.trim();
-    }
-
-    const messageValue = value.message;
-    if (typeof messageValue === "string" && messageValue.trim()) {
-      return messageValue.trim();
-    }
+    const e = value.error;
+    if (typeof e === "string" && e.trim()) return e.trim();
+    const m = value.message;
+    if (typeof m === "string" && m.trim()) return m.trim();
   }
-
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
-
+  if (typeof value === "string" && value.trim()) return value.trim();
   return fallback;
 }
 
 function safeJsonParse(text: string): unknown {
-  if (!text.trim()) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-async function tryGetAccessToken(): Promise<string | null> {
-  try {
-    const supabase = getBrowserSupabase();
-
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession();
-
-    if (error) {
-      return null;
-    }
-
-    const token = session?.access_token?.trim();
-    return token || null;
-  } catch {
-    return null;
-  }
+  if (!text.trim()) return null;
+  try { return JSON.parse(text); } catch { return text; }
 }
 
 export async function fetchWithAuth(
   input: RequestInfo | URL,
   init: RequestInit = {}
 ): Promise<Response> {
-  const token = await tryGetAccessToken();
-
   const headers = new Headers(init.headers ?? {});
 
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  if (!headers.has("Authorization")) {
+    const token = getTokenFromCookie();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
   }
 
-  if (!headers.has("Accept")) {
-    headers.set("Accept", "application/json");
-  }
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
 
   return fetch(input, {
     ...init,
