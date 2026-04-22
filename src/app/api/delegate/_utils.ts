@@ -223,7 +223,7 @@ async function resolveFromBearer(
   if (!token) return null;
 
   const supaRls = createBearerAuthClient(token);
-  const { data, error } = await supaRls.auth.getUser();
+  const { data, error } = await supaRls.auth.getUser(token);
   const authUserId = data?.user?.id ?? null;
 
   if (error || !authUserId) {
