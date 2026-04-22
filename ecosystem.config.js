@@ -15,8 +15,6 @@ module.exports = {
       // Wait before restart to prevent flapping
       restart_delay: 4000,
       exp_backoff_restart_delay: 100,
-      // Next.js loads .env.production automatically when NODE_ENV=production.
-      // Secrets (SUPABASE_SERVICE_ROLE_KEY, etc.) must exist in /var/www/portal/.env.production on VPS.
       env: {
         NODE_ENV: "production",
         PORT: "3000",

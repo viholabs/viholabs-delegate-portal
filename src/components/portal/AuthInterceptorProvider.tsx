@@ -18,28 +18,22 @@ if (typeof window !== "undefined") {
     return _supabase;
   }
 
-  const sec = location.protocol === "https:" ? "; secure" : "";
-
   function setAuthCookie(token: string | null) {
     if (token) {
-      document.cookie = `viholabs_auth_token=${token}; path=/; samesite=lax; max-age=3600${sec}`;
+      document.cookie = `viholabs_auth_token=${token}; path=/; samesite=lax; max-age=3600`;
     } else {
-      document.cookie = `viholabs_auth_token=; path=/; max-age=0${sec}`;
+      document.cookie = `viholabs_auth_token=; path=/; max-age=0`;
     }
   }
 
-  // Seed from cached session — only SET, never delete (server set it at login).
+  // Seed the cookie immediately from the cached session
   getSupabase().auth.getSession().then(({ data: { session } }) => {
-    if (session?.access_token) setAuthCookie(session.access_token);
+    setAuthCookie(session?.access_token ?? null);
   });
 
-  // Keep fresh on token rotation; only clear on explicit sign-out.
-  getSupabase().auth.onAuthStateChange((event, session) => {
-    if (session?.access_token) {
-      setAuthCookie(session.access_token);
-    } else if (event === "SIGNED_OUT") {
-      setAuthCookie(null);
-    }
+  // Keep cookie fresh on token refresh
+  getSupabase().auth.onAuthStateChange((_event, session) => {
+    setAuthCookie(session?.access_token ?? null);
   });
 
   const _originalFetch = window.fetch.bind(window);
