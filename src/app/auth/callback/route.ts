@@ -121,85 +121,46 @@ function redirectToLogin(origin: string, errorCode: string) {
   return NextResponse.redirect(loginUrl);
 }
 
-function createRouteSupabase(req: Request, response: NextResponse) {
-  const { url, anon } = getSupabaseAuthConfig();
-
-  return createServerClient(url, anon, {
-    cookies: {
-      getAll() {
-        const cookieHeader = req.headers.get("cookie") ?? "";
-        if (!cookieHeader.trim()) return [];
-
-        return cookieHeader
-          .split(";")
-          .map((part) => part.trim())
-          .filter(Boolean)
-          .map((part) => {
-            const idx = part.indexOf("=");
-            if (idx === -1) return { name: part, value: "" };
-
-            const name = part.slice(0, idx).trim();
-            const value = part.slice(idx + 1).trim();
-
-            try {
-              return { name, value: decodeURIComponent(value) };
-            } catch {
-              return { name, value };
-            }
-          })
-          .filter((cookie) => cookie.name.length > 0);
-      },
-      setAll(cookiesToSet: CookieToSet[]) {
-        console.log("[AUTH CALLBACK] Supabase setAll called with cookies:", 
-          cookiesToSet.map(c => c.name));
-        for (const { name, value, options } of cookiesToSet) {
-          response.cookies.set(name, value, options);
-        }
-      },
-    },
-  });
+function parseCookies(header: string): { name: string; value: string }[] {
+  return header.split(";").map(p => p.trim()).filter(Boolean).map(p => {
+    const i = p.indexOf("=");
+    if (i === -1) return { name: p, value: "" };
+    const name = p.slice(0, i).trim();
+    const raw = p.slice(i + 1).trim();
+    try { return { name, value: decodeURIComponent(raw) }; } catch { return { name, value: raw }; }
+  }).filter(c => c.name.length > 0);
 }
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const origin = getRequestOrigin(req);
-
+  const secure = origin.startsWith("https://");
   const requestedNext = safeNext(url.searchParams.get("next"));
-  const provisionalPath = requestedNext || "/control-room/shell";
-  
-  // CRITICAL FIX: Use NextResponse.next() to allow cookie setting, then redirect after
-  // (DO NOT create NextResponse.redirect() early - it prevents Set-Cookie headers)
-  const response = NextResponse.next({ request: req });
 
-  const supabase = createRouteSupabase(req, response);
+  // Collect every cookie Supabase wants to write during the exchange.
+  // Written directly to the final redirectResponse — no intermediate copy.
+  const pendingCookies: CookieToSet[] = [];
+
+  const { url: sbUrl, anon } = getSupabaseAuthConfig();
+  const supabase = createServerClient(sbUrl, anon, {
+    cookies: {
+      getAll: () => parseCookies(req.headers.get("cookie") ?? ""),
+      setAll: (list: CookieToSet[]) => { pendingCookies.push(...list); },
+    },
+  });
+
   const code = url.searchParams.get("code");
-
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) {
-      return redirectToLogin(origin, "auth_failed");
-    }
-    console.log("[AUTH CALLBACK] After exchangeCodeForSession, cookies:", 
-      response.cookies.getAll().map(c => c.name));
+    if (error) return redirectToLogin(origin, "auth_failed");
   }
 
-  // CRITICAL: After exchange, get the session to ensure cookies were created
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-  
-  if (sessionError || !sessionData?.session) {
-    console.error("[AUTH CALLBACK] Session not found after exchange", {
-      error: sessionError?.message,
-      hasCookies: req.headers.get("cookie")?.length ?? 0,
-    });
-    return redirectToLogin(origin, "session_missing");
-  }
+  if (sessionError || !sessionData?.session) return redirectToLogin(origin, "session_missing");
 
   const { data, error: userError } = await supabase.auth.getUser();
   const user = data?.user;
-
-  if (userError || !user) {
-    return redirectToLogin(origin, "auth_required");
-  }
+  if (userError || !user) return redirectToLogin(origin, "auth_required");
 
   let actorRole: unknown = null;
   let actorStatus: unknown = null;
@@ -213,78 +174,47 @@ export async function GET(req: Request) {
       .eq("auth_user_id", user.id)
       .maybeSingle();
 
-    if (aErr) {
-      return redirectToLogin(origin, "actor_lookup_failed");
-    }
-
-    if (!a) {
-      return redirectToLogin(origin, "no_actor");
-    }
+    if (aErr) return redirectToLogin(origin, "actor_lookup_failed");
+    if (!a) return redirectToLogin(origin, "no_actor");
 
     actorRole = a.role;
     actorStatus = a.status;
     actorCommissionLevel = a.commission_level;
 
-    if (String(actorStatus).toLowerCase() !== "active") {
-      return redirectToLogin(origin, "no_actor");
-    }
+    if (String(actorStatus).toLowerCase() !== "active") return redirectToLogin(origin, "no_actor");
   } catch {
     return redirectToLogin(origin, "server_misconfigured");
   }
 
   const requestedMode = normalizeMode(url.searchParams.get("mode"));
   const fallbackMode = defaultModeForRole(actorRole);
-
   const modeToSet: ModeCode =
-    requestedMode && roleAllowsMode(actorRole, requestedMode)
-      ? requestedMode
-      : fallbackMode;
+    requestedMode && roleAllowsMode(actorRole, requestedMode) ? requestedMode : fallbackMode;
 
-  const actorEntry = entryForActor({
-    role: actorRole,
-    commission_level: actorCommissionLevel,
-  });
-
+  const actorEntry = entryForActor({ role: actorRole, commission_level: actorCommissionLevel });
   const finalPath = requestedNext || actorEntry || "/control-room/shell";
-
-  const secure = origin.startsWith("https://");
-
-  // viholabs_auth_token: readable by JS — middleware and API routes use it
-  // as a bearer fallback when Supabase SSR session cookies are not present.
-  response.cookies.set("viholabs_auth_token", sessionData.session.access_token, {
-    path: "/",
-    httpOnly: false,
-    sameSite: "lax",
-    secure,
-    maxAge: 3600,
-  });
-
-  // Assign cookies BEFORE creating redirect
-  response.cookies.set(MODE_COOKIE, modeToSet, {
-    path: "/",
-    httpOnly: false,
-    sameSite: "lax",
-    secure,
-  });
-
-  response.cookies.set(ROLE_COOKIE, String(actorRole ?? "").trim().toUpperCase(), {
-    path: "/",
-    httpOnly: false,
-    sameSite: "lax",
-    secure,
-  });
-
-  // NOW create the redirect response AFTER cookies are set
-  // CRITICAL: Pass the request with modified headers to preserve cookies
   const finalUrl = new URL(finalPath, origin);
+
   const redirectResponse = NextResponse.redirect(finalUrl, { status: 302 });
 
-  // Copy ALL cookies (Supabase auth cookies + custom cookies)
-  const allCookies = response.cookies.getAll();
-  console.log("[AUTH CALLBACK] Final cookies to redirect:", allCookies.map(c => c.name));
-  allCookies.forEach((cookie) => {
-    redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+  // 1. Supabase session cookies (collected during exchangeCodeForSession + getSession)
+  for (const { name, value, options } of pendingCookies) {
+    redirectResponse.cookies.set(name, value, options ?? {});
+  }
+
+  // 2. viholabs_auth_token — JS-readable bearer token for middleware + API routes
+  redirectResponse.cookies.set("viholabs_auth_token", sessionData.session.access_token, {
+    path: "/", httpOnly: false, sameSite: "lax", secure, maxAge: 3600,
   });
 
+  // 3. Mode and role for client-side routing
+  redirectResponse.cookies.set(MODE_COOKIE, modeToSet, {
+    path: "/", httpOnly: false, sameSite: "lax", secure,
+  });
+  redirectResponse.cookies.set(ROLE_COOKIE, String(actorRole ?? "").trim().toUpperCase(), {
+    path: "/", httpOnly: false, sameSite: "lax", secure,
+  });
+
+  console.log("[AUTH CALLBACK] cookies on redirect:", redirectResponse.cookies.getAll().map(c => c.name));
   return redirectResponse;
 }
