@@ -640,6 +640,11 @@ function buildDelegateRows(args: {
 async function handle(req: Request) {
   let stage = "auth";
 
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const cookieNames = cookieHeader.split(";").map(p => p.trim().split("=")[0]).filter(Boolean);
+  console.log("[DELEGATES] x-viholabs-token:", req.headers.get("x-viholabs-token") ?? "null");
+  console.log("[DELEGATES] cookies:", cookieNames.join(", ") || "none");
+
   try {
     const auth = (await getActorFromRequest(req)) as {
       ok?: boolean;
