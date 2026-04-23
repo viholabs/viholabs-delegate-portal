@@ -9,6 +9,8 @@ import RevenueRadarBlock from "./RevenueRadarBlock";
 import AlertCenterBlock from "./AlertCenterBlock";
 import PriorityInboxBlock from "./PriorityInboxBlock";
 import ElElyonSystemHealth from "../el-elyon/ElElyonSystemHealth";
+import FinancialWarningsBlock from "./FinancialWarningsBlock";
+import TechOpsBlock from "./TechOpsBlock";
 
 import OrdersMonitorBlock from "./OrdersMonitorBlock";
 import InvoicesMonitorBlock from "./InvoicesMonitorBlock";
@@ -58,6 +60,12 @@ function OptionalBlock({
 export default function ControlRoomMission() {
   return (
     <div style={container}>
+      {/* PRIORITAT 0 — AVISOS FINANCERS I OPS TÈCNIQUES */}
+      <div style={grid}>
+        <FinancialWarningsBlock />
+        <TechOpsBlock />
+      </div>
+
       {/* NIVELL 1 — ESTAT GLOBAL */}
       <div style={grid}>
         <ExecutiveSummaryBlock />
