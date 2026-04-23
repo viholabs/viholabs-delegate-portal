@@ -215,6 +215,5 @@ export async function GET(req: Request) {
     path: "/", httpOnly: false, sameSite: "lax", secure,
   });
 
-  console.log("[AUTH CALLBACK] cookies on redirect:", redirectResponse.cookies.getAll().map(c => c.name));
   return redirectResponse;
 }
