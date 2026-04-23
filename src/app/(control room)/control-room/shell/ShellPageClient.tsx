@@ -171,16 +171,16 @@ function SituationPanel({ onNavigate }: { onNavigate: (tab: ShellTabId) => void 
       description: "Accede a webinars, cursos y materiales de formación.",
       tab: "recursos",
     },
-    ...(isDelegate
-      ? []
-      : [
+    ...(profile.is_melquisedec
+      ? [
           {
             eyebrow: "Operación",
             title: "El-Elyon",
             description: "Panel interno de operación y monitorización del sistema.",
             tab: "el-elyon" as ShellTabId,
           },
-        ]),
+        ]
+      : []),
   ];
 
   return (
@@ -297,10 +297,7 @@ function ElElyonPanel() {
     return <p className="text-sm py-6" style={{ color: "var(--viho-muted)" }}>Cargando…</p>;
   }
 
-  const role = String(profile.role ?? "").toLowerCase();
-  const isDelegate = role === "delegate" && !profile.is_melquisedec;
-
-  if (isDelegate) {
+  if (!profile.is_melquisedec) {
     return (
       <section className="rounded-[32px] border border-[#D6C28A] bg-[#FBF6EC] px-6 py-8">
         <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
