@@ -197,8 +197,16 @@ function DelegatePerformanceCard({ data, month }: { data: DelegateData; month: s
 }
 
 // ---------------------------------------------------------------------------
-// Melquisedec metrics card
+// Melquisedec global metrics card
 // ---------------------------------------------------------------------------
+
+type GlobalStats = {
+  units_sold: number;
+  emitted: { count: number; amount: number };
+  paid: { count: number; amount: number };
+  pending: { count: number; amount: number };
+  overdue: { count: number; amount: number };
+};
 
 function BillingRow({ label, count, amount }: { label: string; count: number; amount: number }) {
   return (
@@ -212,42 +220,25 @@ function BillingRow({ label, count, amount }: { label: string; count: number; am
   );
 }
 
-function MelquisedecMetricsCard({ data, month }: { data: DelegateData; month: string }) {
-  const { period } = data;
+function MelquisedecMetricsCard({ stats, month }: { stats: GlobalStats; month: string }) {
   return (
     <CardShell>
       <CardHeader title="Métricas del periodo" subtitle={formatMonthLabel(month)} />
       <div className="mt-3 space-y-3">
         <div className="rounded-[18px] border border-[#E8DCC5] bg-white/70 p-3 space-y-1.5">
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
-            Actividad comercial
+            Actividad comercial — todos los delegados
           </div>
-          <Row label="Unidades vendidas" value={formatNumber(period.units_sold_period)} />
+          <Row label="Unidades vendidas" value={formatNumber(stats.units_sold)} />
         </div>
         <div className="rounded-[18px] border border-[#E8DCC5] bg-white/70 p-3 space-y-2">
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
-            Facturación
+            Facturación global
           </div>
-          <BillingRow
-            label="Emitidas"
-            count={period.billing_emitted_count}
-            amount={period.billing_emitted_gross}
-          />
-          <BillingRow
-            label="Cobradas"
-            count={period.billing_paid_count}
-            amount={period.billing_paid_gross}
-          />
-          <BillingRow
-            label="Pendientes"
-            count={period.billing_pending_count}
-            amount={period.billing_pending_gross}
-          />
-          <BillingRow
-            label="Vencidas"
-            count={period.billing_overdue_count}
-            amount={period.billing_overdue_gross}
-          />
+          <BillingRow label="Emitidas" count={stats.emitted.count} amount={stats.emitted.amount} />
+          <BillingRow label="Cobradas" count={stats.paid.count} amount={stats.paid.amount} />
+          <BillingRow label="Pendientes" count={stats.pending.count} amount={stats.pending.amount} />
+          <BillingRow label="Vencidas" count={stats.overdue.count} amount={stats.overdue.amount} />
         </div>
       </div>
     </CardShell>
@@ -261,6 +252,7 @@ function MelquisedecMetricsCard({ data, month }: { data: DelegateData; month: st
 export default function PerformanceAdminBlock() {
   const { profile, loading: profileLoading } = useCommunityProfile();
   const [delegateData, setDelegateData] = React.useState<DelegateData | null>(null);
+  const [globalStats, setGlobalStats] = React.useState<GlobalStats | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -268,30 +260,40 @@ export default function PerformanceAdminBlock() {
   const role = String(profile.role ?? "").toLowerCase();
   const actorId = profile.actor_id ?? profile.effective_actor_id;
   const isDelegate = role === "delegate" && !!actorId;
-  const isMelquisedec = profile.is_melquisedec && !!actorId;
-  const shouldFetch = (isDelegate || isMelquisedec) && !profileLoading;
+  const isMelquisedec = !!profile.is_melquisedec;
 
   React.useEffect(() => {
-    if (!shouldFetch) return;
+    if (profileLoading) return;
 
     let cancelled = false;
     async function load() {
       setLoading(true);
       setError(null);
       try {
-        const token = await getAccessToken();
-        const res = await fetch(
-          `/api/control-room/delegates/${encodeURIComponent(actorId!)}?month=${month}`,
-          { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: "no-store" }
-        );
-        const j = await res.json().catch(() => null);
-        if (!j?.ok) throw new Error(j?.error ?? "Error al cargar datos");
-        if (!cancelled) {
-          setDelegateData({
-            period: j.period,
-            commission_rules: j.commission_rules ?? [],
-            delegate: j.delegate,
-          });
+        if (isMelquisedec) {
+          // Global aggregate — all delegates + unassigned
+          const res = await fetch(
+            `/api/control-room/global-period-stats?month=${month}`,
+            { cache: "no-store" }
+          );
+          const j = await res.json().catch(() => null);
+          if (!j?.ok) throw new Error(j?.error ?? "Error al cargar métricas globales");
+          if (!cancelled) setGlobalStats(j as GlobalStats);
+        } else if (isDelegate && actorId) {
+          const token = await getAccessToken();
+          const res = await fetch(
+            `/api/control-room/delegates/${encodeURIComponent(actorId)}?month=${month}`,
+            { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: "no-store" }
+          );
+          const j = await res.json().catch(() => null);
+          if (!j?.ok) throw new Error(j?.error ?? "Error al cargar datos");
+          if (!cancelled) {
+            setDelegateData({
+              period: j.period,
+              commission_rules: j.commission_rules ?? [],
+              delegate: j.delegate,
+            });
+          }
         }
       } catch (e) {
         if (!cancelled) setError(String(e));
@@ -299,17 +301,18 @@ export default function PerformanceAdminBlock() {
         if (!cancelled) setLoading(false);
       }
     }
-    void load();
+    if (isMelquisedec || isDelegate) void load();
     return () => { cancelled = true; };
-  }, [shouldFetch, actorId, month]);
+  }, [profileLoading, isMelquisedec, isDelegate, actorId, month]);
 
+  const shouldFetch = isMelquisedec || isDelegate;
   if (profileLoading || (shouldFetch && loading)) return <LoadingState />;
   if (shouldFetch && error) return <ErrorState message={error} />;
 
-  if (delegateData) {
-    if (isMelquisedec) {
-      return <MelquisedecMetricsCard data={delegateData} month={month} />;
-    }
+  if (isMelquisedec && globalStats) {
+    return <MelquisedecMetricsCard stats={globalStats} month={month} />;
+  }
+  if (isDelegate && delegateData) {
     return <DelegatePerformanceCard data={delegateData} month={month} />;
   }
 

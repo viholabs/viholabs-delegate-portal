@@ -148,11 +148,10 @@ function SituationPanel({ onNavigate }: { onNavigate: (tab: ShellTabId) => void 
 
   const cards: { eyebrow: string; title: string; description: string; tab?: ShellTabId; disabled?: boolean }[] = [
     {
-      eyebrow: "Próximamente",
+      eyebrow: "Pedidos",
       title: "Pedidos",
       description: "Crea y gestiona pedidos para tus clientes directamente desde el portal.",
       tab: "facturacion",
-      disabled: true,
     },
     {
       eyebrow: "Facturación",
@@ -244,7 +243,7 @@ function FacturacionPanel() {
             </div>
             <div className="grid gap-5 px-6 py-6 sm:grid-cols-2">
               <SectionCard
-                eyebrow="Próximamente"
+                eyebrow="Pedidos"
                 title="Crear Pedido"
                 description="Genera un nuevo pedido para tus clientes directamente desde el portal."
                 disabled
