@@ -134,15 +134,6 @@ export default function TabLiquidacion({ settlement, period, month, delegate, vi
 
   return (
     <div className="space-y-6">
-      {/* Banner criterio fijo */}
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
-        <div className="font-semibold">Criterio de liquidación</div>
-        <p className="mt-1">
-          Solo se incluyen como liquidables las facturas efectivamente cobradas. Las pendientes se
-          muestran a efectos de seguimiento, pero no generan comisión.
-        </p>
-      </div>
-
       {/* Error generando */}
       {genError && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700">
@@ -183,10 +174,14 @@ export default function TabLiquidacion({ settlement, period, month, delegate, vi
           </div>
         </div>
 
-        {current ? (
+        {current && current.status !== "DRAFT" ? (
           <SettlementCard proposal={current} onOpenPdf={openPdf} />
         ) : (
-          <ProvisionalCard period={period} month={month} />
+          <ProvisionalCard
+            period={period}
+            month={month}
+            draftCreatedAt={current?.status === "DRAFT" ? current.created_at : null}
+          />
         )}
       </div>
 
@@ -327,15 +322,23 @@ function SettlementCard({ proposal, onOpenPdf }: { proposal: SettlementProposal;
 // Sin propuesta formal: muestra datos provisionales calculados en tiempo real
 // ---------------------------------------------------------------------------
 
-function ProvisionalCard({ period, month }: { period: DetailPeriodStats; month: string }) {
+function ProvisionalCard({
+  period,
+  month,
+  draftCreatedAt,
+}: {
+  period: DetailPeriodStats;
+  month: string;
+  draftCreatedAt?: string | null;
+}) {
   return (
     <div className="p-5 space-y-5">
       <div className="flex items-center gap-3">
         <span className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1 text-sm font-semibold text-neutral-600">
-          Sin propuesta formal
+          {draftCreatedAt ? "Borrador desactualizado" : "Sin propuesta formal"}
         </span>
         <span className="text-xs text-[color:var(--viho-muted)]">
-          Datos calculados en tiempo real para {formatMonthLabel(month)}
+          Datos en tiempo real para {formatMonthLabel(month)}
         </span>
       </div>
 
@@ -370,11 +373,12 @@ function ProvisionalCard({ period, month }: { period: DetailPeriodStats; month: 
         />
       </div>
 
-      <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-xs text-neutral-600">
-        No existe todavía una propuesta formal de liquidación para este periodo. Los valores
-        mostrados son una estimación en tiempo real a partir de las facturas cobradas registradas.
-        Solo Melquisedec puede crear y validar propuestas formales de liquidación.
-      </div>
+      {draftCreatedAt && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          Existe un borrador generado el {formatDatetime(draftCreatedAt)} con datos de aquel momento.
+          Las cifras mostradas son las actuales (en tiempo real). Usa <strong>Regenerar propuesta</strong> para actualizar el borrador.
+        </div>
+      )}
     </div>
   );
 }

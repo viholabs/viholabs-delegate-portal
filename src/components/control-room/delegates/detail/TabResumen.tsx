@@ -140,11 +140,6 @@ export default function TabResumen({ period, delegate }: Props) {
           </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <strong>Criterio de liquidación:</strong> Solo se incluyen como liquidables las
-          facturas efectivamente cobradas. Las pendientes y vencidas se muestran a efectos de
-          seguimiento, pero no generan comisión.
-        </div>
       </Card>
 
       {/* Datos del delegado */}

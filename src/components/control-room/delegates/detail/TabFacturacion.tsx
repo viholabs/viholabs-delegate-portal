@@ -213,12 +213,6 @@ export default function TabFacturacion({ invoices, month, period, commissionRule
         </div>
       </div>
 
-      {/* Banner criterio */}
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        <strong>Criterio de liquidación:</strong> Solo las facturas cobradas{" "}
-        <strong>dentro del periodo</strong> generan comisión.
-      </div>
-
       {/* Filtros rápidos */}
       <div className="flex flex-wrap gap-2">
         <FilterBtn active={filter === "all"} onClick={() => setFilter("all")}>
