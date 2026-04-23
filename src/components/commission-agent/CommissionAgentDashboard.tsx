@@ -4,7 +4,7 @@
 // Muestra clientes atribuidos vía Bixgrow, cuentas de afiliado, comisiones e historial de conversiones.
 
 import { useCallback, useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { getAccessToken } from "@/lib/auth/token";
 
 type AffiliateAccount = {
   id: string;
@@ -57,11 +57,7 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-async function getToken() {
-  const sb = createClient();
-  const { data } = await sb.auth.getSession();
-  return data.session?.access_token ?? null;
-}
+const getToken = getAccessToken;
 
 export default function CommissionAgentDashboard() {
   const [data, setData] = useState<Summary | null>(null);

@@ -4,7 +4,7 @@
 // sin impersonación real — usa el parámetro ?delegateId= que todos los endpoints ya soportan.
 
 import { useCallback, useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { getAccessToken } from "@/lib/auth/token";
 
 type DelegateOption = {
   id: string;
@@ -36,11 +36,7 @@ function fmt(n: number, decimals = 0) {
   return n.toLocaleString("es-ES", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-async function getToken(): Promise<string | null> {
-  const sb = createClient();
-  const { data } = await sb.auth.getSession();
-  return data.session?.access_token ?? null;
-}
+const getToken = getAccessToken;
 
 export default function ViewAsDelegatePanel() {
   const [delegates, setDelegates] = useState<DelegateOption[]>([]);

@@ -4,7 +4,7 @@
 // Permite a delegados y supervisores loguear interacciones con clientes.
 
 import { useCallback, useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { getAccessToken } from "@/lib/auth/token";
 
 type FollowUpType = "call" | "whatsapp" | "email" | "visit" | "incident" | "note";
 
@@ -48,11 +48,7 @@ function formatDate(iso: string) {
   });
 }
 
-async function getToken(): Promise<string | null> {
-  const sb = createClient();
-  const { data } = await sb.auth.getSession();
-  return data.session?.access_token ?? null;
-}
+const getToken = getAccessToken;
 
 type Props = {
   delegateId: string;

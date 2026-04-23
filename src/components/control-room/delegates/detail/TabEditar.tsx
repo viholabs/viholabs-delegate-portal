@@ -5,7 +5,7 @@
 // Solo visible y funcional para Melquisedec.
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { getAccessToken } from "@/lib/auth/token";
 import type { DelegateDetailActor } from "../types";
 
 type Props = {
@@ -50,9 +50,7 @@ export default function TabEditar({ delegate, onSaved }: Props) {
     setSuccess(false);
 
     try {
-      const supabase = createClient();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token ?? null;
+      const token = await getAccessToken();
 
       const body: Record<string, unknown> = {
         name: form.name.trim() || null,

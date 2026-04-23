@@ -5,7 +5,7 @@
 // REGLA CRÍTICA: solo Melquisedec puede editar reglas. Todos los demás: solo lectura.
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { getAccessToken } from "@/lib/auth/token";
 import type { CommissionRule, DetailPeriodStats, DelegateDetailActor } from "../types";
 import { formatMoney, formatDate } from "../utils";
 
@@ -298,9 +298,7 @@ function RuleEditModal({
     setSaving(true);
     setError(null);
     try {
-      const supabase = createClient();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token ?? null;
+      const token = await getAccessToken();
 
       const pct = parseFloat(percentage);
       const refPrice = parseFloat(referencePrice);

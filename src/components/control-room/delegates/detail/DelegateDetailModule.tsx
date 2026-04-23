@@ -4,7 +4,7 @@
 // Orchestrador del detalle de un delegado: gestiona carga de datos y navegación por tabs.
 
 import { useEffect, useState, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { getAccessToken } from "@/lib/auth/token";
 import type { DelegateDetailResponse, DelegateDetailApiResult } from "../types";
 import { currentMonth } from "../utils";
 import DelegateHeader from "./DelegateHeader";
@@ -35,11 +35,6 @@ const MELQUISEDEC_TABS: { id: Tab; label: string }[] = [
   { id: "editar", label: "Editar" },
 ];
 
-async function getAccessToken(): Promise<string | null> {
-  const supabase = createClient();
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
 
 type Props = { delegateId: string };
 
@@ -56,9 +51,7 @@ export default function DelegateDetailModule({ delegateId }: Props) {
 
   useEffect(() => {
     async function checkMe() {
-      const supabase = createClient();
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token ?? null;
+      const token = await getAccessToken();
       try {
         const res = await fetch("/api/control-room/me", {
           headers: token ? { Authorization: `Bearer ${token}` } : {},

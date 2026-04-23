@@ -4,7 +4,7 @@
 // Panel de liquidación: propuesta actual del periodo y historial.
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { getAccessToken } from "@/lib/auth/token";
 import type { SettlementProposal, DetailPeriodStats, DelegateDetailActor } from "../types";
 import {
   formatMoney,
@@ -28,11 +28,7 @@ export default function TabLiquidacion({ settlement, period, month, delegate, vi
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
-  async function getToken(): Promise<string | null> {
-    const supabase = createClient();
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
-  }
+  const getToken = getAccessToken;
 
   async function openPdf() {
     setGenError(null);
