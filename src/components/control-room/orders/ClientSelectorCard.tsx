@@ -15,6 +15,7 @@ type Props = {
   filteredClients: ClientRow[];
   clientsLoad: "idle" | "loading" | "ok" | "error";
   selectedDelegateId: string;
+  delegateMode?: boolean;
   clientQuery: string;
   selectedClientId: string;
   createClientOpen: boolean;
@@ -39,6 +40,7 @@ export default function ClientSelectorCard({
   filteredClients,
   clientsLoad,
   selectedDelegateId,
+  delegateMode = false,
   clientQuery,
   selectedClientId,
   createClientOpen,
@@ -54,6 +56,7 @@ export default function ClientSelectorCard({
   onSubmitCreateClient,
   onCancelCreateClient,
 }: Props) {
+  const needsDelegate = !delegateMode && !selectedDelegateId;
   return (
     <Card
       style={{
@@ -79,14 +82,14 @@ export default function ClientSelectorCard({
             <button
               type="button"
               onClick={onToggleCreateClient}
-              disabled={!selectedDelegateId}
+              disabled={needsDelegate}
               style={{
                 height: 34,
                 borderRadius: 10,
                 border: "1px solid #ddd",
-                background: !selectedDelegateId ? "#f8f8f8" : "#fff",
+                background: needsDelegate ? "#f8f8f8" : "#fff",
                 padding: "0 12px",
-                cursor: !selectedDelegateId ? "not-allowed" : "pointer",
+                cursor: needsDelegate ? "not-allowed" : "pointer",
                 fontWeight: 700,
                 fontSize: 12,
               }}
@@ -119,9 +122,9 @@ export default function ClientSelectorCard({
               borderRadius: 10,
               border: "1px solid #ddd",
               padding: "0 10px",
-              background: !selectedDelegateId ? "#f8f8f8" : "#fff",
+              background: needsDelegate ? "#f8f8f8" : "#fff",
             }}
-            disabled={!selectedDelegateId}
+            disabled={needsDelegate}
           />
 
           <select
@@ -133,12 +136,12 @@ export default function ClientSelectorCard({
               borderRadius: 10,
               border: "1px solid #ddd",
               padding: "0 10px",
-              background: !selectedDelegateId ? "#f8f8f8" : "#fff",
+              background: needsDelegate ? "#f8f8f8" : "#fff",
             }}
-            disabled={!selectedDelegateId}
+            disabled={needsDelegate}
           >
             <option value="">
-              {!selectedDelegateId
+              {needsDelegate
                 ? "— Elige primero un delegado —"
                 : "— Selecciona un cliente —"}
             </option>
@@ -159,11 +162,11 @@ export default function ClientSelectorCard({
             lineHeight: 1.45,
           }}
         >
-          {!selectedDelegateId
+          {needsDelegate
             ? "Como Melquisedec o rol supervisor, primero debes elegir un delegado. Hasta entonces no se listan clientes."
             : clientsLoad === "loading"
-            ? "Cargando clientes del delegado seleccionado…"
-            : "Listado operativo filtrado por delegado."}
+            ? "Cargando clientes…"
+            : "Listado operativo de tus clientes."}
         </div>
 
         {createClientOpen ? (
@@ -172,6 +175,7 @@ export default function ClientSelectorCard({
             createClientState={createClientState}
             createClientMsg={createClientMsg}
             selectedDelegateId={selectedDelegateId}
+            delegateMode={delegateMode}
             paymentMethods={paymentMethods}
             paymentMethodsLoad={paymentMethodsLoad}
             onChange={onNewClientChange}

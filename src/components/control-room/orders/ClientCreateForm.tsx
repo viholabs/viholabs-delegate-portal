@@ -12,6 +12,7 @@ type Props = {
   createClientState: "idle" | "submitting" | "ok" | "error";
   createClientMsg: string;
   selectedDelegateId: string;
+  delegateMode?: boolean;
   paymentMethods: PaymentMethodOption[];
   paymentMethodsLoad: "idle" | "loading" | "ok" | "error";
   onChange: <K extends keyof NewClientForm>(key: K, value: NewClientForm[K]) => void;
@@ -24,12 +25,14 @@ export default function ClientCreateForm({
   createClientState,
   createClientMsg,
   selectedDelegateId,
+  delegateMode = false,
   paymentMethods,
   paymentMethodsLoad,
   onChange,
   onSubmit,
   onCancel,
 }: Props) {
+  const canSubmit = delegateMode || !!selectedDelegateId;
   return (
     <div
       style={{
@@ -213,7 +216,7 @@ export default function ClientCreateForm({
         <button
           type="button"
           onClick={onSubmit}
-          disabled={createClientState === "submitting" || !selectedDelegateId}
+          disabled={createClientState === "submitting" || !canSubmit}
           style={{
             height: 40,
             borderRadius: 10,
@@ -221,7 +224,7 @@ export default function ClientCreateForm({
             background: "#111",
             color: "#fff",
             padding: "0 14px",
-            cursor: createClientState === "submitting" || !selectedDelegateId ? "not-allowed" : "pointer",
+            cursor: createClientState === "submitting" || !canSubmit ? "not-allowed" : "pointer",
             fontWeight: 800,
           }}
         >

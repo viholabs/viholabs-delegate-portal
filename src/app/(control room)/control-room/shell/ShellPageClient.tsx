@@ -219,7 +219,7 @@ function ClientsShellPanel({ clientId }: { clientId?: string | null }) {
 
 function FacturacionPanel() {
   const { profile, loading } = useCommunityProfile();
-  const [showOrders, setShowOrders] = useState(false);
+  const [showFacturas, setShowFacturas] = useState(false);
 
   if (loading) {
     return <p className="text-sm py-6" style={{ color: "var(--viho-muted)" }}>Cargando…</p>;
@@ -231,28 +231,32 @@ function FacturacionPanel() {
   if (role === "delegate" && actorId) {
     return (
       <div className="space-y-4">
-        {/* Header bar with Crear Pedido toggle */}
-        <div className="flex items-center justify-between gap-4">
-          {showOrders ? (
-            <button
-              onClick={() => setShowOrders(false)}
-              className="text-sm transition hover:opacity-70"
-              style={{ color: "var(--viho-muted)" }}
-            >
-              ← Facturas
-            </button>
-          ) : (
-            <button
-              onClick={() => setShowOrders(true)}
-              className="rounded-xl border px-4 py-2 text-sm font-medium transition hover:opacity-80"
-              style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface-2,#f9f7f4)", color: "var(--viho-foreground)" }}
-            >
-              + Crear Pedido
-            </button>
-          )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowFacturas(false)}
+            className="text-sm font-medium transition"
+            style={{
+              color: !showFacturas ? "#C7822A" : "var(--viho-muted)",
+              borderBottom: !showFacturas ? "2px solid #C7822A" : "2px solid transparent",
+              paddingBottom: 2,
+            }}
+          >
+            Pedidos
+          </button>
+          <button
+            onClick={() => setShowFacturas(true)}
+            className="text-sm font-medium transition"
+            style={{
+              color: showFacturas ? "#C7822A" : "var(--viho-muted)",
+              borderBottom: showFacturas ? "2px solid #C7822A" : "2px solid transparent",
+              paddingBottom: 2,
+            }}
+          >
+            Facturas
+          </button>
         </div>
 
-        {showOrders ? (
+        {!showFacturas ? (
           <OrdersConsoleTab delegateMode />
         ) : (
           <DelegateOwnFacturacion actorId={actorId} />

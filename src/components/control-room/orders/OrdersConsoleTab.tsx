@@ -340,15 +340,17 @@ export default function OrdersConsoleTab({ delegateMode = false }: { delegateMod
   );
 
   const cardsClientsValue =
-    !selectedDelegateId && clients.length === 0
+    !delegateMode && !selectedDelegateId && clients.length === 0
       ? "—"
       : clientsLoad === "loading"
         ? "…"
         : clients.length;
 
-  const cardsDelegateValue = selectedDelegate
-    ? safeStr(selectedDelegate.name || selectedDelegate.email || "—")
-    : "General";
+  const cardsDelegateValue = delegateMode
+    ? "Tú"
+    : selectedDelegate
+      ? safeStr(selectedDelegate.name || selectedDelegate.email || "—")
+      : "General";
 
   function setLine(i: number, patch: Partial<LineDraft>) {
     setLines((prev) =>
@@ -747,6 +749,7 @@ export default function OrdersConsoleTab({ delegateMode = false }: { delegateMod
         filteredClients={filteredClients}
         clientsLoad={clientsLoad}
         selectedDelegateId={selectedDelegateId}
+        delegateMode={delegateMode}
         clientQuery={clientQuery}
         selectedClientId={selectedClientId}
         createClientOpen={createClientOpen}
