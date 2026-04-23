@@ -92,11 +92,14 @@ export async function middleware(req: NextRequest) {
       error,
     } = await supabase.auth.getUser();
 
+    console.log(`[MW] ${pathname} | user=${user?.id ?? "null"} err=${error?.message ?? "none"} fallback=${fallbackToken ? "yes(" + fallbackToken.substring(0,20) + "...)" : "no"}`);
+
     if (error || !user) {
       // Supabase session missing — try viholabs_auth_token before redirecting.
       if (fallbackToken) {
         const reqHeaders = new Headers(req.headers);
         reqHeaders.set("x-viholabs-token", fallbackToken);
+        console.log(`[MW] ${pathname} | injecting x-viholabs-token via fallback`);
         return NextResponse.next({ request: { headers: reqHeaders } });
       }
       const loginUrl = req.nextUrl.clone();
