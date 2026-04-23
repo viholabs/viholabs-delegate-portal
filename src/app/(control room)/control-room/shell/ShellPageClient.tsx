@@ -9,6 +9,7 @@ import HoldedDocumentsTable from "@/components/control-room/invoices/HoldedDocum
 import ClientsPanel from "@/components/control-room/clients/ClientsPanel";
 import CommissionAgentDashboard from "@/components/commission-agent/CommissionAgentDashboard";
 import TabFacturacion from "@/components/control-room/delegates/detail/TabFacturacion";
+import OrdersConsoleTab from "@/components/control-room/orders/OrdersConsoleTab";
 import { useCommunityProfile } from "@/components/portal/community/useCommunityProfile";
 import { getAccessToken } from "@/lib/auth/token";
 import type { DetailInvoiceRow, DetailPeriodStats, CommissionRule } from "@/components/control-room/delegates/types";
@@ -218,7 +219,7 @@ function ClientsShellPanel({ clientId }: { clientId?: string | null }) {
 
 function FacturacionPanel() {
   const { profile, loading } = useCommunityProfile();
-  const [showInvoices, setShowInvoices] = useState(false);
+  const [showOrders, setShowOrders] = useState(false);
 
   if (loading) {
     return <p className="text-sm py-6" style={{ color: "var(--viho-muted)" }}>Cargando…</p>;
@@ -229,47 +230,32 @@ function FacturacionPanel() {
 
   if (role === "delegate" && actorId) {
     return (
-      <div className="space-y-5">
-        {/* Entry cards */}
-        {!showInvoices && (
-          <section className="rounded-[32px] border border-[#D6C28A] bg-[#FBF6EC]">
-            <div className="border-b border-[#D6C28A] px-6 py-5">
-              <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
-                Facturación
-              </div>
-              <h2 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-[#5A2E3A]">
-                Tu actividad comercial
-              </h2>
-            </div>
-            <div className="grid gap-5 px-6 py-6 sm:grid-cols-2">
-              <SectionCard
-                eyebrow="Pedidos"
-                title="Crear Pedido"
-                description="Genera un nuevo pedido para tus clientes directamente desde el portal."
-                disabled
-              />
-              <SectionCard
-                eyebrow="Facturas"
-                title="Facturas Emitidas"
-                description="Consulta tus facturas del mes, comisiones acumuladas y estado de cobro."
-                onClick={() => setShowInvoices(true)}
-              />
-            </div>
-          </section>
-        )}
-
-        {/* Inline invoice view */}
-        {showInvoices && (
-          <div className="space-y-3">
+      <div className="space-y-4">
+        {/* Header bar with Crear Pedido toggle */}
+        <div className="flex items-center justify-between gap-4">
+          {showOrders ? (
             <button
-              onClick={() => setShowInvoices(false)}
+              onClick={() => setShowOrders(false)}
               className="text-sm transition hover:opacity-70"
               style={{ color: "var(--viho-muted)" }}
             >
-              ← Volver
+              ← Facturas
             </button>
-            <DelegateOwnFacturacion actorId={actorId} />
-          </div>
+          ) : (
+            <button
+              onClick={() => setShowOrders(true)}
+              className="rounded-xl border px-4 py-2 text-sm font-medium transition hover:opacity-80"
+              style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface-2,#f9f7f4)", color: "var(--viho-foreground)" }}
+            >
+              + Crear Pedido
+            </button>
+          )}
+        </div>
+
+        {showOrders ? (
+          <OrdersConsoleTab delegateMode />
+        ) : (
+          <DelegateOwnFacturacion actorId={actorId} />
         )}
       </div>
     );

@@ -34,11 +34,11 @@ type PaymentMethodOption = {
   name: string;
 };
 
-export default function OrdersConsoleTab() {
+export default function OrdersConsoleTab({ delegateMode = false }: { delegateMode?: boolean }) {
   const [delegates, setDelegates] = useState<DelegateRow[]>([]);
   const [delegatesLoad, setDelegatesLoad] = useState<
     "idle" | "loading" | "ok" | "forbidden" | "error"
-  >("idle");
+  >(delegateMode ? "forbidden" : "idle");
   const [selectedDelegateId, setSelectedDelegateId] = useState<string>("");
 
   const [clients, setClients] = useState<ClientRow[]>([]);
@@ -83,6 +83,7 @@ export default function OrdersConsoleTab() {
   >("idle");
 
   useEffect(() => {
+    if (delegateMode) return;
     let alive = true;
 
     (async () => {
@@ -125,7 +126,7 @@ export default function OrdersConsoleTab() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [delegateMode]);
 
   async function reloadClients(preferredClientId?: string) {
     setClientsLoad("loading");
@@ -461,7 +462,7 @@ export default function OrdersConsoleTab() {
     setCreateClientState("submitting");
     setCreateClientMsg("");
 
-    if (!selectedDelegateId) {
+    if (!delegateMode && !selectedDelegateId) {
       setCreateClientState("error");
       setCreateClientMsg(
         "Debes seleccionar un delegado antes de crear el cliente.",
@@ -470,7 +471,7 @@ export default function OrdersConsoleTab() {
     }
 
     const payload = {
-      delegate_id: selectedDelegateId,
+      ...(delegateMode ? {} : { delegate_id: selectedDelegateId }),
       name: safeStr(newClient.name).trim(),
       tax_id: normalizeTaxId(newClient.tax_id),
       phone: safeStr(newClient.phone).trim(),
@@ -694,23 +695,27 @@ export default function OrdersConsoleTab() {
           marginBottom: 18,
         }}
       >
-        <StatCard
-          title="Delegado"
-          value={cardsDelegateValue}
-          subtitle={
-            selectedDelegateId
-              ? "Ámbito filtrado por delegado"
-              : "Vista general sin delegado seleccionado"
-          }
-        />
+        {!delegateMode && (
+          <StatCard
+            title="Delegado"
+            value={cardsDelegateValue}
+            subtitle={
+              selectedDelegateId
+                ? "Ámbito filtrado por delegado"
+                : "Vista general sin delegado seleccionado"
+            }
+          />
+        )}
 
         <StatCard
           title="Clientes"
           value={cardsClientsValue}
           subtitle={
-            !selectedDelegateId
-              ? "Selecciona delegado para cargar clientes"
-              : "Clientes operativos del delegado"
+            delegateMode
+              ? "Clientes de tu cartera"
+              : !selectedDelegateId
+                ? "Selecciona delegado para cargar clientes"
+                : "Clientes operativos del delegado"
           }
         />
 
@@ -727,13 +732,15 @@ export default function OrdersConsoleTab() {
         />
       </div>
 
-      <DelegateSelectorCard
-        delegates={delegates}
-        delegatesLoad={delegatesLoad}
-        selectedDelegateId={selectedDelegateId}
-        selectedDelegate={selectedDelegate}
-        onChange={setSelectedDelegateId}
-      />
+      {!delegateMode && (
+        <DelegateSelectorCard
+          delegates={delegates}
+          delegatesLoad={delegatesLoad}
+          selectedDelegateId={selectedDelegateId}
+          selectedDelegate={selectedDelegate}
+          onChange={setSelectedDelegateId}
+        />
+      )}
 
       <ClientSelectorCard
         clients={clients}
