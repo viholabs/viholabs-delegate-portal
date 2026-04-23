@@ -222,13 +222,13 @@ async function resolveFromBearer(
   const token = getBearerToken(req);
   if (!token) return null;
 
+  console.log("[BEARER] token src:", token.substring(0, 30) + "...");
   const supaRls = createBearerAuthClient(token);
   const { data, error } = await supaRls.auth.getUser(token);
   const authUserId = data?.user?.id ?? null;
+  console.log("[BEARER] getUser → userId:", authUserId ?? "null", "| error:", error?.message ?? "none");
 
   if (error || !authUserId) {
-    // Token present but invalid/expired — fall through to SSR cookies rather
-    // than hard-failing. SSR may have a fresh session via refresh token.
     return null;
   }
 
