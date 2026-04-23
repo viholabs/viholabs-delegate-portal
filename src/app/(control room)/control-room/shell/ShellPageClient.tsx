@@ -13,12 +13,14 @@ import { useCommunityProfile } from "@/components/portal/community/useCommunityP
 import { getAccessToken } from "@/lib/auth/token";
 import type { DetailInvoiceRow, DetailPeriodStats, CommissionRule } from "@/components/control-room/delegates/types";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
 function isoMonth(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 }
+
+// ---------------------------------------------------------------------------
+// Delegate own invoices (Facturación tab)
+// ---------------------------------------------------------------------------
 
 function DelegateOwnFacturacion({ actorId }: { actorId: string }) {
   const [month, setMonth] = useState(isoMonth);
@@ -78,6 +80,10 @@ function DelegateOwnFacturacion({ actorId }: { actorId: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Types and shared tab logic
+// ---------------------------------------------------------------------------
+
 type ShellTabId =
   | "situation"
   | "clients"
@@ -97,19 +103,106 @@ function isShellTabId(value: string | null): value is ShellTabId {
   );
 }
 
-function SituationPanel() {
+// ---------------------------------------------------------------------------
+// Section entry card (Recursos-style)
+// ---------------------------------------------------------------------------
+
+function SectionCard({
+  eyebrow,
+  title,
+  description,
+  onClick,
+  disabled,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Situation</CardTitle>
-      </CardHeader>
-      <CardContent
-        className="text-sm"
-        style={{ color: "var(--viho-muted, rgba(42,29,32,0.72))" }}
-      >
-        Dashboard principal del actor.
-      </CardContent>
-    </Card>
+    <article
+      onClick={disabled ? undefined : onClick}
+      className={[
+        "rounded-[28px] border border-[#D6C28A] bg-white/70 p-5 transition",
+        disabled ? "opacity-60" : onClick ? "cursor-pointer hover:border-[#C7822A] hover:shadow-md" : "",
+      ].join(" ")}
+    >
+      <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#8A775C]">
+        {eyebrow}
+      </div>
+      <h3 className="mt-3 text-[22px] font-semibold text-[#5A2E3A]">{title}</h3>
+      <p className="mt-3 text-[15px] leading-7 text-[#6E5B43]">{description}</p>
+    </article>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Panels
+// ---------------------------------------------------------------------------
+
+function SituationPanel({ onNavigate }: { onNavigate: (tab: ShellTabId) => void }) {
+  const { profile, loading } = useCommunityProfile();
+  const role = String(profile.role ?? "").toLowerCase();
+  const isDelegate = !loading && role === "delegate";
+
+  const cards: { eyebrow: string; title: string; description: string; tab?: ShellTabId; disabled?: boolean }[] = [
+    {
+      eyebrow: "Cartera",
+      title: "Mis Clientes",
+      description: "Consulta y gestiona tu cartera de clientes asignados.",
+      tab: "clients",
+    },
+    {
+      eyebrow: "Facturación",
+      title: "Facturas Emitidas",
+      description: "Revisa tus facturas del mes, cobros y estado de cada documento.",
+      tab: "facturacion",
+    },
+    {
+      eyebrow: "Contenido",
+      title: "Recursos",
+      description: "Accede a webinars, cursos y materiales de formación.",
+      tab: "recursos",
+    },
+    ...(isDelegate
+      ? []
+      : [
+          {
+            eyebrow: "Operación",
+            title: "El-Elyon",
+            description: "Panel interno de operación y monitorización del sistema.",
+            tab: "el-elyon" as ShellTabId,
+          },
+        ]),
+  ];
+
+  return (
+    <section className="rounded-[32px] border border-[#D6C28A] bg-[#FBF6EC]">
+      <div className="border-b border-[#D6C28A] px-6 py-5">
+        <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
+          Portal del delegado
+        </div>
+        <h2 className="mt-2 text-[28px] font-semibold tracking-[-0.02em] text-[#5A2E3A]">
+          Bienvenido
+        </h2>
+        <p className="mt-3 max-w-[680px] text-[15px] leading-7 text-[#6E5B43]">
+          Tu espacio de gestión comercial. Consulta tus facturas, clientes y rendimiento desde aquí.
+        </p>
+      </div>
+      <div className="grid gap-5 px-6 py-6 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.map((c) => (
+          <SectionCard
+            key={c.tab ?? c.title}
+            eyebrow={c.eyebrow}
+            title={c.title}
+            description={c.description}
+            onClick={c.tab ? () => onNavigate(c.tab!) : undefined}
+            disabled={c.disabled}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -119,6 +212,7 @@ function ClientsShellPanel({ clientId }: { clientId?: string | null }) {
 
 function FacturacionPanel() {
   const { profile, loading } = useCommunityProfile();
+  const [showInvoices, setShowInvoices] = useState(false);
 
   if (loading) {
     return <p className="text-sm py-6" style={{ color: "var(--viho-muted)" }}>Cargando…</p>;
@@ -128,7 +222,51 @@ function FacturacionPanel() {
   const actorId = profile.actor_id ?? profile.effective_actor_id;
 
   if (role === "delegate" && actorId) {
-    return <DelegateOwnFacturacion actorId={actorId} />;
+    return (
+      <div className="space-y-5">
+        {/* Entry cards */}
+        {!showInvoices && (
+          <section className="rounded-[32px] border border-[#D6C28A] bg-[#FBF6EC]">
+            <div className="border-b border-[#D6C28A] px-6 py-5">
+              <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
+                Facturación
+              </div>
+              <h2 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-[#5A2E3A]">
+                Tu actividad comercial
+              </h2>
+            </div>
+            <div className="grid gap-5 px-6 py-6 sm:grid-cols-2">
+              <SectionCard
+                eyebrow="Próximamente"
+                title="Crear Pedido"
+                description="Genera un nuevo pedido para tus clientes directamente desde el portal."
+                disabled
+              />
+              <SectionCard
+                eyebrow="Facturas"
+                title="Facturas Emitidas"
+                description="Consulta tus facturas del mes, comisiones acumuladas y estado de cobro."
+                onClick={() => setShowInvoices(true)}
+              />
+            </div>
+          </section>
+        )}
+
+        {/* Inline invoice view */}
+        {showInvoices && (
+          <div className="space-y-3">
+            <button
+              onClick={() => setShowInvoices(false)}
+              className="text-sm transition hover:opacity-70"
+              style={{ color: "var(--viho-muted)" }}
+            >
+              ← Volver
+            </button>
+            <DelegateOwnFacturacion actorId={actorId} />
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -147,6 +285,31 @@ function RecursosPanel() {
 }
 
 function ElElyonPanel() {
+  const { profile, loading } = useCommunityProfile();
+
+  if (loading) {
+    return <p className="text-sm py-6" style={{ color: "var(--viho-muted)" }}>Cargando…</p>;
+  }
+
+  const role = String(profile.role ?? "").toLowerCase();
+  const isDelegate = role === "delegate" && !profile.is_melquisedec;
+
+  if (isDelegate) {
+    return (
+      <section className="rounded-[32px] border border-[#D6C28A] bg-[#FBF6EC] px-6 py-8">
+        <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
+          El-Elyon
+        </div>
+        <h2 className="mt-2 text-[22px] font-semibold text-[#5A2E3A]">
+          Área de uso interno
+        </h2>
+        <p className="mt-3 text-[15px] leading-7 text-[#6E5B43]">
+          Este panel está reservado para el equipo de operaciones de Viholabs.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <ControlRoomMission />
@@ -161,6 +324,10 @@ function ComisionesAgentePanel() {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Shell root
+// ---------------------------------------------------------------------------
 
 export default function ShellPageClient() {
   const searchParams = useSearchParams();
@@ -181,7 +348,7 @@ export default function ShellPageClient() {
   const content = useMemo(() => {
     switch (activeTab) {
       case "situation":
-        return <SituationPanel />;
+        return <SituationPanel onNavigate={setActiveTab} />;
 
       case "clients":
         return <ClientsShellPanel clientId={clientId} />;
@@ -199,9 +366,9 @@ export default function ShellPageClient() {
         return <ComisionesAgentePanel />;
 
       default:
-        return <SituationPanel />;
+        return <SituationPanel onNavigate={setActiveTab} />;
     }
-  }, [activeTab]);
+  }, [activeTab, clientId]);
 
   return (
     <div

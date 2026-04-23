@@ -25,11 +25,11 @@ const BASE_TABS: { id: Tab; label: string }[] = [
   { id: "facturacion", label: "Facturación" },
   { id: "liquidacion", label: "Liquidación" },
   { id: "clientes", label: "Clientes" },
-  { id: "crm", label: "CRM" },
 ];
 
 // Tabs restringidos a Melquisedec
 const MELQUISEDEC_TABS: { id: Tab; label: string }[] = [
+  { id: "crm", label: "CRM" },
   { id: "comisiones", label: "Comisiones" },
   { id: "auditoria", label: "Auditoría" },
   { id: "editar", label: "Editar" },
@@ -169,10 +169,10 @@ export default function DelegateDetailModule({ delegateId }: Props) {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={[
-                "shrink-0 border-b-2 px-5 py-4 text-sm font-semibold transition-colors",
+                "shrink-0 border-b-[3px] px-5 py-4 text-sm transition-colors",
                 activeTab === tab.id
-                  ? "border-[color:var(--viho-primary)] text-[color:var(--viho-primary)]"
-                  : "border-transparent text-[color:var(--viho-muted)] hover:text-[color:var(--viho-primary)]",
+                  ? "border-[#C7822A] font-bold text-[#C7822A]"
+                  : "border-transparent font-semibold text-[color:var(--viho-muted)] hover:text-[#C7822A]",
               ].join(" ")}
             >
               {tab.label}
