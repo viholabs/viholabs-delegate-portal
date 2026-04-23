@@ -43,19 +43,6 @@ function diffDays(dateA: string, dateB: string): number {
   );
 }
 
-async function safeJson(request: NextRequest, path: string): Promise<any | null> {
-  try {
-    const url = new URL(path, request.nextUrl.origin);
-    const res = await fetch(url.toString(), {
-      cache: "no-store",
-      headers: { cookie: request.headers.get("cookie") || "" },
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
 
 export async function GET(request: NextRequest) {
   const monthParam = request.nextUrl.searchParams.get("month");
@@ -113,9 +100,20 @@ export async function GET(request: NextRequest) {
     return Number(arr.reduce((s, r) => s + toNum(r.total_net, 0), 0).toFixed(2));
   }
 
-  // Units sold: use existing month KPI endpoint (already has the RPC result)
-  const monthKpi = await safeJson(request, `/api/control-room/month?month=${month}-01`);
-  const units_sold = toNum(monthKpi?.units_sold, 0);
+  // Units sold: sum sale lines from invoice_items for invoices issued in the period
+  // (all invoices regardless of payment status — cobradas o no cobradas)
+  const emittedIds = emitted.map((r) => r.id);
+  let units_sold = 0;
+  if (emittedIds.length > 0) {
+    const { data: itemRows, error: itemsError } = await supa
+      .from("invoice_items")
+      .select("units, line_type")
+      .in("invoice_id", emittedIds)
+      .eq("line_type", "sale");
+    if (!itemsError && Array.isArray(itemRows)) {
+      units_sold = itemRows.reduce((acc, r) => acc + toNum(r.units, 0), 0);
+    }
+  }
 
   return json(200, {
     ok: true,
