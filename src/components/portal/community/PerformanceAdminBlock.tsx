@@ -197,6 +197,64 @@ function DelegatePerformanceCard({ data, month }: { data: DelegateData; month: s
 }
 
 // ---------------------------------------------------------------------------
+// Melquisedec metrics card
+// ---------------------------------------------------------------------------
+
+function BillingRow({ label, count, amount }: { label: string; count: number; amount: number }) {
+  return (
+    <div className="flex items-start justify-between gap-2">
+      <span className="text-sm text-[#5A4B38]">{label}</span>
+      <div className="text-right shrink-0">
+        <span className="text-sm font-semibold text-[#2E261D]">{formatCurrency(amount)}</span>
+        <span className="ml-1.5 text-[11px] text-[#8B7355]">({formatNumber(count)})</span>
+      </div>
+    </div>
+  );
+}
+
+function MelquisedecMetricsCard({ data, month }: { data: DelegateData; month: string }) {
+  const { period } = data;
+  return (
+    <CardShell>
+      <CardHeader title="Métricas del periodo" subtitle={formatMonthLabel(month)} />
+      <div className="mt-3 space-y-3">
+        <div className="rounded-[18px] border border-[#E8DCC5] bg-white/70 p-3 space-y-1.5">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
+            Actividad comercial
+          </div>
+          <Row label="Unidades vendidas" value={formatNumber(period.units_sold_period)} />
+        </div>
+        <div className="rounded-[18px] border border-[#E8DCC5] bg-white/70 p-3 space-y-2">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
+            Facturación
+          </div>
+          <BillingRow
+            label="Emitidas"
+            count={period.billing_emitted_count}
+            amount={period.billing_emitted_gross}
+          />
+          <BillingRow
+            label="Cobradas"
+            count={period.billing_paid_count}
+            amount={period.billing_paid_gross}
+          />
+          <BillingRow
+            label="Pendientes"
+            count={period.billing_pending_count}
+            amount={period.billing_pending_gross}
+          />
+          <BillingRow
+            label="Vencidas"
+            count={period.billing_overdue_count}
+            amount={period.billing_overdue_gross}
+          />
+        </div>
+      </div>
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -210,9 +268,11 @@ export default function PerformanceAdminBlock() {
   const role = String(profile.role ?? "").toLowerCase();
   const actorId = profile.actor_id ?? profile.effective_actor_id;
   const isDelegate = role === "delegate" && !!actorId;
+  const isMelquisedec = profile.is_melquisedec && !!actorId;
+  const shouldFetch = (isDelegate || isMelquisedec) && !profileLoading;
 
   React.useEffect(() => {
-    if (profileLoading || !isDelegate) return;
+    if (!shouldFetch) return;
 
     let cancelled = false;
     async function load() {
@@ -241,15 +301,19 @@ export default function PerformanceAdminBlock() {
     }
     void load();
     return () => { cancelled = true; };
-  }, [profileLoading, isDelegate, actorId, month]);
+  }, [shouldFetch, actorId, month]);
 
-  if (profileLoading || (isDelegate && loading)) return <LoadingState />;
-  if (isDelegate && error) return <ErrorState message={error} />;
-  if (isDelegate && delegateData) {
+  if (profileLoading || (shouldFetch && loading)) return <LoadingState />;
+  if (shouldFetch && error) return <ErrorState message={error} />;
+
+  if (delegateData) {
+    if (isMelquisedec) {
+      return <MelquisedecMetricsCard data={delegateData} month={month} />;
+    }
     return <DelegatePerformanceCard data={delegateData} month={month} />;
   }
 
-  // Non-delegate fallback: show a clean informational card
+  // Fallback for non-delegate, non-melquisedec users
   return (
     <CardShell>
       <CardHeader title="Performance" />

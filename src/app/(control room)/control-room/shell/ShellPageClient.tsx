@@ -148,16 +148,23 @@ function SituationPanel({ onNavigate }: { onNavigate: (tab: ShellTabId) => void 
 
   const cards: { eyebrow: string; title: string; description: string; tab?: ShellTabId; disabled?: boolean }[] = [
     {
-      eyebrow: "Cartera",
-      title: "Mis Clientes",
-      description: "Consulta y gestiona tu cartera de clientes asignados.",
-      tab: "clients",
+      eyebrow: "Próximamente",
+      title: "Pedidos",
+      description: "Crea y gestiona pedidos para tus clientes directamente desde el portal.",
+      tab: "facturacion",
+      disabled: true,
     },
     {
       eyebrow: "Facturación",
       title: "Facturas Emitidas",
       description: "Revisa tus facturas del mes, cobros y estado de cada documento.",
       tab: "facturacion",
+    },
+    {
+      eyebrow: "Cartera",
+      title: "Mis Clientes",
+      description: "Consulta y gestiona tu cartera de clientes asignados.",
+      tab: "clients",
     },
     {
       eyebrow: "Contenido",
