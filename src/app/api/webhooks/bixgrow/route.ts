@@ -39,22 +39,49 @@ export async function POST(req: NextRequest) {
     { auth: { persistSession: false } }
   );
 
-  // Extract BixGrow fields from payload
+  // Extract affiliate fields — BixGrow may send affiliate as a nested object or flat fields
+  const affiliateObj = (payload.affiliate as Record<string, unknown>) ?? {};
+
   const bixgrowAffiliateId =
     asString(payload.affiliate_id) ??
     asString(payload.affiliateId) ??
-    asString((payload.affiliate as any)?.id) ??
+    asString(affiliateObj.id) ??
+    null;
+
+  const affiliateNameFallback =
+    [asString(affiliateObj.first_name ?? payload.affiliate_first_name), asString(affiliateObj.last_name ?? payload.affiliate_last_name)]
+      .filter(Boolean)
+      .join(" ") || null;
+
+  const affiliateName =
+    asString(affiliateObj.name) ??
+    asString(payload.affiliate_name) ??
+    affiliateNameFallback;
+
+  const affiliateEmail =
+    normalizeEmail(affiliateObj.email) ??
+    normalizeEmail(payload.affiliate_email) ??
+    null;
+
+  const referralCode =
+    asString(affiliateObj.referral_code ?? affiliateObj.referralCode ?? affiliateObj.code) ??
+    asString(payload.referral_code ?? payload.referralCode) ??
+    null;
+
+  const commissionType =
+    asString(affiliateObj.commission_type ?? affiliateObj.commissionType) ??
+    asString(payload.commission_type ?? payload.commissionType) ??
+    null;
+
+  const commissionValue =
+    asNumber(affiliateObj.commission_value ?? affiliateObj.commissionValue) ??
+    asNumber(payload.commission_value ?? payload.commissionValue) ??
     null;
 
   const customerEmail =
     normalizeEmail(payload.customer_email) ??
     normalizeEmail(payload.customerEmail) ??
     normalizeEmail((payload.customer as any)?.email) ??
-    null;
-
-  const orderId =
-    asString(payload.order_id) ??
-    asString(payload.orderId) ??
     null;
 
   const commissionAmount =
@@ -70,15 +97,43 @@ export async function POST(req: NextRequest) {
     asNumber(payload.total) ??
     null;
 
-  // Resolve affiliate_account_id from affiliate_external_id
+  // Upsert affiliate_account from webhook data (BixGrow has no pull API)
   let affiliateAccountId: string | null = null;
   if (bixgrowAffiliateId) {
-    const { data } = await supa
+    const upsertRow: Record<string, unknown> = {
+      affiliate_external_id: bixgrowAffiliateId,
+      source: "bixgrow",
+      synced_at: new Date().toISOString(),
+    };
+    if (affiliateName) upsertRow.name = affiliateName;
+    if (affiliateEmail) upsertRow.email = affiliateEmail;
+    if (referralCode) upsertRow.referral_code = referralCode;
+    if (commissionType) upsertRow.commission_type = commissionType;
+    if (commissionValue != null) upsertRow.commission_value = commissionValue;
+
+    const { data: existing } = await supa
       .from("affiliate_accounts")
       .select("id")
       .eq("affiliate_external_id", bixgrowAffiliateId)
       .maybeSingle();
-    affiliateAccountId = data?.id ?? null;
+
+    if (existing) {
+      affiliateAccountId = existing.id;
+      await supa
+        .from("affiliate_accounts")
+        .update(upsertRow)
+        .eq("id", existing.id);
+    } else {
+      // New affiliate — name is required
+      if (!upsertRow.name) upsertRow.name = affiliateEmail ?? bixgrowAffiliateId;
+      upsertRow.state_code = "OPEN";
+      const { data: ins } = await supa
+        .from("affiliate_accounts")
+        .insert(upsertRow)
+        .select("id")
+        .single();
+      affiliateAccountId = ins?.id ?? null;
+    }
   }
 
   // Resolve client_id from customer email
@@ -115,9 +170,6 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
-
-  // If we found a client but they don't yet have an affiliate link, log it
-  // (the insert above already sets client_id so no extra action needed)
 
   return NextResponse.json({
     ok: true,
