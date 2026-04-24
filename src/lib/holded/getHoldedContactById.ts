@@ -133,6 +133,10 @@ export async function getHoldedContactById(
     pickNestedRecord(contact, ["bankInfo", "bank_info", "bank"]) ??
     pickNestedRecord(contact, ["bankAccount", "bank_account"]);
 
+  // Holded returns paymentMethod / paymentDue as nested objects: { id, name }
+  const paymentMethodObj = pickNestedRecord(contact, ["paymentMethod", "payment_method"]);
+  const paymentTermsObj = pickNestedRecord(contact, ["paymentDue", "paymentType", "payment_due", "payment_type"]);
+
   const paymentInfo =
     pickNestedRecord(contact, ["payment", "paymentInfo", "payment_info"]) ?? null;
 
@@ -255,22 +259,28 @@ export async function getHoldedContactById(
     ]),
 
     payment_method_name:
+      pickFirstString(paymentMethodObj, ["name"]) ??
       pickFirstString(paymentInfo, ["methodName", "method_name", "name"]) ??
       pickFirstString(contact, ["paymentMethodName", "payment_method_name"]) ??
       null,
 
     payment_terms_name:
+      pickFirstString(paymentTermsObj, ["name"]) ??
       pickFirstString(paymentInfo, ["termsName", "terms_name", "paymentTerms", "name"]) ??
       pickFirstString(contact, ["paymentTermsName", "payment_terms_name"]) ??
       null,
 
     iban:
-      pickFirstString(bankInfo, ["iban"]) ??
+      pickFirstString(bankInfo, ["iban", "accountNumber", "account_number"]) ??
+      pickNestedRecord(contact, ["bankAccount", "bank_account"]) && pickFirstString(
+        pickNestedRecord(contact, ["bankAccount", "bank_account"]),
+        ["iban", "accountNumber"]
+      ) ??
       pickFirstString(contact, ["iban", "bankIban", "bank_iban"]) ??
       null,
 
     bank_account_holder:
-      pickFirstString(bankInfo, ["holder", "accountHolder", "account_holder"]) ??
+      pickFirstString(bankInfo, ["holder", "accountHolder", "account_holder", "name"]) ??
       pickFirstString(contact, ["bankAccountHolder", "bank_account_holder"]) ??
       null,
   };

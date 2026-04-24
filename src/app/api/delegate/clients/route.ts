@@ -909,7 +909,7 @@ export async function POST(req: Request) {
         fiscal_country: fiscalCountry,
         delegate_id: delegateActorId,
         holded_contact_id: holded.holdedContactId,
-        status: "PENDING_VALIDATION",
+        status: "ACTIVE",
         state_code: "OPEN",
         profile_type: "CLIENT",
         payment_method_name: paymentMethodName || null,

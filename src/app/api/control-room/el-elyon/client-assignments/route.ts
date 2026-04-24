@@ -241,6 +241,17 @@ export async function GET(req: NextRequest) {
     const canManageInvoiceOverrides = canManageInvoiceOverridesByRole(roles);
     const allowed = canReadClientAssignments({ eff, roles });
 
+    // A viewer is a "supervisor" (sees everything) if they have admin/management perms
+    // A plain delegate is NOT a supervisor and sees only their own clients
+    const isSupervisor =
+      eff.isSuperAdmin ||
+      eff.has("actors.read") ||
+      eff.has("control_room.delegates.read") ||
+      roles.some((r) =>
+        ["melquisedec", "super_admin", "coordinator", "coordinator_commercial", "coordinator_cect", "administrative", "administrativa"].includes(r)
+      );
+    const isDelegate = !isSupervisor && roles.includes("delegate");
+
     if (!allowed) {
       return json(403, {
         ok: false,
@@ -486,13 +497,45 @@ export async function GET(req: NextRequest) {
       currentAffiliateEventByClientId.set(clientId, row);
     }
 
-    const recommenderClients = clientRows.map((client) => ({
+    // When the viewer is a plain delegate, scope recommenders and affiliates to their
+    // own client portfolio — they must not see other delegates' clients in dropdowns.
+    const delegateOwnHoldedIds = isDelegate
+      ? new Set(
+          activeAssignments
+            .filter((a) => a.actor_id === actorId && a.assignment_role === "delegate")
+            .map((a) => a.client_holded_contact_id)
+        )
+      : null;
+
+    const scopedClientRows = delegateOwnHoldedIds
+      ? clientRows.filter((c) => delegateOwnHoldedIds.has(c.holded_contact_id ?? ""))
+      : clientRows;
+
+    const recommenderClients = scopedClientRows.map((client) => ({
       id: client.id,
       name: client.name,
       holdedContactId: client.holded_contact_id ?? "",
     }));
 
-    const affiliates = affiliateRows.map((row) => ({
+    // Scope affiliates to those with events for the delegate's own clients
+    const scopedAffiliateAccountIds = delegateOwnHoldedIds
+      ? new Set(
+          affiliateClientEvents
+            .filter((e) => {
+              const cid = String(e.client_id ?? "").trim();
+              if (!cid) return false;
+              const client = clientById.get(cid);
+              return client && delegateOwnHoldedIds.has(client.holded_contact_id ?? "");
+            })
+            .map((e) => String(e.affiliate_account_id ?? "").trim())
+            .filter(Boolean)
+        )
+      : null;
+
+    const affiliates = (scopedAffiliateAccountIds
+      ? affiliateRows.filter((r) => scopedAffiliateAccountIds.has(r.id))
+      : affiliateRows
+    ).map((row) => ({
       id: row.id,
       label: [row.name?.trim(), row.email?.trim(), row.affiliate_external_id?.trim()]
         .filter(Boolean)
@@ -559,6 +602,7 @@ export async function GET(req: NextRequest) {
         actorId: resolved.actor.id,
         actorName: resolved.actor.name ?? null,
         roles,
+        isDelegate,
         canManageClientAssignments,
         canManageInvoiceOverrides,
       },

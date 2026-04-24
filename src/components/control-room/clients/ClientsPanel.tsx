@@ -835,6 +835,8 @@ export default function ClientsPanel({ initialClientId }: { initialClientId?: st
               )}
               assignmentsLoading={assignmentsLoading}
               assignmentsError={assignmentsError}
+              isDelegate={Boolean(assignmentsViewer?.isDelegate)}
+              viewerActorId={assignmentsViewer?.actorId ?? null}
             />
 
             <ClientSepaSection

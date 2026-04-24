@@ -23,6 +23,8 @@ type Props = {
   canEditActors: boolean;
   assignmentsLoading: boolean;
   assignmentsError: string | null;
+  isDelegate?: boolean;
+  viewerActorId?: string | null;
 };
 
 function fieldWrapStyle() {
@@ -73,8 +75,17 @@ export default function ClientCommercialSection({
   canEditActors,
   assignmentsLoading,
   assignmentsError,
+  isDelegate = false,
+  viewerActorId,
 }: Props) {
   const disabled = assignmentsLoading || !canEditActors || !selected.holded_contact_id;
+
+  // For a plain delegate, the delegate field is always locked to themselves
+  const delegateDelegate = isDelegate
+    ? delegates.find((d) => d.id === viewerActorId)
+    : null;
+  const delegateDisplayName =
+    delegateDelegate?.name || delegateDelegate?.email || viewerActorId || "—";
 
   return (
     <SectionCard
@@ -90,26 +101,41 @@ export default function ClientCommercialSection({
       >
         <div style={fieldWrapStyle()}>
           <label style={labelStyle()}>Delegado</label>
-          <select
-            value={selected.delegate_id ?? ""}
-            disabled={disabled}
-            onChange={(event) =>
-              updateSelected(
-                "delegate_id",
-                (event.target.value || null) as ClientDetailViewModel["delegate_id"]
-              )
-            }
-            style={selectStyle(disabled)}
-          >
-            <option value="">Sin delegado</option>
-            {delegates.map((delegate) => (
-              <option key={delegate.id} value={delegate.id}>
-                {delegate.name || delegate.email || delegate.id}
-              </option>
-            ))}
-          </select>
+          {isDelegate ? (
+            <div
+              style={{
+                ...selectStyle(true),
+                display: "flex",
+                alignItems: "center",
+                userSelect: "none",
+              }}
+            >
+              {delegateDisplayName}
+            </div>
+          ) : (
+            <select
+              value={selected.delegate_id ?? ""}
+              disabled={disabled}
+              onChange={(event) =>
+                updateSelected(
+                  "delegate_id",
+                  (event.target.value || null) as ClientDetailViewModel["delegate_id"]
+                )
+              }
+              style={selectStyle(disabled)}
+            >
+              <option value="">Sin delegado</option>
+              {delegates.map((delegate) => (
+                <option key={delegate.id} value={delegate.id}>
+                  {delegate.name || delegate.email || delegate.id}
+                </option>
+              ))}
+            </select>
+          )}
           <div style={helpStyle()}>
-            {assignmentsLoading
+            {isDelegate
+              ? "Eres el delegado asignado a este cliente."
+              : assignmentsLoading
               ? "Cargando catálogo de delegados…"
               : canEditActors
               ? "La persistencia se guarda por la ruta canónica de asignaciones."

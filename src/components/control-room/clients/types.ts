@@ -236,6 +236,7 @@ export type ActorAssignmentsDictionaries = {
 
 export type ActorAssignmentsViewer = {
   actor_id?: string | null;
+  actorId?: string | null;
   role_code?: string | null;
   can_edit_delegate?: boolean | null;
   can_edit_recommender?: boolean | null;
@@ -243,6 +244,7 @@ export type ActorAssignmentsViewer = {
   can_manage_client_assignments?: boolean | null;
   canManageClientAssignments?: boolean | null;
   is_admin?: boolean | null;
+  isDelegate?: boolean | null;
 };
 
 export type ActorAssignmentsResponse = {
