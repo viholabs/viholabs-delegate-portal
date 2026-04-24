@@ -34,12 +34,15 @@ type PaymentMethodOption = {
   name: string;
 };
 
-export default function OrdersConsoleTab({ delegateMode = false }: { delegateMode?: boolean }) {
+export default function OrdersConsoleTab({ delegateMode: delegateModeProp = false }: { delegateMode?: boolean }) {
   const [delegates, setDelegates] = useState<DelegateRow[]>([]);
   const [delegatesLoad, setDelegatesLoad] = useState<
     "idle" | "loading" | "ok" | "forbidden" | "error"
-  >(delegateMode ? "forbidden" : "idle");
+  >(delegateModeProp ? "forbidden" : "idle");
   const [selectedDelegateId, setSelectedDelegateId] = useState<string>("");
+
+  // Auto-detect delegate mode: either explicitly requested or the API returned 403
+  const delegateMode = delegateModeProp || delegatesLoad === "forbidden";
 
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [clientsLoad, setClientsLoad] = useState<
@@ -83,7 +86,7 @@ export default function OrdersConsoleTab({ delegateMode = false }: { delegateMod
   >("idle");
 
   useEffect(() => {
-    if (delegateMode) return;
+    if (delegateModeProp) return;
     let alive = true;
 
     (async () => {
