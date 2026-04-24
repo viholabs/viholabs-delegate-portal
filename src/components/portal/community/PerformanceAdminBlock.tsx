@@ -206,6 +206,7 @@ type GlobalStats = {
   paid: { count: number; amount: number };
   pending: { count: number; amount: number };
   overdue: { count: number; amount: number };
+  voided: { count: number; amount: number };
 };
 
 function BillingRow({ label, count, amount }: { label: string; count: number; amount: number }) {
@@ -239,6 +240,9 @@ function MelquisedecMetricsCard({ stats, month }: { stats: GlobalStats; month: s
           <BillingRow label="Cobradas" count={stats.paid.count} amount={stats.paid.amount} />
           <BillingRow label="Pendientes" count={stats.pending.count} amount={stats.pending.amount} />
           <BillingRow label="Vencidas" count={stats.overdue.count} amount={stats.overdue.amount} />
+          {(stats.voided?.count ?? 0) > 0 && (
+            <BillingRow label="Anuladas (CN)" count={stats.voided.count} amount={stats.voided.amount} />
+          )}
         </div>
       </div>
     </CardShell>
@@ -278,7 +282,10 @@ export default function PerformanceAdminBlock() {
           );
           const j = await res.json().catch(() => null);
           if (!j?.ok) throw new Error(j?.error ?? "Error al cargar métricas globales");
-          if (!cancelled) setGlobalStats(j as GlobalStats);
+          if (!cancelled) setGlobalStats({
+            ...j,
+            voided: j.voided ?? { count: 0, amount: 0 },
+          } as GlobalStats);
         } else if (isDelegate && actorId) {
           const token = await getAccessToken();
           const res = await fetch(
