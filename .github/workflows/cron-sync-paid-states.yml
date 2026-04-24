@@ -12,10 +12,11 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     env:
-      MAX_ITEMS: "200"
+      MAX_ITEMS: "5000"
+      CONCURRENCY: "8"
       PREVIEW: "false"
 
     steps:
@@ -43,6 +44,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
           MAX_ITEMS: ${{ env.MAX_ITEMS }}
+          CONCURRENCY: ${{ env.CONCURRENCY }}
           PREVIEW: ${{ env.PREVIEW }}
         run: |
           set -euo pipefail
