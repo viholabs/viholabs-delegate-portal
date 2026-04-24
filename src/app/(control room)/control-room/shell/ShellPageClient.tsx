@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import ControlRoomMission from "@/components/control-room/dashboard/ControlRoomMission";
@@ -8,7 +8,11 @@ import ResourcesHubBlock from "@/components/control-room/resources/ResourcesHubB
 import HoldedDocumentsTable from "@/components/control-room/invoices/HoldedDocumentsTable";
 import ClientsPanel from "@/components/control-room/clients/ClientsPanel";
 import CommissionAgentDashboard from "@/components/commission-agent/CommissionAgentDashboard";
+import OrdersConsoleTab from "@/components/control-room/orders/OrdersConsoleTab";
+import TabFacturacion from "@/components/control-room/delegates/detail/TabFacturacion";
 import { useCommunityProfile } from "@/components/portal/community/useCommunityProfile";
+import { getAccessToken } from "@/lib/auth/token";
+import type { DetailInvoiceRow, DetailPeriodStats, CommissionRule } from "@/components/control-room/delegates/types";
 
 // ---------------------------------------------------------------------------
 // Types and shared tab logic
@@ -78,6 +82,12 @@ function SituationPanel({ onNavigate }: { onNavigate: (tab: ShellTabId) => void 
 
   const cards: { eyebrow: string; title: string; description: string; tab?: ShellTabId; disabled?: boolean }[] = [
     {
+      eyebrow: "Pedidos",
+      title: "Crear Pedido",
+      description: "Genera un nuevo pedido para tus clientes directamente desde el portal.",
+      tab: "facturacion",
+    },
+    {
       eyebrow: "Facturación",
       title: "Facturas Emitidas",
       description: "Revisa tus facturas del mes, cobros y estado de cada documento.",
@@ -140,7 +150,145 @@ function ClientsShellPanel({ clientId }: { clientId?: string | null }) {
   return <ClientsPanel initialClientId={clientId} />;
 }
 
+// ---------------------------------------------------------------------------
+// Delegate invoice view
+// ---------------------------------------------------------------------------
+
+function isoMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function DelegateFacturas({ actorId }: { actorId: string }) {
+  const [month, setMonth] = useState(isoMonth);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<DetailInvoiceRow[]>([]);
+  const [period, setPeriod] = useState<DetailPeriodStats | null>(null);
+  const [rules, setRules] = useState<CommissionRule[]>([]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch(
+        `/api/control-room/delegates/${encodeURIComponent(actorId)}?month=${month}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: "no-store" }
+      );
+      const j = await res.json().catch(() => null);
+      if (!j?.ok) throw new Error(j?.error ?? "Error al cargar facturas");
+      setInvoices(j.invoices ?? []);
+      setPeriod(j.period ?? null);
+      setRules(j.commission_rules ?? []);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [actorId, month]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <input
+          type="month"
+          value={month.slice(0, 7)}
+          onChange={(e) => setMonth(e.target.value + "-01")}
+          className="rounded-xl border px-3 py-2 text-sm"
+          style={{ borderColor: "var(--viho-border)", background: "var(--viho-surface-2,#f9f7f4)", color: "var(--viho-foreground)" }}
+        />
+        <button
+          onClick={() => void load()}
+          className="rounded-xl border px-3 py-2 text-sm transition hover:opacity-70"
+          style={{ borderColor: "var(--viho-border)", color: "var(--viho-muted)" }}
+        >
+          Actualizar
+        </button>
+      </div>
+      {loading && <p className="text-sm py-6" style={{ color: "var(--viho-muted)" }}>Cargando facturas…</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {!loading && !error && period && (
+        <TabFacturacion invoices={invoices} month={month} period={period} commissionRules={rules} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Facturación panel
+// ---------------------------------------------------------------------------
+
+type FacturacionView = "cards" | "pedidos" | "facturas";
+
 function FacturacionPanel() {
+  const { profile, loading } = useCommunityProfile();
+  const [view, setView] = useState<FacturacionView>("cards");
+
+  if (loading) {
+    return <p className="text-sm py-6" style={{ color: "var(--viho-muted)" }}>Cargando…</p>;
+  }
+
+  const role = String(profile.role ?? "").toLowerCase();
+  const actorId = profile.actor_id ?? profile.effective_actor_id;
+
+  if (role === "delegate" && actorId) {
+    if (view === "pedidos") {
+      return (
+        <div className="space-y-4">
+          <button
+            onClick={() => setView("cards")}
+            className="text-sm transition hover:opacity-70"
+            style={{ color: "var(--viho-muted)" }}
+          >
+            ← Volver
+          </button>
+          <OrdersConsoleTab delegateMode />
+        </div>
+      );
+    }
+
+    if (view === "facturas") {
+      return (
+        <div className="space-y-4">
+          <button
+            onClick={() => setView("cards")}
+            className="text-sm transition hover:opacity-70"
+            style={{ color: "var(--viho-muted)" }}
+          >
+            ← Volver
+          </button>
+          <DelegateFacturas actorId={actorId} />
+        </div>
+      );
+    }
+
+    return (
+      <section className="rounded-[32px] border border-[#D6C28A] bg-[#FBF6EC]">
+        <div className="border-b border-[#D6C28A] px-6 py-5">
+          <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">Facturación</div>
+          <h2 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-[#5A2E3A]">Tu actividad comercial</h2>
+        </div>
+        <div className="grid gap-5 px-6 py-6 sm:grid-cols-2">
+          <SectionCard
+            eyebrow="Pedidos"
+            title="Crear Pedido"
+            description="Genera un nuevo pedido para tus clientes directamente desde el portal."
+            onClick={() => setView("pedidos")}
+          />
+          <SectionCard
+            eyebrow="Facturas"
+            title="Facturas Emitidas"
+            description="Consulta tus facturas del mes, comisiones acumuladas y estado de cobro."
+            onClick={() => setView("facturas")}
+          />
+        </div>
+      </section>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <HoldedDocumentsTable />
