@@ -272,10 +272,7 @@ export async function getHoldedContactById(
 
     iban:
       pickFirstString(bankInfo, ["iban", "accountNumber", "account_number"]) ??
-      pickNestedRecord(contact, ["bankAccount", "bank_account"]) && pickFirstString(
-        pickNestedRecord(contact, ["bankAccount", "bank_account"]),
-        ["iban", "accountNumber"]
-      ) ??
+      pickFirstString(pickNestedRecord(contact, ["bankAccount", "bank_account"]), ["iban", "accountNumber"]) ??
       pickFirstString(contact, ["iban", "bankIban", "bank_iban"]) ??
       null,
 
