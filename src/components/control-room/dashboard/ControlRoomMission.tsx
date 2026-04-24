@@ -25,6 +25,7 @@ import JobsMonitorBlock from "./JobsMonitorBlock";
 import IntegrationsBlock from "./IntegrationsBlock";
 import HoldedLogBlock from "./HoldedLogBlock";
 import BixGrowLogBlock from "./BixGrowLogBlock";
+import BixGrowAffiliatesBlock from "./BixGrowAffiliatesBlock";
 import TechnicalWarningsBlock from "./TechnicalWarningsBlock";
 import AuditBlock from "./AuditBlock";
 import QuickActionsBlock from "./QuickActionsBlock";
@@ -100,7 +101,12 @@ export default function ControlRoomMission() {
         </OptionalBlock>
       </div>
 
-      {/* NIVELL 2 — OPERACIÓ COMERCIAL */}
+      {/* NIVELL 2 — AFILIATS BIXGROW */}
+      <div style={grid}>
+        <BixGrowAffiliatesBlock />
+      </div>
+
+      {/* NIVELL 3 — OPERACIÓ COMERCIAL */}
       <div style={grid}>
         <OrdersMonitorBlock />
         <InvoicesMonitorBlock />
