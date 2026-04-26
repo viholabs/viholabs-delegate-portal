@@ -165,20 +165,58 @@ async function buildActivity(args: {
       loadTechnicalWarnings({ supaService }),
     ]);
 
-  const all = [
+  const rawAll = [
     ...invoiceEvents,
     ...assignmentEvents,
     ...warningEvents,
   ].filter((e) => e.timestamp);
 
-  const sorted = all.sort((a, b) =>
+  const sorted = rawAll.sort((a, b) =>
     String(b.timestamp).localeCompare(String(a.timestamp)),
   );
 
+  // Normalize to the shape the ActivityTimelineBlock component expects
+  function severityFromType(type: string, state: string | null): "info" | "warning" | "critical" {
+    if (type === "technical_warning") return "warning";
+    if (type === "invoice_needs_review") return "warning";
+    if (state === "overdue" || state === "OVERDUE") return "critical";
+    return "info";
+  }
+
+  function actionLabel(type: string): string {
+    switch (type) {
+      case "invoice_created": return "factura_creada";
+      case "invoice_reviewed": return "factura_revisada";
+      case "invoice_needs_review": return "pendiente_revision";
+      case "assignment": return "asignacion";
+      case "technical_warning": return "aviso_tecnico";
+      default: return type;
+    }
+  }
+
+  function entityType(type: string): string {
+    if (type.startsWith("invoice")) return "factura";
+    if (type === "assignment") return "asignacion";
+    if (type === "technical_warning") return "tecnico";
+    return "sistema";
+  }
+
+  const items = sorted.slice(0, 50).map((e: any, i: number) => ({
+    id: e.entity_id ? `${e.type}_${e.entity_id}` : `${e.type}_${i}`,
+    timestamp: e.timestamp,
+    actor_name: "Sistema",
+    action_type: actionLabel(e.type),
+    entity_type: entityType(e.type),
+    entity_label: e.label ?? null,
+    message: e.label ?? null,
+    severity: e.severity ?? severityFromType(e.type, e.state ?? null),
+    amount: e.amount ?? null,
+  }));
+
   return {
-    items: sorted.slice(0, 50),
+    items,
     summary: {
-      total_events: all.length,
+      total_events: rawAll.length,
       invoices: invoiceEvents.length,
       assignments: assignmentEvents.length,
       warnings: warningEvents.length,

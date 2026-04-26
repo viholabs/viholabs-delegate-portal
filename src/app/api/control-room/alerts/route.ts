@@ -111,50 +111,42 @@ async function loadTechnicalWarningsCount(supaService: any) {
   return Number(data?.length ?? 0);
 }
 
+type InvoiceAtRisk = {
+  id: string;
+  invoice_number: string | null;
+  client_name: string | null;
+  delegate_name: string | null;
+  total_net: number;
+  days_overdue: number;
+};
+
 function buildAlerts(args: {
   invoices: any[];
   today: string;
   technicalWarningsCount: number;
   scopeLabel: string;
-}): AlertItem[] {
-  const { invoices, today, technicalWarningsCount, scopeLabel } = args;
+  delegateById?: Map<string, string>;
+}): { alerts: AlertItem[]; invoices_at_risk: InvoiceAtRisk[] } {
+  const { invoices, today, technicalWarningsCount, scopeLabel, delegateById } = args;
 
-  const criticalOverdue = invoices.filter((row) => {
+  const withDays = invoices.map((row) => {
     const issueDate = String(row.invoice_date ?? "").trim();
-    if (!issueDate) return false;
-    return diffDays(today, issueDate) > 15;
+    return { ...row, _days: issueDate ? diffDays(today, issueDate) : -1 };
   });
 
-  const overdue = invoices.filter((row) => {
-    const issueDate = String(row.invoice_date ?? "").trim();
-    if (!issueDate) return false;
-    const days = diffDays(today, issueDate);
-    return days > 0 && days <= 15;
-  });
-
-  const highAmount = invoices.filter((row) => toNum(row.total_net, 0) >= 1000);
-
-  const reviewNeeded = invoices.filter((row) => row.needs_review === true);
+  const criticalOverdue = withDays.filter((r) => r._days > 15);
+  const overdue = withDays.filter((r) => r._days > 0 && r._days <= 15);
+  const highAmount = withDays.filter((r) => toNum(r.total_net, 0) >= 1000);
+  const reviewNeeded = withDays.filter((r) => r.needs_review === true);
 
   const alerts: AlertItem[] = [];
 
   if (criticalOverdue.length > 0) {
-    const amount = criticalOverdue.reduce(
-      (acc, row) => acc + toNum(row.total_net, 0),
-      0,
-    );
-
+    const amount = criticalOverdue.reduce((acc, r) => acc + toNum(r.total_net, 0), 0);
     alerts.push({
       id: "critical-overdue-invoices",
       type: "critical",
-      message: `${criticalOverdue.length} facturas críticas (+15 días) en ${scopeLabel}. Importe aprox.: ${new Intl.NumberFormat(
-        "es-ES",
-        {
-          style: "currency",
-          currency: "EUR",
-          maximumFractionDigits: 0,
-        },
-      ).format(amount)}.`,
+      message: `${criticalOverdue.length} facturas críticas (+15 días) en ${scopeLabel}. Importe aprox.: ${new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(amount)}.`,
     });
   }
 
@@ -183,14 +175,22 @@ function buildAlerts(args: {
   }
 
   if (invoices.length === 0) {
-    alerts.push({
-      id: "no-open-invoices",
-      type: "info",
-      message: "No hay facturas abiertas en el universo visible.",
-    });
+    alerts.push({ id: "no-open-invoices", type: "info", message: "No hay facturas abiertas en el universo visible." });
   }
 
-  return alerts.slice(0, 5);
+  const invoices_at_risk: InvoiceAtRisk[] = criticalOverdue
+    .sort((a, b) => b._days - a._days)
+    .slice(0, 50)
+    .map((r) => ({
+      id: r.id,
+      invoice_number: r.invoice_number ?? null,
+      client_name: r.client_name ?? null,
+      delegate_name: r.delegate_id && delegateById ? (delegateById.get(r.delegate_id) ?? null) : null,
+      total_net: toNum(r.total_net, 0),
+      days_overdue: r._days,
+    }));
+
+  return { alerts: alerts.slice(0, 5), invoices_at_risk };
 }
 
 async function handle(req: Request) {
@@ -238,16 +238,26 @@ async function handle(req: Request) {
     ]);
 
     stage = "build_alerts";
-    const alerts = buildAlerts({
+    // Load delegate names for invoice drill-down
+    const delegateIds = [...new Set((invoices as any[]).map((r: any) => r.delegate_id).filter(Boolean))];
+    let delegateById = new Map<string, string>();
+    if (delegateIds.length > 0) {
+      const { data: actors } = await ctx.supaService.from("actors").select("id, name").in("id", delegateIds);
+      delegateById = new Map((actors ?? []).map((a: any) => [a.id, a.name ?? a.id]));
+    }
+
+    const { alerts, invoices_at_risk } = buildAlerts({
       invoices,
       today,
       technicalWarningsCount,
       scopeLabel: ctx.scope.label,
+      delegateById,
     });
 
     return json(200, {
       ok: true,
       alerts,
+      invoices_at_risk,
       actor_context: {
         actor: ctx.actor,
         effectiveActor: ctx.effectiveActor,

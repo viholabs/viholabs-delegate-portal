@@ -88,7 +88,9 @@ async function queryOrders(args: {
 
   return {
     summary: {
-      open_count: open.length,
+      open: open.length,
+      delayed: 0,
+      blocked: 0,
       open_amount: Number(
         open.reduce((acc, r) => acc + toNum(r.total_net, 0), 0).toFixed(2),
       ),
