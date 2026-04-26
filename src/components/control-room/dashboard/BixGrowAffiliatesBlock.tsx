@@ -1,21 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-type AttributedClient = {
-  id: string;
-  name: string | null;
-  email: string | null;
-  status: string | null;
-};
-
-type Liquidation = {
-  amount: number;
-  state_code: string;
-  period_from: string;
-  period_to: string;
-  paid_at: string | null;
-};
+/* ─── Types ─────────────────────────────────────────────────────────────── */
 
 type AffiliateStats = {
   total_events: number;
@@ -24,6 +11,17 @@ type AffiliateStats = {
   total_commission: number;
   total_liquidated: number;
   pending_liquidation: number;
+};
+
+type LinkedClient = {
+  event_id: string;
+  client_id: string;
+  client_name: string | null;
+  client_email: string | null;
+  source: string;
+  commission_amount: number | null;
+  order_amount: number | null;
+  removable: boolean;
 };
 
 type Affiliate = {
@@ -38,145 +36,303 @@ type Affiliate = {
   commission_type: string | null;
   synced_at: string | null;
   stats: AffiliateStats;
-  clients: AttributedClient[];
-  liquidations: Liquidation[];
+  clients: LinkedClient[];
 };
 
-type AffiliatesResponse = {
-  ok: boolean;
-  affiliates?: Affiliate[];
-  error?: string;
-};
+type ClientResult = { id: string; name: string | null; email: string | null; status: string | null };
+
+/* ─── Helpers ────────────────────────────────────────────────────────────── */
 
 function fmt(n: number) {
-  return n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 
-function fmtDate(v: string | null) {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("es-ES");
+function sourceLabel(src: string) {
+  const map: Record<string, string> = {
+    bixgrow: "webhook",
+    email_match: "email",
+    manual: "manual",
+    manual_control_room: "manual",
+    bixgrow_sync: "sync",
+  };
+  return map[src] ?? src;
 }
 
-function statePill(state: string | null) {
-  const s = (state ?? "").toUpperCase();
-  let bg = "rgba(107,114,128,0.12)";
-  let color = "#374151";
-  if (s === "OPEN" || s === "ACTIVE") { bg = "rgba(5,150,105,0.12)"; color = "#065f46"; }
-  else if (s === "PENDING") { bg = "rgba(217,119,6,0.12)"; color = "#92400e"; }
-  else if (s === "PAID") { bg = "rgba(37,99,235,0.12)"; color = "#1e3a8a"; }
-  else if (s === "CLOSED") { bg = "rgba(107,114,128,0.12)"; color = "#6b7280"; }
-  return { bg, color, label: s || "—" };
+function sourcePillStyle(src: string): React.CSSProperties {
+  if (src === "bixgrow") return { background: "rgba(37,99,235,0.10)", color: "#1e40af" };
+  if (src === "email_match") return { background: "rgba(5,150,105,0.10)", color: "#065f46" };
+  return { background: "rgba(107,114,128,0.10)", color: "#374151" };
 }
 
-function AffiliateRow({ aff }: { aff: Affiliate }) {
-  const [expanded, setExpanded] = useState(false);
-  const s = aff.stats;
+/* ─── Sub-components ─────────────────────────────────────────────────────── */
+
+function StatCell({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <div style={statCellStyle}>
+      <div style={{ ...statValStyle, ...(warn ? { color: "#92400e" } : {}) }}>{value}</div>
+      <div style={statLabelStyle}>{label}</div>
+    </div>
+  );
+}
+
+function ClientRow({ lc, affiliateId, onUnlinked }: { lc: LinkedClient; affiliateId: string; onUnlinked: () => void }) {
+  const [removing, setRemoving] = useState(false);
+
+  async function unlink() {
+    if (!confirm(`¿Desvincular "${lc.client_name || lc.client_id}"?`)) return;
+    setRemoving(true);
+    try {
+      await fetch(`/api/control-room/bixgrow-affiliates/${affiliateId}/clients?client_id=${lc.client_id}`, { method: "DELETE" });
+      onUnlinked();
+    } finally {
+      setRemoving(false);
+    }
+  }
 
   return (
-    <div style={rowCard}>
-      <div
-        style={rowHeader}
-        onClick={() => setExpanded((p) => !p)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && setExpanded((p) => !p)}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
-          <div style={rowName}>{aff.name || aff.email || aff.affiliate_external_id || "—"}</div>
-          <div style={rowMeta}>
-            {aff.email && <span>{aff.email}</span>}
-            {aff.referral_code && <span>código: {aff.referral_code}</span>}
-            {aff.affiliate_external_id && <span>BixGrow ID: {aff.affiliate_external_id}</span>}
-          </div>
+    <div style={clientRowStyle}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 600 }}>{lc.client_name || lc.client_id}</div>
+        {lc.client_email && <div style={{ fontSize: 11, opacity: 0.65 }}>{lc.client_email}</div>}
+      </div>
+      <span style={{ ...miniPill, ...sourcePillStyle(lc.source) }}>{sourceLabel(lc.source)}</span>
+      {lc.removable && (
+        <button style={iconBtn} onClick={unlink} disabled={removing} title="Desvincular">
+          {removing ? "…" : "×"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ClientSearchInput({
+  affiliateId,
+  onLinked,
+}: {
+  affiliateId: string;
+  onLinked: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<ClientResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [open, setOpen] = useState(false);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (q.length < 2) { setResults([]); setOpen(false); return; }
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(`/api/control-room/clients-search?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+        const data = await res.json();
+        setResults(data.clients ?? []);
+        setOpen(true);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  }, [q]);
+
+  async function link(client: ClientResult) {
+    setLinking(true);
+    setOpen(false);
+    setQ("");
+    try {
+      const res = await fetch(`/api/control-room/bixgrow-affiliates/${affiliateId}/clients`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: client.id }),
+      });
+      const data = await res.json();
+      if (data.ok) onLinked();
+      else alert(data.error || "Error vinculando");
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        style={searchInput}
+        placeholder={linking ? "Vinculando…" : "Buscar cliente para vincular…"}
+        value={q}
+        disabled={linking}
+        onChange={(e) => setQ(e.target.value)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        onFocus={() => results.length > 0 && setOpen(true)}
+      />
+      {open && results.length > 0 && (
+        <div style={dropdown}>
+          {results.map((c) => (
+            <div key={c.id} style={dropdownItem} onMouseDown={() => link(c)}>
+              <span style={{ fontWeight: 600 }}>{c.name || "—"}</span>
+              {c.email && <span style={{ opacity: 0.65, marginLeft: 6 }}>{c.email}</span>}
+            </div>
+          ))}
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            {(() => { const p = statePill(aff.state_code); return (
-              <span style={{ ...pill, background: p.bg, color: p.color }}>{p.label}</span>
-            ); })()}
+      )}
+      {searching && <div style={{ fontSize: 11, opacity: 0.6, marginTop: 3 }}>Buscando…</div>}
+    </div>
+  );
+}
+
+function AffiliateCard({
+  aff,
+  onChanged,
+}: {
+  aff: Affiliate;
+  onChanged: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [form, setForm] = useState({
+    name: aff.name ?? "",
+    email: aff.email ?? "",
+    referral_code: aff.referral_code ?? "",
+    affiliate_external_id: aff.affiliate_external_id ?? "",
+    commission_value: aff.commission_value != null ? String(aff.commission_value) : "",
+    commission_type: aff.commission_type ?? "",
+    state_code: aff.state_code ?? "OPEN",
+  });
+  const s = aff.stats;
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/control-room/bixgrow-affiliates/${aff.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...form,
+          commission_value: form.commission_value ? Number(form.commission_value) : null,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) { setEditing(false); onChanged(); }
+      else alert(data.error || "Error guardando");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function del() {
+    if (!confirm(`¿Eliminar afiliado "${aff.name}"? Se eliminarán también sus eventos de atribución.`)) return;
+    setDeleting(true);
+    try {
+      await fetch(`/api/control-room/bixgrow-affiliates/${aff.id}`, { method: "DELETE" });
+      onChanged();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const stateColor = aff.state_code === "OPEN" ? "#065f46" : "#6b7280";
+  const stateBg = aff.state_code === "OPEN" ? "rgba(5,150,105,0.10)" : "rgba(107,114,128,0.10)";
+
+  return (
+    <div style={affCard}>
+      {/* Header row */}
+      <div style={affHeader} onClick={() => !editing && setExpanded((p) => !p)} role="button" tabIndex={0}
+        onKeyDown={(e) => e.key === "Enter" && !editing && setExpanded((p) => !p)}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={affName}>{aff.name || "—"}</span>
+            <span style={{ ...miniPill, background: stateBg, color: stateColor }}>
+              {aff.state_code || "—"}
+            </span>
             {s.pending_liquidation > 0 && (
-              <span style={{ ...pill, background: "rgba(217,119,6,0.12)", color: "#92400e" }}>
+              <span style={{ ...miniPill, background: "rgba(217,119,6,0.10)", color: "#92400e" }}>
                 pendiente {fmt(s.pending_liquidation)} €
               </span>
             )}
           </div>
-          <span style={chevron}>{expanded ? "▲" : "▼"}</span>
+          <div style={affMeta}>
+            {aff.email && <span>{aff.email}</span>}
+            {aff.referral_code && <span>código: <strong>{aff.referral_code}</strong></span>}
+            {aff.commission_value != null && (
+              <span>{aff.commission_value}{aff.commission_type ? ` ${aff.commission_type}` : ""}</span>
+            )}
+            <span style={{ opacity: 0.5 }}>{s.total_clients} clientes · {fmt(s.total_commission)} € comisión</span>
+          </div>
         </div>
+        <span style={{ fontSize: 10, opacity: 0.5, flexShrink: 0, marginTop: 2 }}>{expanded ? "▲" : "▼"}</span>
       </div>
 
+      {/* Expanded body */}
       {expanded && (
-        <div style={expandedBody}>
-          {/* Stats grid */}
+        <div style={expandBody}>
+          {/* Stats */}
           <div style={statsGrid}>
-            <StatCell label="Ventas totales" value={`${fmt(s.total_sales)} €`} />
-            <StatCell label="Comisión total" value={`${fmt(s.total_commission)} €`} />
+            <StatCell label="Ventas" value={`${fmt(s.total_sales)} €`} />
+            <StatCell label="Comisión" value={`${fmt(s.total_commission)} €`} />
             <StatCell label="Liquidado" value={`${fmt(s.total_liquidated)} €`} />
-            <StatCell label="Pendiente" value={`${fmt(s.pending_liquidation)} €`} highlight={s.pending_liquidation > 0} />
+            <StatCell label="Pendiente" value={`${fmt(s.pending_liquidation)} €`} warn={s.pending_liquidation > 0} />
             <StatCell label="Eventos" value={String(s.total_events)} />
             <StatCell label="Clientes" value={String(s.total_clients)} />
           </div>
 
-          {/* Commission info */}
-          {(aff.commission_value != null || aff.commission_type) && (
-            <div style={infoRow}>
-              <span style={infoLabel}>Comisión:</span>
-              <span style={infoVal}>
-                {aff.commission_value != null ? `${aff.commission_value}` : "—"}
-                {aff.commission_type ? ` (${aff.commission_type})` : ""}
-              </span>
+          {/* Clientes vinculados */}
+          <div style={section}>
+            <div style={sectionTitle}>Clientes vinculados</div>
+            {aff.clients.length === 0
+              ? <div style={muted}>Sin clientes vinculados.</div>
+              : aff.clients.map((lc) => (
+                <ClientRow key={lc.event_id} lc={lc} affiliateId={aff.id} onUnlinked={onChanged} />
+              ))
+            }
+            <div style={{ marginTop: 8 }}>
+              <ClientSearchInput affiliateId={aff.id} onLinked={onChanged} />
             </div>
-          )}
-          {aff.synced_at && (
-            <div style={infoRow}>
-              <span style={infoLabel}>Sincronizado:</span>
-              <span style={infoVal}>{fmtDate(aff.synced_at)}</span>
-            </div>
-          )}
+          </div>
 
-          {/* Attributed clients */}
-          {aff.clients.length > 0 && (
+          {/* Edit form */}
+          {editing ? (
             <div style={section}>
-              <div style={sectionTitle}>Clientes atribuidos ({aff.clients.length})</div>
-              <div style={clientList}>
-                {aff.clients.map((c) => (
-                  <div key={c.id} style={clientChip}>
-                    <span style={clientName}>{c.name || c.email || c.id}</span>
-                    {c.status && (
-                      <span style={{ ...pill, ...(() => { const p = statePill(c.status); return { background: p.bg, color: p.color }; })() }}>
-                        {c.status}
-                      </span>
-                    )}
-                  </div>
-                ))}
+              <div style={sectionTitle}>Editar afiliado</div>
+              <div style={formGrid}>
+                <label style={fieldLabel}>Nombre *
+                  <input style={fieldInput} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                </label>
+                <label style={fieldLabel}>Email
+                  <input style={fieldInput} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                </label>
+                <label style={fieldLabel}>Código referido
+                  <input style={fieldInput} value={form.referral_code} onChange={(e) => setForm({ ...form, referral_code: e.target.value })} />
+                </label>
+                <label style={fieldLabel}>ID externo BixGrow
+                  <input style={fieldInput} value={form.affiliate_external_id} onChange={(e) => setForm({ ...form, affiliate_external_id: e.target.value })} />
+                </label>
+                <label style={fieldLabel}>Comisión (valor)
+                  <input style={fieldInput} type="number" value={form.commission_value} onChange={(e) => setForm({ ...form, commission_value: e.target.value })} />
+                </label>
+                <label style={fieldLabel}>Comisión (tipo)
+                  <input style={fieldInput} value={form.commission_type} placeholder="% / fijo / …" onChange={(e) => setForm({ ...form, commission_type: e.target.value })} />
+                </label>
+                <label style={fieldLabel}>Estado
+                  <select style={fieldInput} value={form.state_code} onChange={(e) => setForm({ ...form, state_code: e.target.value })}>
+                    <option value="OPEN">OPEN</option>
+                    <option value="CLOSED">CLOSED</option>
+                    <option value="SUSPENDED">SUSPENDED</option>
+                  </select>
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</button>
+                <button style={btnSecondary} onClick={() => setEditing(false)}>Cancelar</button>
               </div>
             </div>
-          )}
-
-          {/* Liquidations */}
-          {aff.liquidations.length > 0 && (
-            <div style={section}>
-              <div style={sectionTitle}>Liquidaciones ({aff.liquidations.length})</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {aff.liquidations.map((l, i) => {
-                  const p = statePill(l.state_code);
-                  return (
-                    <div key={i} style={liquidRow}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <span style={{ fontWeight: 700, fontSize: 13 }}>{fmt(l.amount)} €</span>
-                        <span style={{ ...pill, background: p.bg, color: p.color }}>{p.label}</span>
-                        <span style={muted}>{fmtDate(l.period_from)} – {fmtDate(l.period_to)}</span>
-                      </div>
-                      {l.paid_at && <div style={muted}>Pagado: {fmtDate(l.paid_at)}</div>}
-                    </div>
-                  );
-                })}
-              </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button style={btnSecondary} onClick={() => setEditing(true)}>Editar</button>
+              <button style={{ ...btnSecondary, color: "#b91c1c" }} onClick={del} disabled={deleting}>
+                {deleting ? "Eliminando…" : "Eliminar"}
+              </button>
             </div>
-          )}
-          {aff.liquidations.length === 0 && (
-            <div style={muted}>Sin liquidaciones registradas.</div>
           )}
         </div>
       )}
@@ -184,102 +340,180 @@ function AffiliateRow({ aff }: { aff: Affiliate }) {
   );
 }
 
-function StatCell({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function NewAffiliateForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
+  const [form, setForm] = useState({
+    name: "", email: "", referral_code: "", affiliate_external_id: "",
+    commission_value: "", commission_type: "", state_code: "OPEN",
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function create() {
+    if (!form.name.trim()) { setErr("El nombre es obligatorio"); return; }
+    setSaving(true); setErr(null);
+    try {
+      const res = await fetch("/api/control-room/bixgrow-affiliates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, commission_value: form.commission_value ? Number(form.commission_value) : null }),
+      });
+      const data = await res.json();
+      if (data.ok) onCreated();
+      else setErr(data.error || "Error creando");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div style={statCell}>
-      <div style={{ ...statVal, color: highlight ? "#92400e" : "inherit" }}>{value}</div>
-      <div style={statLabel}>{label}</div>
+    <div style={newFormCard}>
+      <div style={sectionTitle}>Nuevo afiliado</div>
+      {err && <div style={{ fontSize: 12, color: "#b91c1c" }}>{err}</div>}
+      <div style={formGrid}>
+        <label style={fieldLabel}>Nombre *
+          <input style={fieldInput} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
+        </label>
+        <label style={fieldLabel}>Email
+          <input style={fieldInput} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        </label>
+        <label style={fieldLabel}>Código referido
+          <input style={fieldInput} value={form.referral_code} onChange={(e) => setForm({ ...form, referral_code: e.target.value })} />
+        </label>
+        <label style={fieldLabel}>ID externo BixGrow
+          <input style={fieldInput} placeholder="ID de BixGrow si lo tienes" value={form.affiliate_external_id} onChange={(e) => setForm({ ...form, affiliate_external_id: e.target.value })} />
+        </label>
+        <label style={fieldLabel}>Comisión (valor)
+          <input style={fieldInput} type="number" value={form.commission_value} onChange={(e) => setForm({ ...form, commission_value: e.target.value })} />
+        </label>
+        <label style={fieldLabel}>Comisión (tipo)
+          <input style={fieldInput} placeholder="% / fijo / …" value={form.commission_type} onChange={(e) => setForm({ ...form, commission_type: e.target.value })} />
+        </label>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button style={btnPrimary} onClick={create} disabled={saving}>{saving ? "Creando…" : "Crear afiliado"}</button>
+        <button style={btnSecondary} onClick={onCancel}>Cancelar</button>
+      </div>
     </div>
   );
 }
 
-export default function BixGrowAffiliatesBlock() {
-  const [data, setData] = useState<AffiliatesResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+/* ─── Main block ─────────────────────────────────────────────────────────── */
 
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      try {
-        setLoading(true);
-        const res = await fetch("/api/control-room/bixgrow-affiliates", { cache: "no-store" });
-        const json = (await res.json()) as AffiliatesResponse;
-        if (!cancelled) setData(json);
-      } catch {
-        if (!cancelled) setData({ ok: false, error: "Error cargando afiliados." });
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+export default function BixGrowAffiliatesBlock() {
+  const [affiliates, setAffiliates] = useState<Affiliate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showNew, setShowNew] = useState(false);
+  const [matching, setMatching] = useState(false);
+  const [matchResult, setMatchResult] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      const res = await fetch("/api/control-room/bixgrow-affiliates", { cache: "no-store" });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Error");
+      setAffiliates(data.affiliates ?? []);
+    } catch (e: any) {
+      setError(e?.message || "Error cargando afiliados");
+    } finally {
+      setLoading(false);
     }
-    run();
-    return () => { cancelled = true; };
   }, []);
 
-  const affiliates = useMemo(() => data?.affiliates ?? [], [data]);
+  useEffect(() => { load(); }, [load]);
 
-  const totals = useMemo(() => {
-    return affiliates.reduce(
-      (acc, a) => ({
-        sales: acc.sales + a.stats.total_sales,
-        commission: acc.commission + a.stats.total_commission,
-        pending: acc.pending + a.stats.pending_liquidation,
-        clients: acc.clients + a.stats.total_clients,
-      }),
-      { sales: 0, commission: 0, pending: 0, clients: 0 }
-    );
-  }, [affiliates]);
+  async function autoMatch() {
+    setMatching(true);
+    setMatchResult(null);
+    try {
+      const res = await fetch("/api/control-room/bixgrow-affiliates/auto-match", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        setMatchResult(`${data.matched} nuevos vínculos creados, ${data.already_linked} ya existían`);
+        if (data.matched > 0) load();
+      } else {
+        setMatchResult("Error: " + (data.error || "desconocido"));
+      }
+    } finally {
+      setMatching(false);
+    }
+  }
+
+  const totals = affiliates.reduce(
+    (acc, a) => ({
+      sales: acc.sales + a.stats.total_sales,
+      commission: acc.commission + a.stats.total_commission,
+      pending: acc.pending + a.stats.pending_liquidation,
+      clients: acc.clients + a.stats.total_clients,
+    }),
+    { sales: 0, commission: 0, pending: 0, clients: 0 }
+  );
 
   return (
     <div style={card}>
       <div style={eyebrow}>El-Elyon · BixGrow</div>
-      <div style={title}>Afiliados BixGrow</div>
+
+      {/* Title + actions */}
+      <div style={headerRow}>
+        <div style={titleStyle}>Afiliados BixGrow</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={btnSecondary} onClick={autoMatch} disabled={matching}>
+            {matching ? "Procesando…" : "Auto-vincular por email"}
+          </button>
+          <button style={btnPrimary} onClick={() => setShowNew((p) => !p)}>
+            {showNew ? "Cancelar" : "+ Nuevo afiliado"}
+          </button>
+        </div>
+      </div>
+
+      {matchResult && (
+        <div style={{ fontSize: 11, padding: "6px 10px", borderRadius: 8, background: "rgba(5,150,105,0.09)", color: "#065f46" }}>
+          {matchResult}
+        </div>
+      )}
+
+      {/* New affiliate form */}
+      {showNew && (
+        <NewAffiliateForm
+          onCreated={() => { setShowNew(false); load(); }}
+          onCancel={() => setShowNew(false)}
+        />
+      )}
 
       {loading && <div style={muted}>Cargando…</div>}
-
-      {!loading && data && !data.ok && (
-        <div style={errorText}>{data.error || "Error."}</div>
+      {!loading && error && <div style={{ fontSize: 12, color: "#b91c1c" }}>{error}</div>}
+      {!loading && !error && affiliates.length === 0 && (
+        <div style={muted}>Sin afiliados registrados. Usa "+ Nuevo afiliado" para añadir o configura el webhook en BixGrow.</div>
       )}
 
-      {!loading && data?.ok && affiliates.length === 0 && (
-        <div style={muted}>Sin afiliados registrados.</div>
+      {/* Totals */}
+      {affiliates.length > 0 && (
+        <div style={totalsRow}>
+          <div style={totalChip}><span style={totalVal}>{affiliates.length}</span><span style={totalLabel}>afiliados</span></div>
+          <div style={totalChip}><span style={totalVal}>{totals.clients}</span><span style={totalLabel}>clientes</span></div>
+          <div style={totalChip}><span style={totalVal}>{fmt(totals.sales)} €</span><span style={totalLabel}>ventas</span></div>
+          <div style={totalChip}><span style={totalVal}>{fmt(totals.commission)} €</span><span style={totalLabel}>comisiones</span></div>
+          <div style={{ ...totalChip, ...(totals.pending > 0 ? { background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.2)" } : {}) }}>
+            <span style={{ ...totalVal, ...(totals.pending > 0 ? { color: "#92400e" } : {}) }}>{fmt(totals.pending)} €</span>
+            <span style={totalLabel}>pendiente</span>
+          </div>
+        </div>
       )}
 
-      {!loading && data?.ok && affiliates.length > 0 && (
-        <>
-          {/* Summary totals */}
-          <div style={totalsRow}>
-            <div style={totalChip}>
-              <span style={totalVal}>{fmt(totals.sales)} €</span>
-              <span style={totalLabel}>ventas</span>
-            </div>
-            <div style={totalChip}>
-              <span style={totalVal}>{fmt(totals.commission)} €</span>
-              <span style={totalLabel}>comisiones</span>
-            </div>
-            <div style={{ ...totalChip, ...(totals.pending > 0 ? { background: "rgba(217,119,6,0.1)", borderColor: "rgba(217,119,6,0.25)" } : {}) }}>
-              <span style={{ ...totalVal, ...(totals.pending > 0 ? { color: "#92400e" } : {}) }}>{fmt(totals.pending)} €</span>
-              <span style={totalLabel}>pendiente liquidar</span>
-            </div>
-            <div style={totalChip}>
-              <span style={totalVal}>{affiliates.length}</span>
-              <span style={totalLabel}>afiliados</span>
-            </div>
-            <div style={totalChip}>
-              <span style={totalVal}>{totals.clients}</span>
-              <span style={totalLabel}>clientes</span>
-            </div>
-          </div>
-
-          <div style={affiliatesList}>
-            {affiliates.map((aff) => (
-              <AffiliateRow key={aff.id} aff={aff} />
-            ))}
-          </div>
-        </>
+      {/* Affiliate list */}
+      {!loading && !error && affiliates.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {affiliates.map((aff) => (
+            <AffiliateCard key={aff.id} aff={aff} onChanged={load} />
+          ))}
+        </div>
       )}
     </div>
   );
 }
+
+/* ─── Styles ─────────────────────────────────────────────────────────────── */
 
 const card: React.CSSProperties = {
   border: "1px solid rgba(199,174,106,0.28)",
@@ -291,202 +525,43 @@ const card: React.CSSProperties = {
   gap: 10,
 };
 
-const eyebrow: React.CSSProperties = {
-  fontSize: 11,
-  textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  opacity: 0.7,
-  fontWeight: 700,
-};
+const eyebrow: React.CSSProperties = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.7, fontWeight: 700 };
+const headerRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" };
+const titleStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700 };
+const muted: React.CSSProperties = { fontSize: 12, opacity: 0.72 };
 
-const title: React.CSSProperties = {
-  fontSize: 15,
-  fontWeight: 700,
-  lineHeight: 1.2,
-};
+const totalsRow: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 6 };
+const totalChip: React.CSSProperties = { display: "flex", flexDirection: "column", alignItems: "center", gap: 1, padding: "5px 10px", borderRadius: 10, border: "1px solid rgba(0,0,0,0.07)", background: "rgba(255,255,255,0.55)" };
+const totalVal: React.CSSProperties = { fontSize: 13, fontWeight: 700, lineHeight: 1.1 };
+const totalLabel: React.CSSProperties = { fontSize: 10, opacity: 0.65, textTransform: "uppercase", letterSpacing: "0.05em" };
 
-const muted: React.CSSProperties = {
-  fontSize: 12,
-  opacity: 0.72,
-};
+const affCard: React.CSSProperties = { border: "1px solid rgba(0,0,0,0.07)", borderRadius: 12, background: "rgba(255,255,255,0.66)", overflow: "hidden" };
+const affHeader: React.CSSProperties = { display: "flex", gap: 8, alignItems: "flex-start", padding: "10px 12px", cursor: "pointer", userSelect: "none" };
+const affName: React.CSSProperties = { fontSize: 13, fontWeight: 700 };
+const affMeta: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 8, fontSize: 11, opacity: 0.7, marginTop: 2 };
+const expandBody: React.CSSProperties = { borderTop: "1px solid rgba(0,0,0,0.05)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 12 };
 
-const errorText: React.CSSProperties = {
-  fontSize: 12,
-  color: "#a61b1b",
-};
+const statsGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 };
+const statCellStyle: React.CSSProperties = { background: "rgba(0,0,0,0.03)", borderRadius: 8, padding: "5px 8px" };
+const statValStyle: React.CSSProperties = { fontSize: 13, fontWeight: 700, lineHeight: 1.1 };
+const statLabelStyle: React.CSSProperties = { fontSize: 10, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.04em" };
 
-const totalsRow: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-};
+const section: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 6 };
+const sectionTitle: React.CSSProperties = { fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.07em", opacity: 0.65, marginBottom: 2 };
 
-const totalChip: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  gap: 2,
-  padding: "6px 10px",
-  borderRadius: 10,
-  border: "1px solid rgba(0,0,0,0.07)",
-  background: "rgba(255,255,255,0.55)",
-};
+const clientRowStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 8, background: "rgba(0,0,0,0.025)" };
+const miniPill: React.CSSProperties = { fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, flexShrink: 0, textTransform: "uppercase", letterSpacing: "0.04em" };
+const iconBtn: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", fontSize: 14, opacity: 0.55, padding: "0 4px", lineHeight: 1, flexShrink: 0 };
 
-const totalVal: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 700,
-  lineHeight: 1.1,
-};
+const searchInput: React.CSSProperties = { width: "100%", fontSize: 12, padding: "7px 10px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(255,255,255,0.8)", outline: "none", boxSizing: "border-box" };
+const dropdown: React.CSSProperties = { position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#fff", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, boxShadow: "0 4px 12px rgba(0,0,0,0.12)", maxHeight: 220, overflowY: "auto" };
+const dropdownItem: React.CSSProperties = { padding: "8px 12px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid rgba(0,0,0,0.04)" };
 
-const totalLabel: React.CSSProperties = {
-  fontSize: 10,
-  opacity: 0.7,
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-};
+const formGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 8 };
+const fieldLabel: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 3, fontSize: 11, fontWeight: 600, opacity: 0.8 };
+const fieldInput: React.CSSProperties = { fontSize: 12, padding: "6px 8px", borderRadius: 7, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(255,255,255,0.9)", outline: "none" };
 
-const affiliatesList: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-};
+const newFormCard: React.CSSProperties = { border: "1px solid rgba(199,174,106,0.4)", borderRadius: 12, padding: 12, background: "rgba(255,255,255,0.6)", display: "flex", flexDirection: "column", gap: 10 };
 
-const rowCard: React.CSSProperties = {
-  border: "1px solid rgba(0,0,0,0.06)",
-  borderRadius: 12,
-  background: "rgba(255,255,255,0.66)",
-  overflow: "hidden",
-};
-
-const rowHeader: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  alignItems: "flex-start",
-  padding: "10px 12px",
-  cursor: "pointer",
-  userSelect: "none",
-};
-
-const rowName: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 700,
-  lineHeight: 1.2,
-};
-
-const rowMeta: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-  fontSize: 11,
-  opacity: 0.7,
-};
-
-const chevron: React.CSSProperties = {
-  fontSize: 10,
-  opacity: 0.5,
-  marginTop: 2,
-};
-
-const pill: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  padding: "3px 7px",
-  borderRadius: 999,
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-  whiteSpace: "nowrap",
-};
-
-const expandedBody: React.CSSProperties = {
-  borderTop: "1px solid rgba(0,0,0,0.05)",
-  padding: "10px 12px",
-  display: "flex",
-  flexDirection: "column",
-  gap: 10,
-};
-
-const statsGrid: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, 1fr)",
-  gap: 6,
-};
-
-const statCell: React.CSSProperties = {
-  background: "rgba(0,0,0,0.03)",
-  borderRadius: 8,
-  padding: "6px 8px",
-  display: "flex",
-  flexDirection: "column",
-  gap: 1,
-};
-
-const statVal: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 700,
-  lineHeight: 1.1,
-};
-
-const statLabel: React.CSSProperties = {
-  fontSize: 10,
-  opacity: 0.65,
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-};
-
-const infoRow: React.CSSProperties = {
-  display: "flex",
-  gap: 6,
-  fontSize: 12,
-  alignItems: "baseline",
-};
-
-const infoLabel: React.CSSProperties = {
-  opacity: 0.65,
-  flexShrink: 0,
-};
-
-const infoVal: React.CSSProperties = {
-  fontWeight: 600,
-};
-
-const section: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-};
-
-const sectionTitle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  textTransform: "uppercase",
-  letterSpacing: "0.07em",
-  opacity: 0.7,
-};
-
-const clientList: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-};
-
-const clientChip: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  fontSize: 12,
-  padding: "4px 0",
-};
-
-const clientName: React.CSSProperties = {
-  fontWeight: 600,
-  flex: 1,
-};
-
-const liquidRow: React.CSSProperties = {
-  background: "rgba(0,0,0,0.025)",
-  borderRadius: 8,
-  padding: "6px 8px",
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-};
+const btnPrimary: React.CSSProperties = { fontSize: 12, fontWeight: 700, padding: "7px 14px", borderRadius: 8, border: "none", background: "#1d4ed8", color: "#fff", cursor: "pointer" };
+const btnSecondary: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: "7px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.15)", background: "rgba(255,255,255,0.8)", cursor: "pointer", color: "#374151" };

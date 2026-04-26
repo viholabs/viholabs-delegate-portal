@@ -110,3 +110,35 @@ export async function GET(req: NextRequest) {
 
   return json(200, { ok: true, affiliates });
 }
+
+export async function POST(req: NextRequest) {
+  const ctx = await resolveDashboardContext(req);
+  if (!ctx.ok) return json(ctx.status, { ok: false, error: ctx.error });
+  if (!ctx.permissions.canViewGlobal) return json(403, { ok: false, error: "Acceso restringido" });
+
+  let body: any = {};
+  try { body = await req.json(); } catch { return json(400, { ok: false, error: "JSON inválido" }); }
+
+  const { name, email, referral_code, commission_value, commission_type, state_code, affiliate_external_id } = body;
+  if (!name?.trim()) return json(400, { ok: false, error: "El nombre es obligatorio" });
+
+  const supa = ctx.supaService;
+  const { data, error } = await supa
+    .from("affiliate_accounts")
+    .insert({
+      name: name.trim(),
+      email: email?.trim()?.toLowerCase() || null,
+      referral_code: referral_code?.trim() || null,
+      commission_value: commission_value != null ? Number(commission_value) : null,
+      commission_type: commission_type?.trim() || null,
+      state_code: state_code || "OPEN",
+      affiliate_external_id: affiliate_external_id?.trim() || null,
+      source: "manual",
+      synced_at: new Date().toISOString(),
+    })
+    .select("id, name, email, referral_code, commission_value, commission_type, state_code, affiliate_external_id, source, synced_at")
+    .single();
+
+  if (error) return json(500, { ok: false, error: error.message });
+  return json(201, { ok: true, affiliate: data });
+}
