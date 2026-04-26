@@ -406,6 +406,8 @@ export default function BixGrowAffiliatesBlock() {
   const [showNew, setShowNew] = useState(false);
   const [matching, setMatching] = useState(false);
   const [matchResult, setMatchResult] = useState<string | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionResult, setProvisionResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -422,6 +424,28 @@ export default function BixGrowAffiliatesBlock() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  async function provision() {
+    setProvisioning(true);
+    setProvisionResult(null);
+    try {
+      const res = await fetch("/api/control-room/bixgrow-affiliates/provision", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        const parts = [];
+        if (data.provisioned > 0) parts.push(`${data.provisioned} clientes creados`);
+        if (data.linked > 0) parts.push(`${data.linked} vinculados`);
+        if (data.already_linked > 0) parts.push(`${data.already_linked} ya vinculados`);
+        if (data.errors > 0) parts.push(`${data.errors} errores`);
+        setProvisionResult(parts.join(", ") || "Sin cambios necesarios");
+        if (data.provisioned > 0 || data.linked > 0) load();
+      } else {
+        setProvisionResult("Error: " + (data.error || "desconocido"));
+      }
+    } finally {
+      setProvisioning(false);
+    }
+  }
 
   async function autoMatch() {
     setMatching(true);
@@ -461,6 +485,9 @@ export default function BixGrowAffiliatesBlock() {
           <button style={btnSecondary} onClick={autoMatch} disabled={matching}>
             {matching ? "Procesando…" : "Auto-vincular por email"}
           </button>
+          <button style={btnSecondary} onClick={provision} disabled={provisioning}>
+            {provisioning ? "Provisionando…" : "Provisionar clientes"}
+          </button>
           <button style={btnPrimary} onClick={() => setShowNew((p) => !p)}>
             {showNew ? "Cancelar" : "+ Nuevo afiliado"}
           </button>
@@ -470,6 +497,11 @@ export default function BixGrowAffiliatesBlock() {
       {matchResult && (
         <div style={{ fontSize: 11, padding: "6px 10px", borderRadius: 8, background: "rgba(5,150,105,0.09)", color: "#065f46" }}>
           {matchResult}
+        </div>
+      )}
+      {provisionResult && (
+        <div style={{ fontSize: 11, padding: "6px 10px", borderRadius: 8, background: "rgba(37,99,235,0.09)", color: "#1e40af" }}>
+          Provision: {provisionResult}
         </div>
       )}
 

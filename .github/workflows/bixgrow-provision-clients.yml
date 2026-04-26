@@ -1,0 +1,49 @@
+name: BixGrow — Provision Clients (every 12h)
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"
+  workflow_dispatch:
+    inputs:
+      preview:
+        description: "Dry-run (no writes)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: bixgrow-provision-clients
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Provision clients
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
+          PREVIEW: ${{ github.event.inputs.preview || 'false' }}
+        run: |
+          set -euo pipefail
+          pnpm exec -- tsx scripts/bixgrow-provision-clients.ts

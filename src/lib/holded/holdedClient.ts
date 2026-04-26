@@ -400,3 +400,40 @@ export async function holdedListContacts<T = HoldedContact[]>(
     .map((item) => normalizeHoldedContact(item))
     .filter((item): item is HoldedContact => Boolean(item?.id)) as T;
 }
+
+export type HoldedCreateContactInput = {
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  type?: number;      // 0 = client (default)
+  isperson?: number;  // 1 = person, 0 = company
+  notes?: string | null;
+};
+
+export async function holdedCreateContact(input: HoldedCreateContactInput): Promise<HoldedContact> {
+  const body: Record<string, unknown> = {
+    name: input.name.trim(),
+    type: input.type ?? 0,
+    isperson: input.isperson ?? 1,
+  };
+  if (input.email) body.email = input.email.trim().toLowerCase();
+  if (input.phone) body.phone = input.phone.trim();
+  if (input.notes) body.notes = input.notes;
+
+  const payload = await rawHoldedFetch<unknown>("/contacts", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  const normalized = normalizeHoldedContact(payload);
+  if (!normalized?.id) {
+    throw new HoldedClientError("holdedCreateContact: no id in response", null, payload);
+  }
+  return normalized;
+}
+
+export async function holdedFindContactByEmail(email: string): Promise<HoldedContact | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const contacts = await holdedListContacts<HoldedContact[]>({ keywords: normalizedEmail, type: 0 });
+  return contacts.find((c) => c.email?.toLowerCase() === normalizedEmail) ?? null;
+}
