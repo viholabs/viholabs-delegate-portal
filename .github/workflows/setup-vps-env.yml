@@ -1,0 +1,40 @@
+name: Setup VPS env vars (one-time)
+
+on:
+  workflow_dispatch:
+    inputs:
+      github_token:
+        description: "GitHub token for Jobs Monitor (PORTAL_GITHUB_TOKEN)"
+        required: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write env var to VPS and reload
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            ENV_FILE="/var/www/portal/.env.local"
+            KEY="GITHUB_TOKEN"
+            VALUE="${{ inputs.github_token }}"
+
+            # Remove existing line if present, then append updated value
+            sed -i "/^${KEY}=/d" "$ENV_FILE"
+            echo "${KEY}=${VALUE}" >> "$ENV_FILE"
+            echo "✓ ${KEY} written to ${ENV_FILE}"
+
+            # Reload without downtime
+            cd /var/www/portal
+            pm2 reload portal --update-env
+            echo "✓ PM2 reloaded"
+
+            # Verify
+            sleep 2
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" -m 5 http://127.0.0.1:3000/api/control-room/jobs-monitor || echo "000")
+            echo "Jobs monitor HTTP status: $STATUS"
