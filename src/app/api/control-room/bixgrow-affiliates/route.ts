@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
     (events ?? [])
       .map((e: any) => e.client_id)
       .filter(Boolean)
-  )];
+  )] as string[];
 
   const { data: clients } = clientIds.length > 0
     ? await supa.from("clients").select("id, name, contact_email, status").in("id", clientIds)
@@ -56,23 +56,36 @@ export async function GET(req: NextRequest) {
 
   const clientById = new Map(((clients ?? []) as { id: string; name: string | null; contact_email: string | null; status: string | null }[]).map((c) => [c.id, c]));
 
+  // Load invoice totals per client (real sales from Holded invoices)
+  const { data: invoiceData } = clientIds.length > 0
+    ? await supa
+        .from("invoices")
+        .select("client_id, total_net, is_paid")
+        .in("client_id", clientIds)
+        .not("total_net", "is", null)
+    : { data: [] };
+
+  const invByClient = new Map<string, { total: number; paid: number }>();
+  for (const inv of (invoiceData ?? []) as { client_id: string; total_net: string | number; is_paid: boolean }[]) {
+    const cid = inv.client_id;
+    const existing = invByClient.get(cid) ?? { total: 0, paid: 0 };
+    const net = Number(inv.total_net) || 0;
+    existing.total += net;
+    if (inv.is_paid) existing.paid += net;
+    invByClient.set(cid, existing);
+  }
+
   // Aggregate per affiliate
   const affiliates = (accounts ?? []).map((acc: any) => {
     const accEvents = (events ?? []).filter((e: any) => e.affiliate_account_id === acc.id);
     const accLiquidations = (liquidations ?? []).filter((l: any) => l.affiliate_account_id === acc.id);
-
-    const totalCommission = accEvents.reduce((s: number, e: any) => s + (Number(e.commission_amount) || 0), 0);
-    const totalSales = accEvents.reduce((s: number, e: any) => s + (Number(e.order_amount) || 0), 0);
-    const totalLiquidated = accLiquidations
-      .filter((l: any) => l.state_code === "PAID")
-      .reduce((s: number, l: any) => s + (Number(l.amount) || 0), 0);
-    const pendingLiquidation = Math.max(0, totalCommission - totalLiquidated);
 
     const REMOVABLE_SOURCES = ["manual", "manual_control_room", "email_match", "bixgrow_sync"];
     const attributedClients = accEvents
       .filter((e: any) => e.client_id)
       .map((e: any) => {
         const c = clientById.get(e.client_id);
+        const inv = invByClient.get(e.client_id);
         return {
           event_id: e.id,
           client_id: e.client_id,
@@ -82,9 +95,30 @@ export async function GET(req: NextRequest) {
           source: e.source ?? "unknown",
           commission_amount: e.commission_amount ?? null,
           order_amount: e.order_amount ?? null,
+          invoice_total: inv ? Number(inv.total.toFixed(2)) : null,
+          invoice_paid_total: inv ? Number(inv.paid.toFixed(2)) : null,
           removable: REMOVABLE_SOURCES.includes(e.source),
         };
       });
+
+    // Sales = sum of invoice totals for unique linked clients
+    const uniqueClientIds = Array.from(new Set(attributedClients.map((c: { client_id: string }) => c.client_id))) as string[];
+    const totalSales = uniqueClientIds.reduce((s: number, cid: string) => s + (invByClient.get(cid)?.total ?? 0), 0);
+    const totalSalesPaid = uniqueClientIds.reduce((s: number, cid: string) => s + (invByClient.get(cid)?.paid ?? 0), 0);
+
+    // Commission: prefer explicit commission_amount from events, else compute from rate
+    const explicitCommission = accEvents.reduce((s: number, e: any) => s + (Number(e.commission_amount) || 0), 0);
+    const commValue = Number(acc.commission_value) || 0;
+    const commType = (acc.commission_type ?? "").toLowerCase();
+    const computedCommission = commValue > 0 && commType.includes("%")
+      ? totalSalesPaid * commValue / 100
+      : 0;
+    const totalCommission = explicitCommission > 0 ? explicitCommission : computedCommission;
+
+    const totalLiquidated = accLiquidations
+      .filter((l: any) => l.state_code === "PAID")
+      .reduce((s: number, l: any) => s + (Number(l.amount) || 0), 0);
+    const pendingLiquidation = Math.max(0, totalCommission - totalLiquidated);
 
     return {
       id: acc.id,
@@ -99,8 +133,9 @@ export async function GET(req: NextRequest) {
       synced_at: acc.synced_at,
       stats: {
         total_events: accEvents.length,
-        total_clients: new Set(attributedClients.map((c: any) => c.client_id)).size,
+        total_clients: uniqueClientIds.length,
         total_sales: Number(totalSales.toFixed(2)),
+        total_sales_paid: Number(totalSalesPaid.toFixed(2)),
         total_commission: Number(totalCommission.toFixed(2)),
         total_liquidated: Number(totalLiquidated.toFixed(2)),
         pending_liquidation: Number(pendingLiquidation.toFixed(2)),

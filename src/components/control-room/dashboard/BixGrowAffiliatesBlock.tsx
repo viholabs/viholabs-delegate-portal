@@ -21,6 +21,8 @@ type LinkedClient = {
   source: string;
   commission_amount: number | null;
   order_amount: number | null;
+  invoice_total: number | null;
+  invoice_paid_total: number | null;
   removable: boolean;
 };
 
@@ -93,7 +95,17 @@ function ClientRow({ lc, affiliateId, onUnlinked }: { lc: LinkedClient; affiliat
     <div style={clientRowStyle}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 600 }}>{lc.client_name || lc.client_id}</div>
-        {lc.client_email && <div style={{ fontSize: 11, opacity: 0.65 }}>{lc.client_email}</div>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 1 }}>
+          {lc.client_email && <span style={{ fontSize: 11, opacity: 0.65 }}>{lc.client_email}</span>}
+          {lc.invoice_total != null && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#1e40af" }}>
+              {fmt(lc.invoice_total)} €
+              {lc.invoice_paid_total != null && lc.invoice_paid_total < lc.invoice_total && (
+                <span style={{ fontWeight: 400, opacity: 0.7 }}> ({fmt(lc.invoice_paid_total)} € cobrado)</span>
+              )}
+            </span>
+          )}
+        </div>
       </div>
       <span style={{ ...miniPill, ...sourcePillStyle(lc.source) }}>{sourceLabel(lc.source)}</span>
       {lc.removable && (
@@ -268,11 +280,11 @@ function AffiliateCard({
         <div style={expandBody}>
           {/* Stats */}
           <div style={statsGrid}>
-            <StatCell label="Ventas" value={`${fmt(s.total_sales)} €`} />
+            <StatCell label="Facturado" value={`${fmt(s.total_sales)} €`} />
+            <StatCell label="Cobrado" value={`${fmt((s as any).total_sales_paid ?? s.total_sales)} €`} />
             <StatCell label="Comisión" value={`${fmt(s.total_commission)} €`} />
             <StatCell label="Liquidado" value={`${fmt(s.total_liquidated)} €`} />
             <StatCell label="Pendiente" value={`${fmt(s.pending_liquidation)} €`} warn={s.pending_liquidation > 0} />
-            <StatCell label="Eventos" value={String(s.total_events)} />
             <StatCell label="Clientes" value={String(s.total_clients)} />
           </div>
 
