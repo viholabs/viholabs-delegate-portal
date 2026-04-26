@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   // Load attribution events to compute stats per affiliate
   const { data: events } = await supa
     .from("affiliate_attribution_events")
-    .select("affiliate_account_id, client_id, commission_amount, order_amount, state_code, event_at")
+    .select("id, affiliate_account_id, client_id, commission_amount, order_amount, state_code, event_at, source")
     .in("affiliate_account_id", accountIds);
 
   // Load liquidations
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     ? await supa.from("clients").select("id, name, contact_email, status").in("id", clientIds)
     : { data: [] };
 
-  const clientById = new Map((clients ?? []).map((c: any) => [c.id, c]));
+  const clientById = new Map(((clients ?? []) as { id: string; name: string | null; contact_email: string | null; status: string | null }[]).map((c) => [c.id, c]));
 
   // Aggregate per affiliate
   const affiliates = (accounts ?? []).map((acc: any) => {
@@ -68,15 +68,23 @@ export async function GET(req: NextRequest) {
       .reduce((s: number, l: any) => s + (Number(l.amount) || 0), 0);
     const pendingLiquidation = Math.max(0, totalCommission - totalLiquidated);
 
-    const attributedClients = [...new Set(accEvents.map((e: any) => e.client_id).filter(Boolean) as string[])]
-      .map((cid) => clientById.get(cid))
-      .filter(Boolean)
-      .map((c: any) => ({
-        id: c.id,
-        name: c.name,
-        email: c.contact_email,
-        status: c.status,
-      }));
+    const REMOVABLE_SOURCES = ["manual", "manual_control_room", "email_match", "bixgrow_sync"];
+    const attributedClients = accEvents
+      .filter((e: any) => e.client_id)
+      .map((e: any) => {
+        const c = clientById.get(e.client_id);
+        return {
+          event_id: e.id,
+          client_id: e.client_id,
+          client_name: c?.name ?? null,
+          client_email: c?.contact_email ?? null,
+          client_status: c?.status ?? null,
+          source: e.source ?? "unknown",
+          commission_amount: e.commission_amount ?? null,
+          order_amount: e.order_amount ?? null,
+          removable: REMOVABLE_SOURCES.includes(e.source),
+        };
+      });
 
     return {
       id: acc.id,
@@ -91,7 +99,7 @@ export async function GET(req: NextRequest) {
       synced_at: acc.synced_at,
       stats: {
         total_events: accEvents.length,
-        total_clients: attributedClients.length,
+        total_clients: new Set(attributedClients.map((c: any) => c.client_id)).size,
         total_sales: Number(totalSales.toFixed(2)),
         total_commission: Number(totalCommission.toFixed(2)),
         total_liquidated: Number(totalLiquidated.toFixed(2)),
