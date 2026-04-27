@@ -20,6 +20,14 @@ type ReconcileResult = {
   errors: number;
   remaining_open: number;
   details: { invoice_number: string; action: string; paid_date: string | null }[];
+  open_diagnostics?: {
+    invoice_number: string;
+    holded_status: string | null;
+    payments_total: number | null;
+    payments_pending: number | null;
+    holded_total: number | null;
+    our_total_gross: number;
+  }[];
 };
 
 export default function SystemModule({ kpis }: { kpis?: { critical: number; total: number } }) {
@@ -165,6 +173,21 @@ export default function SystemModule({ kpis }: { kpis?: { critical: number; tota
                   {d.paid_date ? ` · ${d.paid_date}` : " · sin fecha (revisar manualmente)"}
                 </div>
               ))}
+            </div>
+          )}
+          {reconcileResult && reconcileResult.open_diagnostics && reconcileResult.open_diagnostics.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 4 }}>
+                Diagnóstico Holded — facturas que siguen abiertas según la API:
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {reconcileResult.open_diagnostics.map((d, i) => (
+                  <div key={i} style={{ fontSize: 10, fontFamily: "monospace", background: "rgba(0,0,0,0.04)", borderRadius: 4, padding: "2px 6px", color: "#374151" }}>
+                    <strong>{d.invoice_number}</strong> status=<em>{d.holded_status ?? "–"}</em>
+                    {" "} pending={d.payments_pending ?? "–"} total={d.payments_total ?? "–"} holded_total={d.holded_total ?? "–"} nuestro={d.our_total_gross}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

@@ -84,18 +84,27 @@ function extractPaidState(detail: Record<string, unknown>, totalGross: number): 
   paidDate: string | null;
   paymentsTotal: number | null;
   paymentsPending: number | null;
+  holdedTotal: number | null;
+  holdedStatus: string | null;
 } {
   const paymentsTotal = asNumber(detail["paymentsTotal"]) ?? asNumber(detail["payments_total"]);
   const paymentsPending = asNumber(detail["paymentsPending"]) ?? asNumber(detail["payments_pending"]);
+  // Use Holded's own total for comparison (more reliable than our stored total_gross)
+  const holdedTotal = asNumber(detail["total"]) ?? asNumber(detail["subtotal"]) ?? totalGross;
 
-  // Explicit status check (some invoices have status: "paid")
-  const statusRaw = typeof detail["status"] === "string" ? detail["status"].toLowerCase() : "";
-  const explicitPaid = statusRaw === "paid" || statusRaw === "pagado" || statusRaw === "cobrado";
+  const statusRaw = typeof detail["status"] === "string" ? detail["status"].toLowerCase()
+    : typeof detail["docStatus"] === "string" ? (detail["docStatus"] as string).toLowerCase()
+    : "";
+  const holdedStatus = statusRaw || null;
+  const explicitPaid = statusRaw === "paid" || statusRaw === "pagado" || statusRaw === "cobrado"
+    || statusRaw === "closed" || statusRaw === "settled" || statusRaw === "collected";
 
   const isPaid =
     explicitPaid ||
-    (paymentsTotal !== null && paymentsTotal >= totalGross - EPSILON &&
-      (paymentsPending === null || paymentsPending <= EPSILON));
+    // Primary: Holded says nothing is pending
+    (paymentsPending !== null && paymentsPending <= EPSILON) ||
+    // Fallback: paymentsTotal covers holdedTotal
+    (paymentsTotal !== null && paymentsTotal >= holdedTotal - EPSILON);
 
   // Extract paid_date from paymentsDetail entries
   let paidDate: string | null = null;
@@ -105,7 +114,7 @@ function extractPaidState(detail: Record<string, unknown>, totalGross: number): 
     if (d && (!paidDate || d > paidDate)) paidDate = d;
   }
 
-  return { isPaid, paidDate, paymentsTotal, paymentsPending };
+  return { isPaid, paidDate, paymentsTotal, paymentsPending, holdedTotal, holdedStatus };
 }
 
 export async function POST(req: NextRequest) {
@@ -155,6 +164,7 @@ export async function POST(req: NextRequest) {
     let settled = 0;
     let errors = 0;
     const details: { invoice_number: string; action: string; paid_date: string | null; cn_match?: string }[] = [];
+    const openDiag: { invoice_number: string; holded_status: string | null; payments_total: number | null; payments_pending: number | null; holded_total: number | null; our_total_gross: number }[] = [];
 
     for (const inv of openInvoices as any[]) {
       checked++;
@@ -163,9 +173,19 @@ export async function POST(req: NextRequest) {
       const detail = await fetchHoldedDetail(inv.external_invoice_id);
       if (!detail) { errors++; continue; }
 
-      const { isPaid, paidDate: rawPaidDate, paymentsTotal, paymentsPending } = extractPaidState(detail, totalGross);
+      const { isPaid, paidDate: rawPaidDate, paymentsTotal, paymentsPending, holdedTotal, holdedStatus } = extractPaidState(detail, totalGross);
 
-      if (!isPaid) continue;
+      if (!isPaid) {
+        openDiag.push({
+          invoice_number: inv.invoice_number,
+          holded_status: holdedStatus,
+          payments_total: paymentsTotal,
+          payments_pending: paymentsPending,
+          holded_total: holdedTotal,
+          our_total_gross: totalGross,
+        });
+        continue;
+      }
 
       // Resolve paid_date: use paymentsDetail if available, otherwise find matching CN
       let paidDate = rawPaidDate;
@@ -218,6 +238,7 @@ export async function POST(req: NextRequest) {
       errors,
       remaining_open: (openInvoices.length) - settled,
       details,
+      open_diagnostics: openDiag,
     });
   } catch (err: unknown) {
     return json(500, { ok: false, error: String(err) });
