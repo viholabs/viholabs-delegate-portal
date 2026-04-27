@@ -71,6 +71,7 @@ export type CanonicalInvoiceRow = {
   total_gross: number | null;
   is_paid: boolean | null;
   paid_date: string | null;
+  due_date: string | null;
   document_type: "invoice" | "creditnote";
   state_code: string | null;
   external_modified_at: string | null;
@@ -1029,6 +1030,7 @@ export async function buildHoldedImportDecision(args: {
     total_gross: totals.total_gross,
     is_paid: paidState.is_paid,
     paid_date: paidState.is_paid === true ? payments.paid_date : null,
+    due_date: extractDueDate(detail),
     document_type: documentType,
     state_code: desiredStateCode,
     external_modified_at: externalModifiedAt,

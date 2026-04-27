@@ -108,6 +108,7 @@ async function queryInvoicesMonitor(args: {
         "client_name",
         "delegate_id",
         "invoice_date",
+        "due_date",
         "total_net",
         "currency",
         "is_paid",
@@ -116,9 +117,12 @@ async function queryInvoicesMonitor(args: {
         "source_provider",
         "client_id",
         "ops_owner_actor_id",
+        "document_type",
       ].join(", "),
     )
     .or("is_paid.is.false,is_paid.is.null")
+    .neq("state_code", "SETTLED")
+    .neq("document_type", "creditnote")
     .order("invoice_date", { ascending: true })
     .limit(500);
 
@@ -152,7 +156,7 @@ async function queryInvoicesMonitor(args: {
 
   const items: InvoiceMonitorRow[] = rows.map((row: any) => {
     const issueDate = row.invoice_date ? String(row.invoice_date) : null;
-    const dueDate = issueDate;
+    const dueDate = row.due_date ? String(row.due_date) : issueDate;
     const daysOverdue =
       dueDate && today > dueDate ? diffDays(today, dueDate) : 0;
 

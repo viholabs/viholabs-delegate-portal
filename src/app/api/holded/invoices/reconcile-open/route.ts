@@ -45,6 +45,22 @@ function unixToDateYmd(v: unknown): string | null {
   return null;
 }
 
+function extractDueDate(detail: Record<string, unknown>): string | null {
+  const multi = typeof detail["multipledueDate"] === "object" && detail["multipledueDate"] !== null
+    ? (detail["multipledueDate"] as Record<string, unknown>)
+    : null;
+  const multiAlt = typeof detail["multipleDueDate"] === "object" && detail["multipleDueDate"] !== null
+    ? (detail["multipleDueDate"] as Record<string, unknown>)
+    : null;
+  return (
+    unixToDateYmd(detail["dueDate"]) ??
+    unixToDateYmd(multi?.["date"]) ??
+    unixToDateYmd(multiAlt?.["date"]) ??
+    unixToDateYmd(detail["forecastDate"]) ??
+    null
+  );
+}
+
 async function fetchHoldedDetail(externalId: string): Promise<Record<string, unknown> | null> {
   const apiKey = (process.env.HOLDED_API_KEY ?? "").trim();
   if (!apiKey) return null;
@@ -175,9 +191,9 @@ export async function POST(req: NextRequest) {
           is_paid: true,
           state_code: "SETTLED",
           paid_date: paidDate,
+          due_date: extractDueDate(detail),
           updated_at: now,
-          // Record reconciliation info in source_meta patch
-          needs_review: !paidDate, // flag for manual review if we still couldn't get paid_date
+          needs_review: !paidDate,
         })
         .eq("id", inv.id);
 
