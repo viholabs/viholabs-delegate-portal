@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { isSupervisorRole, normalizeRole } from "@/lib/auth/roles";
 import {
@@ -143,11 +144,12 @@ type SupabaseAdmin = ReturnType<typeof supabaseAdmin>;
 
 async function readDelegates(
   db: SupabaseAdmin,
-  actor: ActorLike
+  actor: ActorLike,
+  canViewGlobal = false
 ): Promise<ActorLike[]> {
   const role = normalizeRole(actor.role);
 
-  if (isDelegateRole(role)) {
+  if (isDelegateRole(role) && !canViewGlobal) {
     return [actor];
   }
 
@@ -667,6 +669,14 @@ async function handle(req: Request) {
       return json(403, { ok: false, stage, error: "Forbidden" });
     }
 
+    stage = "permissions";
+    const eff = await getEffectivePermissionsByActorId(actor.id);
+    const canViewGlobal =
+      eff.isSuperAdmin ||
+      eff.has("control_room.read") ||
+      eff.has("control_room.dashboard.read") ||
+      eff.has("actors.read");
+
     stage = "input";
     let month = normalizeMonth(new URL(req.url).searchParams.get("month"));
 
@@ -682,7 +692,7 @@ async function handle(req: Request) {
     const db = supabaseAdmin();
 
     stage = "delegates";
-    const allDelegates = await readDelegates(db, actor);
+    const allDelegates = await readDelegates(db, actor, canViewGlobal);
     const allDelegateIds = allDelegates.map((d) => d.id);
 
     // For supervisors: filter to operational delegates only.
@@ -691,7 +701,7 @@ async function handle(req: Request) {
     stage = "assignments";
     const [assignments, invoiceDelegatesResult] = await Promise.all([
       readActiveDelegateAssignments(db, allDelegateIds),
-      isDelegateRole(role)
+      (isDelegateRole(role) && !canViewGlobal)
         ? Promise.resolve({ data: null, error: null })
         : db
             .from("invoices")
