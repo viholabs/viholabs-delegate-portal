@@ -10,32 +10,31 @@ function json(status: number, body: unknown) {
 }
 
 export async function POST(req: NextRequest) {
-  const ctx = await resolveDashboardContext(req);
-  if (!ctx.ok) return json(ctx.status, { ok: false, error: ctx.error });
-  if (!ctx.permissions.canViewGlobal) return json(403, { ok: false, error: "Acceso restringido" });
-
-  if (!isShopifyConfigured()) {
-    return json(400, { ok: false, error: "Shopify no configurado. Añade SHOPIFY_SHOP_DOMAIN y SHOPIFY_ADMIN_ACCESS_TOKEN." });
-  }
-
-  const supa = ctx.supaService;
-  const shopDomain = (process.env.SHOPIFY_SHOP_DOMAIN ?? "").trim();
-
-  let body: any = {};
-  try { body = await req.json().catch(() => ({})); } catch { body = {}; }
-  const fullSync = body.full === true;
-
-  // For incremental: only fetch orders updated in last 7 days
-  const createdAtMin = fullSync
-    ? undefined
-    : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-  let upserted = 0;
-  let errors = 0;
-  let pageInfo: string | null = null;
-  let page = 0;
-
   try {
+    const ctx = await resolveDashboardContext(req);
+    if (!ctx.ok) return json(ctx.status, { ok: false, error: ctx.error });
+    if (!ctx.permissions.canViewGlobal) return json(403, { ok: false, error: "Acceso restringido" });
+
+    if (!isShopifyConfigured()) {
+      return json(400, { ok: false, error: "Shopify no configurado. Añade SHOPIFY_SHOP_DOMAIN y SHOPIFY_ADMIN_ACCESS_TOKEN." });
+    }
+
+    const supa = ctx.supaService;
+    const shopDomain = (process.env.SHOPIFY_SHOP_DOMAIN ?? "").trim();
+
+    let body: any = {};
+    try { body = await req.json(); } catch { body = {}; }
+    const fullSync = body.full === true;
+
+    const createdAtMin = fullSync
+      ? undefined
+      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    let upserted = 0;
+    let errors: { order_id: number; error: string }[] = [];
+    let pageInfo: string | null = null;
+    let page = 0;
+
     do {
       page++;
       const { orders, nextPageInfo } = await shopifyFetchOrders({
@@ -47,7 +46,6 @@ export async function POST(req: NextRequest) {
 
       if (orders.length === 0) break;
 
-      // Upsert batch into shopify_orders_raw
       for (const order of orders) {
         const email = order.customer?.email ?? order.email ?? null;
         const { error } = await supa
@@ -67,15 +65,14 @@ export async function POST(req: NextRequest) {
             raw: order,
           }, { onConflict: "order_id" });
 
-        if (error) errors++;
+        if (error) errors.push({ order_id: order.id, error: error.message });
         else upserted++;
       }
 
       pageInfo = nextPageInfo;
-      // Safety: max 10 pages (2500 orders) per sync call
     } while (pageInfo && page < 10);
 
-    // After sync, auto-match emails to clients
+    // Auto-match emails to clients
     const { data: unmatched } = await supa
       .from("shopify_orders_raw")
       .select("id, email")
@@ -97,7 +94,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return json(200, { ok: true, upserted, errors, client_matches: matched, pages_fetched: page });
+    return json(200, {
+      ok: true,
+      upserted,
+      errors: errors.length,
+      error_details: errors.slice(0, 5),
+      client_matches: matched,
+      pages_fetched: page,
+    });
   } catch (err: unknown) {
     const msg = err instanceof ShopifyClientError ? err.message : String(err);
     return json(500, { ok: false, error: msg });

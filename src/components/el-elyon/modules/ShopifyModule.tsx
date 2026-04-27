@@ -80,7 +80,12 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ full }),
       });
-      const d = await r.json();
+      const text = await r.text();
+      let d: any;
+      try { d = JSON.parse(text); } catch {
+        setSyncError(`HTTP ${r.status} — respuesta no-JSON: ${text.slice(0, 300)}`);
+        return;
+      }
       if (d.ok) {
         setSyncResult({ upserted: d.upserted, errors: d.errors, client_matches: d.client_matches });
         await loadData();

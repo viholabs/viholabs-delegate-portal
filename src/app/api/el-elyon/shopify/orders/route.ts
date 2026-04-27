@@ -9,6 +9,7 @@ function json(status: number, body: unknown) {
 }
 
 export async function GET(req: NextRequest) {
+  try {
   const ctx = await resolveDashboardContext(req);
   if (!ctx.ok) return json(ctx.status, { ok: false, error: ctx.error });
   if (!ctx.permissions.canViewGlobal) return json(403, { ok: false, error: "Acceso restringido" });
@@ -81,4 +82,7 @@ export async function GET(req: NextRequest) {
     total: count ?? 0,
     summary,
   });
+  } catch (err: unknown) {
+    return json(500, { ok: false, error: String(err) });
+  }
 }
