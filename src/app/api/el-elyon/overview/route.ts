@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveDashboardContext } from "@/lib/control-room/resolveDashboardContext";
+import { isShopifyConfigured } from "@/lib/shopify/shopifyClient";
 
 export const runtime = "nodejs";
 
@@ -98,7 +99,7 @@ export async function GET(req: NextRequest) {
         total_unpaid: Math.round(totalUnpaid * 100) / 100,
         overdue: overdueInvoices,
       },
-      shopify: { configured: (shopifyOrders ?? []).length > 0, order_count: (shopifyOrders ?? []).length },
+      shopify: { configured: isShopifyConfigured(), order_count: (shopifyOrders ?? []).length },
       warnings: { critical: criticalWarnings, total: (warnings ?? []).length },
       liquidations: { pending: pendingLiquidations, total: (liquidations ?? []).length },
     },
