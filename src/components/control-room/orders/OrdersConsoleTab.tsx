@@ -239,37 +239,38 @@ export default function OrdersConsoleTab({ delegateMode: delegateModeProp = fals
       const q = selectedDelegateId
         ? `?delegateId=${encodeURIComponent(selectedDelegateId)}`
         : "";
-      const res = await fetchJson(`/api/delegate/products${q}`);
-      if (!alive) return;
+      try {
+        const json = await fetchJsonWithAuth<any>(`/api/delegate/products${q}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!alive) return;
 
-      if (!res.ok) {
+        const { products: normalizedProducts, bundles } = normalizeProducts(json);
+
+        const map = new Map<string, BundleDef>();
+        for (const b of bundles) {
+          map.set(b.sku, b);
+        }
+
+        const withName = normalizedProducts.map((p) => ({
+          ...p,
+          name: safeStr(p.name).trim() ? p.name : p.sku,
+        }));
+
+        withName.sort((a, b) =>
+          safeStr(a.name).localeCompare(safeStr(b.name), "es"),
+        );
+
+        setProducts(withName);
+        setBundlesBySku(map);
+        setProductsLoad("ok");
+      } catch {
+        if (!alive) return;
         setProductsLoad("error");
         setProducts([]);
         setBundlesBySku(new Map());
-        return;
       }
-
-      const { products: normalizedProducts, bundles } = normalizeProducts(
-        res.json,
-      );
-
-      const map = new Map<string, BundleDef>();
-      for (const b of bundles) {
-        map.set(b.sku, b);
-      }
-
-      const withName = normalizedProducts.map((p) => ({
-        ...p,
-        name: safeStr(p.name).trim() ? p.name : p.sku,
-      }));
-
-      withName.sort((a, b) =>
-        safeStr(a.name).localeCompare(safeStr(b.name), "es"),
-      );
-
-      setProducts(withName);
-      setBundlesBySku(map);
-      setProductsLoad("ok");
     })();
 
     return () => {
