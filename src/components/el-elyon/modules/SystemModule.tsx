@@ -14,6 +14,14 @@ type HoldedSyncResult = {
   shopify_matched: number;
 };
 
+type ReconcileResult = {
+  checked: number;
+  settled: number;
+  errors: number;
+  remaining_open: number;
+  details: { invoice_number: string; action: string; paid_date: string | null }[];
+};
+
 export default function SystemModule({ kpis }: { kpis?: { critical: number; total: number } }) {
   const critical = kpis?.critical ?? 0;
   const total = kpis?.total ?? 0;
@@ -22,6 +30,10 @@ export default function SystemModule({ kpis }: { kpis?: { critical: number; tota
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<HoldedSyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<ReconcileResult | null>(null);
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
 
   async function syncHolded() {
     setSyncing(true);
@@ -41,6 +53,27 @@ export default function SystemModule({ kpis }: { kpis?: { critical: number; tota
       setSyncError(String(e));
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function reconcileOpen() {
+    setReconciling(true);
+    setReconcileResult(null);
+    setReconcileError(null);
+    try {
+      const r = await fetch("/api/holded/invoices/reconcile-open", { method: "POST" });
+      const text = await r.text();
+      let d: any;
+      try { d = JSON.parse(text); } catch {
+        setReconcileError(`HTTP ${r.status}: ${text.slice(0, 200)}`);
+        return;
+      }
+      if (d.ok) setReconcileResult(d);
+      else setReconcileError(d.error ?? "Error desconocido");
+    } catch (e: unknown) {
+      setReconcileError(String(e));
+    } finally {
+      setReconciling(false);
     }
   }
 
@@ -89,6 +122,49 @@ export default function SystemModule({ kpis }: { kpis?: { critical: number; tota
           {syncResult && (
             <div style={{ fontSize: 11, opacity: 0.6 }}>
               Tras el sync, recarga el módulo Shopify para ver los pedidos vinculados.
+            </div>
+          )}
+        </div>
+      </Subcard>
+
+      {/* Invoice reconciliation — fixes CN-settled invoices showing as Vencida */}
+      <Subcard title="Reconciliación facturas Holded" defaultOpen>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 12, color: "#4b4b4b" }}>
+            Re-verifica en Holded todas las facturas <strong>OPEN</strong> de la BD. Detecta las saldadas
+            via abono (CN) que el sync incremental no actualiza porque Holded no las marca como
+            "modificadas" al crear la CN. Usar tras cada importación o cuando haya incongruencias
+            con el estado real de Holded.
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              onClick={reconcileOpen}
+              disabled={reconciling}
+              style={{ fontSize: 11, padding: "5px 12px", borderRadius: 6, border: "1px solid rgba(146,64,14,0.35)", background: "rgba(146,64,14,0.07)", color: "#92400e", fontWeight: 700, cursor: reconciling ? "not-allowed" : "pointer", opacity: reconciling ? 0.6 : 1 }}
+            >
+              {reconciling ? "Reconciliando…" : "⚡ Reconciliar facturas abiertas"}
+            </button>
+            {reconcileResult && (
+              <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(6,95,70,0.1)", color: "#065f46", fontWeight: 600 }}>
+                ✓ {reconcileResult.checked} revisadas · {reconcileResult.settled} saldadas
+                {reconcileResult.remaining_open > 0 && ` · ${reconcileResult.remaining_open} siguen abiertas`}
+                {reconcileResult.errors > 0 && ` · ${reconcileResult.errors} errores`}
+              </span>
+            )}
+            {reconcileError && (
+              <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(185,28,28,0.1)", color: "#b91c1c", fontWeight: 600 }}>
+                ✗ {reconcileError}
+              </span>
+            )}
+          </div>
+          {reconcileResult && reconcileResult.settled > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {reconcileResult.details.map((d, i) => (
+                <div key={i} style={{ fontSize: 11, color: "#374151" }}>
+                  <strong>{d.invoice_number}</strong> → {d.action}
+                  {d.paid_date ? ` · ${d.paid_date}` : " · sin fecha (revisar manualmente)"}
+                </div>
+              ))}
             </div>
           )}
         </div>
