@@ -28,7 +28,24 @@ type ShopifyOrderRow = {
   client_email: string | null;
 };
 
-const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
+type OrderDetail = {
+  order: ShopifyOrderRow & { raw: any };
+  client: { id: string; name: string | null; contact_email: string | null; status: string | null } | null;
+  holded_invoices: {
+    id: string;
+    invoice_number: string | null;
+    invoice_date: string | null;
+    total_net: number | null;
+    total_gross: number | null;
+    is_paid: boolean;
+    paid_date: string | null;
+    external_invoice_id: string | null;
+    document_type: string | null;
+  }[];
+  email_candidates: { id: string; name: string | null; contact_email: string | null; status: string | null }[];
+};
+
+const FS_COLORS: Record<string, { bg: string; fg: string }> = {
   paid: { bg: "rgba(6,95,70,0.1)", fg: "#065f46" },
   pending: { bg: "rgba(146,64,14,0.1)", fg: "#92400e" },
   refunded: { bg: "rgba(107,114,128,0.1)", fg: "#6b7280" },
@@ -36,8 +53,133 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   partially_paid: { bg: "rgba(217,119,6,0.1)", fg: "#d97706" },
 };
 
-function fmt(n: number) { return n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function fmtDate(s: string) { return new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }); }
+function fmt(n: number | null | undefined) {
+  if (n == null) return "—";
+  return n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtDate(s: string | null | undefined) {
+  if (!s) return "—";
+  return new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function OrderDetailPanel({ rowId, orderEmail }: { rowId: string; orderEmail: string | null }) {
+  const [detail, setDetail] = useState<OrderDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/el-elyon/shopify/orders/${rowId}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok) setDetail(d);
+        else setError(d.error ?? "Error");
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [rowId]);
+
+  if (loading) return <div style={{ fontSize: 11, opacity: 0.6, padding: "8px 0" }}>Cargando detalle…</div>;
+  if (error) return <div style={{ fontSize: 11, color: "#b91c1c", padding: "8px 0" }}>{error}</div>;
+  if (!detail) return null;
+
+  const raw = detail.order.raw ?? {};
+  const lineItems: any[] = raw.line_items ?? [];
+  const shipping = raw.shipping_address;
+  const note = raw.note;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 8, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
+
+      {/* Client match */}
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", opacity: 0.5, marginBottom: 4 }}>Cliente Viholabs</div>
+        {detail.client ? (
+          <div style={{ fontSize: 12, padding: "6px 8px", borderRadius: 6, background: "rgba(6,95,70,0.07)", border: "1px solid rgba(6,95,70,0.15)" }}>
+            <span style={{ fontWeight: 700, color: "#065f46" }}>{detail.client.name}</span>
+            <span style={{ opacity: 0.65 }}> · {detail.client.contact_email} · {detail.client.status}</span>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, padding: "6px 8px", borderRadius: 6, background: "rgba(185,28,28,0.05)", border: "1px solid rgba(185,28,28,0.12)" }}>
+            <span style={{ color: "#b91c1c", fontWeight: 600 }}>Sin cliente vinculado</span>
+            <span style={{ opacity: 0.65 }}> — email del pedido: {orderEmail ?? "—"}</span>
+            {detail.email_candidates.length > 0 && (
+              <div style={{ marginTop: 4, fontSize: 11 }}>
+                Posibles matches: {detail.email_candidates.map((c) => (
+                  <span key={c.id} style={{ marginRight: 6, background: "rgba(0,0,0,0.06)", borderRadius: 4, padding: "1px 5px" }}>{c.name} ({c.contact_email})</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Holded invoices */}
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", opacity: 0.5, marginBottom: 4 }}>
+          Facturas Holded (±21 días)
+        </div>
+        {detail.holded_invoices.length === 0 ? (
+          <div style={{ fontSize: 12, opacity: 0.6 }}>
+            {detail.client ? "Sin facturas en ese período." : "Necesita cliente vinculado para buscar facturas."}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {detail.holded_invoices.map((inv) => (
+              <div key={inv.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 11, padding: "5px 8px", borderRadius: 6, background: inv.is_paid ? "rgba(6,95,70,0.05)" : "rgba(146,64,14,0.05)", border: `1px solid ${inv.is_paid ? "rgba(6,95,70,0.12)" : "rgba(146,64,14,0.12)"}` }}>
+                <span style={{ fontWeight: 700, minWidth: 90 }}>{inv.invoice_number ?? inv.external_invoice_id ?? "—"}</span>
+                <span style={{ opacity: 0.65 }}>{fmtDate(inv.invoice_date)}</span>
+                <span style={{ fontWeight: 600 }}>{fmt(inv.total_net)} € neto</span>
+                <span style={{ opacity: 0.65 }}>({fmt(inv.total_gross)} € bruto)</span>
+                <span style={{ marginLeft: "auto", padding: "1px 6px", borderRadius: 4, fontWeight: 600, fontSize: 10, background: inv.is_paid ? "rgba(6,95,70,0.1)" : "rgba(146,64,14,0.1)", color: inv.is_paid ? "#065f46" : "#92400e" }}>
+                  {inv.is_paid ? `Cobrada ${fmtDate(inv.paid_date)}` : "Pendiente"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Line items */}
+      {lineItems.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", opacity: 0.5, marginBottom: 4 }}>Productos</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {lineItems.map((item: any) => (
+              <div key={item.id} style={{ display: "flex", gap: 8, fontSize: 11, padding: "4px 0", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+                <span style={{ flex: 1 }}>{item.title}</span>
+                {item.sku && <span style={{ opacity: 0.5 }}>SKU {item.sku}</span>}
+                <span style={{ opacity: 0.7 }}>×{item.quantity}</span>
+                <span style={{ fontWeight: 600 }}>{fmt(parseFloat(item.price))} {detail.order.currency}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Shipping + note */}
+      {(shipping || note) && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {shipping && (
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", opacity: 0.5, marginBottom: 2 }}>Envío</div>
+              <div style={{ fontSize: 11, opacity: 0.75 }}>
+                {[shipping.first_name, shipping.last_name].filter(Boolean).join(" ")}
+                {shipping.phone && ` · ${shipping.phone}`}
+                {shipping.country_code && ` · ${shipping.country_code}`}
+              </div>
+            </div>
+          )}
+          {note && (
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", opacity: 0.5, marginBottom: 2 }}>Nota</div>
+              <div style={{ fontSize: 11, opacity: 0.75 }}>{note}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured?: boolean }) {
   const [summary, setSummary] = useState<OrderSummary | null>(null);
@@ -47,6 +189,7 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ upserted: number; errors: number; client_matches: number } | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -65,7 +208,6 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Also reflect prop changes from parent overview
   useEffect(() => {
     if (shopifyConfigured !== undefined) setConfigured(shopifyConfigured);
   }, [shopifyConfigured]);
@@ -83,7 +225,7 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
       const text = await r.text();
       let d: any;
       try { d = JSON.parse(text); } catch {
-        setSyncError(`HTTP ${r.status} — respuesta no-JSON: ${text.slice(0, 300)}`);
+        setSyncError(`HTTP ${r.status}: ${text.slice(0, 300)}`);
         return;
       }
       if (d.ok) {
@@ -115,7 +257,7 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
               <KpiChip label="Pedidos" value={summary.total_orders} />
               <KpiChip label="Pagados" value={summary.paid_orders} />
               <KpiChip label="Ingresos" value={`${fmt(summary.total_revenue)} €`} />
-              <KpiChip label="Sin match" value={summary.unmatched_orders} warn={summary.unmatched_orders > 0} />
+              <KpiChip label="Sin match email" value={summary.unmatched_orders} warn={summary.unmatched_orders > 0} />
             </>
           )}
         </>
@@ -155,9 +297,7 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
       <Subcard title="Resumen de pedidos" defaultOpen>
         {!configured ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ fontSize: 12, opacity: 0.75 }}>
-              Shopify no configurado. Añade las variables al servidor:
-            </div>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Shopify no configurado. Añade las variables al servidor:</div>
             <div style={{ fontFamily: "monospace", fontSize: 11, background: "rgba(0,0,0,0.05)", borderRadius: 6, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
               <span>SHOPIFY_SHOP_DOMAIN=tu-tienda.myshopify.com</span>
               <span>SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxxx</span>
@@ -173,8 +313,8 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
               { label: "Pagados", value: summary.paid_orders, ok: true },
               { label: "Pendientes", value: summary.pending_orders, warn: summary.pending_orders > 0 },
               { label: "Ingresos totales", value: `${fmt(summary.total_revenue)} €` },
-              { label: "Con cliente", value: summary.matched_clients },
-              { label: "Sin matching", value: summary.unmatched_orders, warn: summary.unmatched_orders > 0 },
+              { label: "Con cliente Viholabs", value: summary.matched_clients },
+              { label: "Email sin match", value: summary.unmatched_orders, warn: summary.unmatched_orders > 0 },
             ].map((s) => (
               <div key={s.label} style={{ padding: "8px 10px", borderRadius: 8, background: s.warn ? "rgba(185,28,28,0.05)" : s.ok ? "rgba(6,95,70,0.05)" : "rgba(0,0,0,0.03)", border: `1px solid ${s.warn ? "rgba(185,28,28,0.15)" : "rgba(0,0,0,0.06)"}` }}>
                 <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 2 }}>{s.label}</div>
@@ -187,39 +327,56 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
         )}
       </Subcard>
 
-      <Subcard title={`Últimos pedidos (${orders.length})`}>
+      <Subcard title={`Últimos pedidos (${orders.length})`} defaultOpen={orders.length > 0}>
         {orders.length === 0 ? (
           <div style={{ fontSize: 12, opacity: 0.6 }}>{configured ? "Sin pedidos. Ejecuta un sync." : "Shopify no configurado."}</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 320, overflowY: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 480, overflowY: "auto" }}>
             {orders.map((o) => {
-              const sc = STATUS_COLORS[o.financial_status] ?? { bg: "rgba(0,0,0,0.04)", fg: "#6b7280" };
+              const sc = FS_COLORS[o.financial_status] ?? { bg: "rgba(0,0,0,0.04)", fg: "#6b7280" };
+              const isExpanded = expandedId === o.id;
               return (
-                <div key={o.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 8px", borderRadius: 8, background: "rgba(255,255,255,0.5)", border: "1px solid rgba(0,0,0,0.06)" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <span style={{ fontSize: 12, fontWeight: 700 }}>{o.order_name}</span>
-                      <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, background: sc.bg, color: sc.fg, fontWeight: 600 }}>{o.financial_status}</span>
-                      {o.fulfillment_status && (
-                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, background: "rgba(0,0,0,0.05)", color: "#6b7280", fontWeight: 600 }}>{o.fulfillment_status}</span>
+                <div key={o.id} style={{ borderRadius: 8, background: "rgba(255,255,255,0.6)", border: `1px solid ${isExpanded ? "rgba(90,46,58,0.25)" : "rgba(0,0,0,0.06)"}`, overflow: "hidden" }}>
+                  {/* Row — clickable */}
+                  <div
+                    onClick={() => setExpandedId(isExpanded ? null : o.id)}
+                    style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "7px 10px", cursor: "pointer" }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700 }}>{o.order_name}</span>
+                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, background: sc.bg, color: sc.fg, fontWeight: 600 }}>{o.financial_status}</span>
+                        {o.fulfillment_status && (
+                          <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, background: "rgba(0,0,0,0.05)", color: "#6b7280", fontWeight: 600 }}>{o.fulfillment_status}</span>
+                        )}
+                      </div>
+                      {/* Client name — prominent */}
+                      {o.client_name ? (
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#065f46", marginTop: 2 }}>
+                          {o.client_name}
+                          <span style={{ fontWeight: 400, opacity: 0.65 }}> · {o.email}</span>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: "#92400e", marginTop: 2 }}>
+                          {o.email ?? "sin email"} — email sin match en Viholabs
+                        </div>
                       )}
+                      <div style={{ fontSize: 10, opacity: 0.5, marginTop: 1 }}>{fmtDate(o.processed_at)}</div>
                     </div>
-                    <div style={{ fontSize: 11, opacity: 0.65, marginTop: 1 }}>
-                      {o.email ?? "sin email"} · {fmtDate(o.processed_at)}
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(o.total_price)} {o.currency}</div>
+                      {o.discount_codes && o.discount_codes.length > 0 && (
+                        <div style={{ fontSize: 10, opacity: 0.55 }}>{o.discount_codes.map((d) => d.code).join(", ")}</div>
+                      )}
+                      <div style={{ fontSize: 10, opacity: 0.4, marginTop: 2 }}>{isExpanded ? "▲ cerrar" : "▼ ver"}</div>
                     </div>
-                    {o.client_name && (
-                      <div style={{ fontSize: 11, color: "#065f46", marginTop: 1 }}>→ {o.client_name}</div>
-                    )}
-                    {!o.client_id && o.email && (
-                      <div style={{ fontSize: 11, color: "#92400e", marginTop: 1 }}>Sin cliente vinculado</div>
-                    )}
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700 }}>{fmt(o.total_price)} {o.currency}</div>
-                    {o.discount_codes && o.discount_codes.length > 0 && (
-                      <div style={{ fontSize: 10, opacity: 0.6 }}>{o.discount_codes.map((d) => d.code).join(", ")}</div>
-                    )}
-                  </div>
+                  {/* Expanded detail */}
+                  {isExpanded && (
+                    <div style={{ padding: "0 10px 10px" }}>
+                      <OrderDetailPanel rowId={o.id} orderEmail={o.email} />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -227,13 +384,15 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
         )}
       </Subcard>
 
-      <Subcard title="Matching clientes y atribución">
+      <Subcard title="Sobre el matching de clientes">
         <div style={{ fontSize: 12, opacity: 0.7 }}>
-          El sync automático une pedidos por email a clientes Viholabs. La atribución comercial
-          (afiliado BixGrow, recomendador, delegado) se calcula a partir del cliente vinculado.
+          El sync une pedidos Shopify a clientes Viholabs por <strong>coincidencia exacta de email</strong>.
+          Si un pedido aparece como "email sin match", significa que ese email no existe en la tabla de clientes
+          de Viholabs (aunque el cliente sí esté en Holded). Para vincularlo, asegúrate de que el cliente
+          tenga el mismo email en Viholabs que usó en Shopify.
           {summary && summary.unmatched_orders > 0 && (
             <span style={{ color: "#b91c1c", display: "block", marginTop: 4 }}>
-              ⚠ {summary.unmatched_orders} pedidos sin cliente — ejecuta sync para re-intentar el matching.
+              {summary.unmatched_orders} pedido(s) sin match — haz clic en cada uno para ver candidatos.
             </span>
           )}
         </div>
