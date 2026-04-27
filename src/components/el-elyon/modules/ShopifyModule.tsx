@@ -53,9 +53,11 @@ const FS_COLORS: Record<string, { bg: string; fg: string }> = {
   partially_paid: { bg: "rgba(217,119,6,0.1)", fg: "#d97706" },
 };
 
-function fmt(n: number | null | undefined) {
+function fmt(n: number | string | null | undefined) {
   if (n == null) return "—";
-  return n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const num = typeof n === "string" ? parseFloat(n) : n;
+  if (isNaN(num)) return String(n);
+  return num.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function fmtDate(s: string | null | undefined) {
   if (!s) return "—";
@@ -327,54 +329,53 @@ export default function ShopifyModule({ shopifyConfigured }: { shopifyConfigured
         )}
       </Subcard>
 
-      <Subcard title={`Últimos pedidos (${orders.length})`} defaultOpen={orders.length > 0}>
+      <Subcard title={`Últimos pedidos (${orders.length})`} defaultOpen>
         {orders.length === 0 ? (
-          <div style={{ fontSize: 12, opacity: 0.6 }}>{configured ? "Sin pedidos. Ejecuta un sync." : "Shopify no configurado."}</div>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>{loading ? "Cargando…" : configured ? "Sin pedidos. Ejecuta un sync." : "Shopify no configurado."}</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 480, overflowY: "auto" }}>
             {orders.map((o) => {
               const sc = FS_COLORS[o.financial_status] ?? { bg: "rgba(0,0,0,0.04)", fg: "#6b7280" };
-              const isExpanded = expandedId === o.id;
+              const rowId = String(o.id);
+              const isExpanded = expandedId === rowId;
               return (
-                <div key={o.id} style={{ borderRadius: 8, background: "rgba(255,255,255,0.6)", border: `1px solid ${isExpanded ? "rgba(90,46,58,0.25)" : "rgba(0,0,0,0.06)"}`, overflow: "hidden" }}>
+                <div key={rowId} style={{ borderRadius: 8, background: "rgba(255,255,255,0.7)", border: `1px solid ${isExpanded ? "rgba(90,46,58,0.25)" : "rgba(0,0,0,0.08)"}`, overflow: "hidden" }}>
                   {/* Row — clickable */}
                   <div
-                    onClick={() => setExpandedId(isExpanded ? null : o.id)}
-                    style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "7px 10px", cursor: "pointer" }}
+                    onClick={() => setExpandedId(isExpanded ? null : rowId)}
+                    style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 10px", cursor: "pointer", color: "#2d2d2d" }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 12, fontWeight: 700 }}>{o.order_name}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#1a1a1a" }}>{o.order_name}</span>
                         <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, background: sc.bg, color: sc.fg, fontWeight: 600 }}>{o.financial_status}</span>
                         {o.fulfillment_status && (
                           <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, background: "rgba(0,0,0,0.05)", color: "#6b7280", fontWeight: 600 }}>{o.fulfillment_status}</span>
                         )}
                       </div>
-                      {/* Client name — prominent */}
                       {o.client_name ? (
                         <div style={{ fontSize: 12, fontWeight: 600, color: "#065f46", marginTop: 2 }}>
                           {o.client_name}
-                          <span style={{ fontWeight: 400, opacity: 0.65 }}> · {o.email}</span>
+                          <span style={{ fontWeight: 400, color: "#555" }}> · {o.email}</span>
                         </div>
                       ) : (
                         <div style={{ fontSize: 11, color: "#92400e", marginTop: 2 }}>
-                          {o.email ?? "sin email"} — email sin match en Viholabs
+                          {o.email ?? "sin email"} — sin match
                         </div>
                       )}
-                      <div style={{ fontSize: 10, opacity: 0.5, marginTop: 1 }}>{fmtDate(o.processed_at)}</div>
+                      <div style={{ fontSize: 10, color: "#888", marginTop: 1 }}>{fmtDate(o.processed_at)}</div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(o.total_price)} {o.currency}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{fmt(o.total_price)} {o.currency}</div>
                       {o.discount_codes && o.discount_codes.length > 0 && (
-                        <div style={{ fontSize: 10, opacity: 0.55 }}>{o.discount_codes.map((d) => d.code).join(", ")}</div>
+                        <div style={{ fontSize: 10, color: "#888" }}>{o.discount_codes.map((d) => d.code).join(", ")}</div>
                       )}
-                      <div style={{ fontSize: 10, opacity: 0.4, marginTop: 2 }}>{isExpanded ? "▲ cerrar" : "▼ ver"}</div>
+                      <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>{isExpanded ? "▲" : "▼"}</div>
                     </div>
                   </div>
-                  {/* Expanded detail */}
                   {isExpanded && (
                     <div style={{ padding: "0 10px 10px" }}>
-                      <OrderDetailPanel rowId={o.id} orderEmail={o.email} />
+                      <OrderDetailPanel rowId={rowId} orderEmail={o.email} />
                     </div>
                   )}
                 </div>
