@@ -386,7 +386,11 @@ function computeScopeMode(args: {
 
   if (viewAsActive && actorId !== effectiveActorId) return "view_as" as const;
 
-  if (permissions.canViewGlobal) {
+  if (
+    permissions.canViewGlobal &&
+    (permissions.isSuperAdmin ||
+      hasRole(roles, ["melquisedec", "super_admin"]))
+  ) {
     return "global" as const;
   }
 
