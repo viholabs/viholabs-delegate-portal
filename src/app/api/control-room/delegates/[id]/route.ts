@@ -12,6 +12,7 @@
 
 import { NextResponse } from "next/server";
 import { getActorFromRequest } from "@/app/api/delegate/_utils";
+import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { isSupervisorRole, normalizeRole } from "@/lib/auth/roles";
 import { asString, asNumber, todayYmdUtc } from "@/lib/holded/holdedPrimitives";
@@ -199,8 +200,16 @@ export async function GET(
       return json(403, { ok: false, stage, error: "Forbidden" });
     }
 
-    // Delegados solo pueden ver su propia ficha
-    if (isDelegate && requestingActor.id !== delegateId) {
+    stage = "permissions";
+    const eff = await getEffectivePermissionsByActorId(requestingActor.id);
+    const canViewGlobal =
+      eff.isSuperAdmin ||
+      eff.has("control_room.read") ||
+      eff.has("control_room.dashboard.read") ||
+      eff.has("actors.read");
+
+    // Delegados solo pueden ver su propia ficha (a menos que tengan permiso global)
+    if (isDelegate && !canViewGlobal && requestingActor.id !== delegateId) {
       return json(403, { ok: false, stage, error: "Forbidden" });
     }
 
