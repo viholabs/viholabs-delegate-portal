@@ -254,6 +254,74 @@ export async function POST(
     const refPrice = applicable ? (asNumber(applicable.reference_price) ?? 31) : 31;
     const totalCommissionAmount = totalUnitsSoldPaid * refPrice * (pct / 100);
 
+    // Calcular comisiones de recomendadores a deducir
+    let totalRecommenderCommissions = 0;
+    {
+      const { data: recommenders } = await db
+        .from("recommenders")
+        .select("id, commission_pct")
+        .eq("delegate_actor_id", delegateId)
+        .eq("state_code", "OPEN")
+        .eq("active", true);
+
+      const recommenderIds = (recommenders ?? [])
+        .map((r) => asString((r as Record<string, unknown>).id))
+        .filter((v): v is string => !!v);
+
+      if (recommenderIds.length > 0) {
+        const { data: rcaRows } = await db
+          .from("recommender_client_assignments")
+          .select("recommender_id, client_id, commission_pct")
+          .in("recommender_id", recommenderIds)
+          .eq("state_code", "OPEN");
+
+        // Build map: recommender_id → commission_pct
+        const recPctMap = new Map<string, number>();
+        for (const r of recommenders ?? []) {
+          const row = r as Record<string, unknown>;
+          const id = asString(row.id);
+          if (id) recPctMap.set(id, asNumber(row.commission_pct) ?? 0);
+        }
+
+        // Gather all client IDs from assignments
+        const rcaClientIds = [...new Set(
+          (rcaRows ?? []).map((r) => asString((r as Record<string, unknown>).client_id)).filter((v): v is string => !!v)
+        )];
+
+        if (rcaClientIds.length > 0) {
+          const { data: recPaidInvoices } = await db
+            .from("invoices")
+            .select("id, client_id, total_net")
+            .in("client_id", rcaClientIds)
+            .eq("is_paid", true)
+            .eq("document_type", "invoice")
+            .not("paid_date", "is", null)
+            .gte("paid_date", bounds.start)
+            .lt("paid_date", bounds.endExclusive);
+
+          // Sum net per client
+          const netByClient = new Map<string, number>();
+          for (const inv of recPaidInvoices ?? []) {
+            const r = inv as Record<string, unknown>;
+            const cid = asString(r.client_id) ?? "";
+            netByClient.set(cid, (netByClient.get(cid) ?? 0) + (asNumber(r.total_net) ?? 0));
+          }
+
+          // For each assignment, compute recommender commission
+          for (const row of rcaRows ?? []) {
+            const r = row as Record<string, unknown>;
+            const rid = asString(r.recommender_id) ?? "";
+            const cid = asString(r.client_id) ?? "";
+            const effectivePct = asNumber(r.commission_pct) ?? recPctMap.get(rid) ?? 0;
+            const clientNet = netByClient.get(cid) ?? 0;
+            totalRecommenderCommissions += clientNet * (effectivePct / 100);
+          }
+        }
+      }
+    }
+
+    const totalPayable = Math.max(0, totalCommissionAmount - totalRecommenderCommissions);
+
     // Crear propuesta
     const { data: newProposal, error: insertErr } = await db
       .from("commission_settlement_proposals")
@@ -268,7 +336,8 @@ export async function POST(
         total_net_commissionable: totalNetCommissionable,
         total_commission_amount: totalCommissionAmount,
         total_adjustments_amount: 0,
-        total_payable_amount: totalCommissionAmount,
+        total_recommender_commissions_amount: totalRecommenderCommissions,
+        total_payable_amount: totalPayable,
         data_cutoff_at: new Date().toISOString(),
         ruleset_version: `auto-${today}`,
       })

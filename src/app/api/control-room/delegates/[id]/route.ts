@@ -794,7 +794,7 @@ export async function GET(
     const { data: settlementData } = await db
       .from("commission_settlement_proposals")
       .select(
-        "id, period_yyyy_mm, status, total_units_sold_paid, total_units_foc, total_net_commissionable, total_commission_amount, total_adjustments_amount, total_payable_amount, data_cutoff_at, ruleset_version, created_at, updated_at"
+        "id, period_yyyy_mm, status, total_units_sold_paid, total_units_foc, total_net_commissionable, total_commission_amount, total_adjustments_amount, total_recommender_commissions_amount, total_payable_amount, data_cutoff_at, ruleset_version, created_at, updated_at"
       )
       .eq("actor_id", delegateId)
       .eq("state_code", "OPEN")
@@ -813,6 +813,7 @@ export async function GET(
         total_net_commissionable: asNumber(rec.total_net_commissionable) ?? 0,
         total_commission_amount: asNumber(rec.total_commission_amount) ?? 0,
         total_adjustments_amount: asNumber(rec.total_adjustments_amount) ?? 0,
+        total_recommender_commissions_amount: asNumber(rec.total_recommender_commissions_amount) ?? 0,
         total_payable_amount: asNumber(rec.total_payable_amount) ?? 0,
         data_cutoff_at: asString(rec.data_cutoff_at),
         ruleset_version: asString(rec.ruleset_version),

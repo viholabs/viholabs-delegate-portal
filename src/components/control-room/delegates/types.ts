@@ -108,11 +108,56 @@ export type SettlementProposal = {
   total_net_commissionable: number;
   total_commission_amount: number;
   total_adjustments_amount: number;
+  total_recommender_commissions_amount: number;
   total_payable_amount: number;
   data_cutoff_at: string | null;
   ruleset_version: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// ---------------------------------------------------------------------------
+// Recommender types
+// ---------------------------------------------------------------------------
+
+export type RecommenderPeriodStats = {
+  net_commissionable: number;
+  total_gross: number;
+  invoice_count: number;
+  commission_amount: number;
+};
+
+export type RecommenderRow = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  commission_pct: number;
+  notes: string | null;
+  active: boolean;
+  client_id: string | null;
+  created_at: string;
+  clients_assigned: number;
+  period: RecommenderPeriodStats;
+};
+
+export type RecommenderClientAssignment = {
+  id: string;
+  client_id: string;
+  client_name: string;
+  commission_pct: number | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  created_at: string;
+};
+
+export type RecommendersApiResponse = {
+  ok: true;
+  recommenders: RecommenderRow[];
+  period: {
+    month: string;
+    total_commission: number;
+  };
 };
 
 export type AuditEntry = {
