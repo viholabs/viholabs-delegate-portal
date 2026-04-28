@@ -213,6 +213,19 @@ export async function GET(
       return json(403, { ok: false, stage, error: "Forbidden" });
     }
 
+    // Actores internos VIHOLABS (@viholabs.com) solo visibles para super_admin/melquisedec
+    if (canViewGlobal && !eff.isSuperAdmin && !isMelquisedec) {
+      const { data: targetActor } = await supabaseAdmin()
+        .from("actors")
+        .select("email")
+        .eq("id", delegateId)
+        .single();
+      const targetEmail = String(targetActor?.email ?? "").toLowerCase();
+      if (targetEmail.endsWith("@viholabs.com")) {
+        return json(403, { ok: false, stage, error: "Forbidden" });
+      }
+    }
+
     const month = normalizeMonth(new URL(req.url).searchParams.get("month"));
     const bounds = getMonthBounds(month);
     const today = todayYmdUtc();

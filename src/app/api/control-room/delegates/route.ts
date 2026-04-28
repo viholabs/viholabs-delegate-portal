@@ -145,7 +145,8 @@ type SupabaseAdmin = ReturnType<typeof supabaseAdmin>;
 async function readDelegates(
   db: SupabaseAdmin,
   actor: ActorLike,
-  canViewGlobal = false
+  canViewGlobal = false,
+  isSuperAdmin = false
 ): Promise<ActorLike[]> {
   const role = normalizeRole(actor.role);
 
@@ -153,11 +154,18 @@ async function readDelegates(
     return [actor];
   }
 
-  const { data, error } = await db
+  let query = db
     .from("actors")
     .select("id, role, name, email, status")
     .eq("role", "delegate")
     .order("name", { ascending: true });
+
+  // Hide internal VIHOLABS actors (@viholabs.com) from non-super-admin global viewers
+  if (!isSuperAdmin) {
+    query = query.not("email", "ilike", "%@viholabs.com");
+  }
+
+  const { data, error } = await query;
 
   if (error) throw new Error(error.message);
 
@@ -692,7 +700,7 @@ async function handle(req: Request) {
     const db = supabaseAdmin();
 
     stage = "delegates";
-    const allDelegates = await readDelegates(db, actor, canViewGlobal);
+    const allDelegates = await readDelegates(db, actor, canViewGlobal, eff.isSuperAdmin);
     const allDelegateIds = allDelegates.map((d) => d.id);
 
     // For supervisors: filter to operational delegates only.
