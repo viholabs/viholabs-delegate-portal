@@ -68,8 +68,7 @@ function extractDueDate(detail: Record<string, unknown>): string | null {
 function resolveHoldedListStatus(raw: unknown): string | null {
   if (typeof raw === "string" && raw.trim()) return raw.trim().toLowerCase();
   if (typeof raw === "number" && Number.isFinite(raw)) {
-    // 0 = void/anulado for issued invoices (Holded sets status=0 when cancelling)
-    const map: Record<number, string> = { 0: "anulado", 1: "pending", 2: "paid", 3: "pending", 4: "overdue", 5: "anulado" };
+    const map: Record<number, string> = { 0: "draft", 1: "pending", 2: "paid", 3: "pending", 4: "overdue", 5: "anulado" };
     return map[raw] ?? String(raw);
   }
   return null;
