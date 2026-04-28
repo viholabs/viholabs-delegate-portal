@@ -62,7 +62,7 @@ export function statusTone(status: string | null | undefined): string {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
-export function paymentStatusBadge(status: "PAID" | "PENDING" | "OVERDUE" | "CREDIT_NOTE"): {
+export function paymentStatusBadge(status: "PAID" | "PENDING" | "OVERDUE" | "CREDIT_NOTE" | "CANCELLED"): {
   label: string;
   classes: string;
 } {
@@ -73,6 +73,8 @@ export function paymentStatusBadge(status: "PAID" | "PENDING" | "OVERDUE" | "CRE
       return { label: "Vencida", classes: "border-red-200 bg-red-50 text-red-700" };
     case "CREDIT_NOTE":
       return { label: "Abono/CN", classes: "border-purple-200 bg-purple-50 text-purple-700" };
+    case "CANCELLED":
+      return { label: "Anulada", classes: "border-gray-200 bg-gray-50 text-gray-500" };
     case "PENDING":
     default:
       return { label: "Pendiente", classes: "border-amber-200 bg-amber-50 text-amber-700" };

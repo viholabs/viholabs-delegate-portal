@@ -81,10 +81,12 @@ function inferPaymentStatus(
   isPaid: boolean | null,
   invoiceDate: string | null,
   documentType: string,
-  today: string
+  today: string,
+  stateCode?: string | null
 ): PaymentStatus {
   if (documentType === "creditnote") return "CREDIT_NOTE";
   if (isPaid === true) return "PAID";
+  if (stateCode === "SETTLED" && isPaid === false) return "CANCELLED";
   if (invoiceDate) {
     const d = new Date(invoiceDate);
     d.setDate(d.getDate() + 30);
@@ -572,7 +574,7 @@ export async function GET(
       }
 
       const isPaidBool = isPaid ? true : (inv.is_paid as boolean | null);
-      const paymentStatus = inferPaymentStatus(isPaidBool, invoiceDate, docType, today);
+      const paymentStatus = inferPaymentStatus(isPaidBool, invoiceDate, docType, today, asString(inv.state_code));
       const daysOverdue = computeDaysOverdue(isPaidBool, invoiceDate, docType, today);
 
       return {

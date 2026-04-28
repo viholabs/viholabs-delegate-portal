@@ -53,7 +53,7 @@ export type DelegateDetailActor = {
   created_at: string;
 };
 
-export type PaymentStatus = "PAID" | "PENDING" | "OVERDUE" | "CREDIT_NOTE";
+export type PaymentStatus = "PAID" | "PENDING" | "OVERDUE" | "CREDIT_NOTE" | "CANCELLED";
 
 export type DetailInvoiceRow = {
   id: string;
