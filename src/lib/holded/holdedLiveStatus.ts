@@ -96,7 +96,7 @@ export async function resolvePaymentMethodName(
 // Live status computation
 // ---------------------------------------------------------------------------
 
-export type HoldedLiveStatusLabel = "Pagado" | "Vencido" | "Pendiente" | "Sin estado";
+export type HoldedLiveStatusLabel = "Pagado" | "Vencido" | "Pendiente" | "Sin estado" | "Anulado";
 
 export type HoldedLiveMeta = {
   holded_status_label: HoldedLiveStatusLabel;

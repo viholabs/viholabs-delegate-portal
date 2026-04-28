@@ -129,6 +129,7 @@ function isDelegateRole(role: string): boolean {
 
 function fallbackInvoiceLabel(invoice: InvoiceRow): HoldedLiveStatusLabel {
   if (invoice.is_paid === true) return "Pagado";
+  if (invoice.state_code === "SETTLED" && invoice.is_paid === false) return "Anulado";
 
   const today = todayYmdUtc();
   if (invoice.invoice_date && invoice.invoice_date < today) return "Vencido";
