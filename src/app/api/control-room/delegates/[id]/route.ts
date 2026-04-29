@@ -15,12 +15,9 @@ import { getActorFromRequest } from "@/app/api/delegate/_utils";
 import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { isSupervisorRole, normalizeRole } from "@/lib/auth/roles";
-import { asString, asNumber, todayYmdUtc, unixToDateYmd } from "@/lib/holded/holdedPrimitives";
-import {
-  fetchHoldedInvoiceDetail,
-  computeHoldedLiveMeta,
-  runWithConcurrencyLimit,
-} from "@/lib/holded/holdedLiveStatus";
+import { asString, asNumber, todayYmdUtc } from "@/lib/holded/holdedPrimitives";
+import { computeHoldedLiveMeta } from "@/lib/holded/holdedLiveStatus";
+import { sumInvoiceUnits, SALE_SKUS } from "@/lib/holded/holdedLineClassifier";
 import type {
   DelegateDetailActor,
   DetailInvoiceRow,
@@ -319,286 +316,158 @@ export async function GET(
       }
     }
 
-    const clientIds = clientRows.map((c) => c.id);
-
-    // --- Invoices ---
-    // Cargamos:
-    //   1. Emitidas en el periodo (invoice_date en el periodo)
-    //   2. Cobradas en el periodo (paid_date en el periodo, aunque sean de meses anteriores)
-    //   3. Impagadas (pending/overdue, sin límite de fecha reciente)
+    // --- Invoices — leer directamente de holded_invoices (fuente de verdad) ---
     stage = "invoices";
 
-    const INVOICE_SELECT =
-      "id, invoice_number, invoice_date, due_date, paid_date, client_id, client_name, total_net, total_vat, total_gross, is_paid, payments_pending, payments_total, state_code, delegate_id, document_type, external_invoice_id, source_provider";
-
-    let allInvoices: Record<string, unknown>[] = [];
-
-    if (clientIds.length > 0) {
-      const [emittedRes, allPaidRes, unpaidRes] = await Promise.all([
-        // 1. Emitidas en el periodo (para stats de "facturado este mes")
-        db
-          .from("invoices")
-          .select(INVOICE_SELECT)
-          .in("client_id", clientIds)
-          .gte("invoice_date", bounds.start)
-          .lt("invoice_date", bounds.endExclusive),
-
-        // 2. TODAS las cobradas — sin restricción de periodo
-        //    La UI distinguirá "cobradas en este periodo" vs "cobradas en otro periodo"
-        db
-          .from("invoices")
-          .select(INVOICE_SELECT)
-          .in("client_id", clientIds)
-          .eq("is_paid", true)
-          .not("paid_date", "is", null)
-          .order("paid_date", { ascending: false })
-          .limit(500),
-
-        // 3. Impagadas (pending/overdue)
-        db
-          .from("invoices")
-          .select(INVOICE_SELECT)
-          .in("client_id", clientIds)
-          .or("is_paid.is.null,is_paid.eq.false"),
-      ]);
-
-      if (emittedRes.error) return json(500, { ok: false, stage, error: emittedRes.error.message });
-      if (allPaidRes.error) return json(500, { ok: false, stage, error: allPaidRes.error.message });
-      if (unpaidRes.error) return json(500, { ok: false, stage, error: unpaidRes.error.message });
-
-      const seen = new Set<string>();
-      for (const inv of [
-        ...(emittedRes.data ?? []),
-        ...(allPaidRes.data ?? []),
-        ...(unpaidRes.data ?? []),
-      ]) {
-        const rec = inv as Record<string, unknown>;
-        const id = asString(rec.id) ?? "";
-        if (id && !seen.has(id)) {
-          seen.add(id);
-          allInvoices.push(rec);
-        }
-      }
-    }
-
-    const invoiceIds = allInvoices.map((i) => asString(i.id)).filter((id): id is string => !!id);
-
-    // --- Holded live-status override for unpaid invoices ---
-    // The DB is the canonical store, but imports run periodically — payments made in Holded
-    // between import runs show as stale "Pendiente/Vencida" here. This check fixes the display
-    // in real time and auto-repairs the DB row as a side-effect.
-    // --- Leer estado/fechas desde holded_invoices (fuente de verdad) ---
-    stage = "holded_mirror";
-
-    // Recoger todos los external_invoice_id (= ID de Holded) de las facturas
-    const externalIds = allInvoices
-      .map((inv) => asString(inv.external_invoice_id))
-      .filter((id): id is string => !!id);
-
-    // invoiceId (portal UUID) → datos de Holded mirror
-    type HoldedMirrorEntry = {
-      paymentsPending: number | null;
-      dueDate: string | null;
-      paidDate: string | null;
-    };
-    const holdedMirror = new Map<string, HoldedMirrorEntry>();
-
-    if (externalIds.length > 0) {
-      const { data: mirrorRows } = await db
-        .from("holded_invoices")
-        .select("id, due_date, raw")
-        .in("id", externalIds);
-
-      // externalId → mirror row
-      type MirrorRow = { id: string; due_date: string | null; raw: Record<string, unknown> | null };
-      const mirrorByExternalId = new Map<string, MirrorRow>();
-      for (const row of (mirrorRows ?? []) as MirrorRow[]) {
-        mirrorByExternalId.set(row.id, row);
-      }
-
-      for (const inv of allInvoices) {
-        const portalId = asString(inv.id) ?? "";
-        const extId = asString(inv.external_invoice_id);
-        if (!extId) continue;
-        const mirror = mirrorByExternalId.get(extId);
-        if (!mirror) continue;
-
-        const raw = (mirror.raw ?? {}) as Record<string, unknown>;
-        const paymentsPending = asNumber(raw["paymentsPending"]);
-
-        // due_date: de holded_invoices (timestamp), slice a YYYY-MM-DD
-        const dueDate = mirror.due_date ? mirror.due_date.slice(0, 10) : null;
-
-        // paid_date: extraer de paymentsDetail
-        let paidDate: string | null = null;
-        const detail = Array.isArray(raw["paymentsDetail"])
-          ? (raw["paymentsDetail"] as Array<Record<string, unknown>>)
-          : [];
-        for (const payment of detail) {
-          const d = unixToDateYmd(payment["date"]) ?? unixToDateYmd(payment["paidAt"]);
-          if (d && (!paidDate || d > paidDate)) paidDate = d;
-        }
-
-        holdedMirror.set(portalId, { paymentsPending, dueDate, paidDate });
-      }
-    }
-
-    // --- Invoice items + normalizations ---
-    stage = "items";
-    type ItemDbRow = {
+    type HoldedInvRow = {
       id: string;
-      invoice_id: string;
-      description: string;
-      units: number;
-      unit_net_price: number;
-      line_net_amount: number;
-      vat_rate: number;
-      line_vat_amount: number;
-      line_gross_amount: number;
-      line_type: string;
-      sku: string | null;
+      doc_number: string | null;
+      contact_id: string | null;
+      contact_name: string | null;
+      date: string | null;
+      due_date: string | null;
+      total: number;
+      raw: Record<string, unknown>;
+      is_credit_note: boolean;
     };
 
-    let itemRows: ItemDbRow[] = [];
-    // normalized: raw_invoice_item_id → { line_type, is_commissionable }
-    const normByItemId = new Map<string, { line_type: string; is_commissionable: boolean }>();
+    let allHoldedInvoices: HoldedInvRow[] = [];
 
-    if (invoiceIds.length > 0) {
-      const itemsRes = await db
-        .from("invoice_items")
-        .select(
-          "id, invoice_id, description, units, unit_net_price, line_net_amount, vat_rate, line_vat_amount, line_gross_amount, line_type, sku"
-        )
-        .in("invoice_id", invoiceIds)
-        .eq("state_code", "OPEN");
+    if (holdedContactIds.length > 0) {
+      const { data: hiData, error: hiError } = await db
+        .from("holded_invoices")
+        .select("id, doc_number, contact_id, contact_name, date, due_date, total, raw, is_credit_note")
+        .in("contact_id", holdedContactIds)
+        .order("date", { ascending: false })
+        .limit(1000);
 
-      if (itemsRes.error) return json(500, { ok: false, stage, error: itemsRes.error.message });
-
-      itemRows = (itemsRes.data ?? []).map((r) => {
-        const rec = r as Record<string, unknown>;
-        return {
-          id: asString(rec.id) ?? "",
-          invoice_id: asString(rec.invoice_id) ?? "",
-          description: asString(rec.description) ?? "",
-          units: asNumber(rec.units) ?? 0,
-          unit_net_price: asNumber(rec.unit_net_price) ?? 0,
-          line_net_amount: asNumber(rec.line_net_amount) ?? 0,
-          vat_rate: asNumber(rec.vat_rate) ?? 0,
-          line_vat_amount: asNumber(rec.line_vat_amount) ?? 0,
-          line_gross_amount: asNumber(rec.line_gross_amount) ?? 0,
-          line_type: asString(rec.line_type) ?? "",
-          sku: asString(rec.sku),
-        };
-      }).filter((r) => r.id.length > 0);
-
-      // Normalizations scoped to actual item IDs — never unbounded
-      const itemIds = itemRows.map((r) => r.id).filter((id) => id.length > 0);
-      if (itemIds.length > 0) {
-        const normRes = await db
-          .from("invoice_line_normalizations")
-          .select("raw_invoice_item_id, line_type, is_commissionable")
-          .in("raw_invoice_item_id", itemIds)
-          .eq("state_code", "OPEN");
-
-        for (const normRec of normRes.data ?? []) {
-          const rec = normRec as Record<string, unknown>;
-          const rawId = asString(rec.raw_invoice_item_id);
-          if (rawId) {
-            normByItemId.set(rawId, {
-              line_type: asString(rec.line_type) ?? "",
-              is_commissionable: rec.is_commissionable === true,
-            });
-          }
-        }
-      }
+      if (hiError) return json(500, { ok: false, stage, error: hiError.message });
+      allHoldedInvoices = (hiData ?? []) as HoldedInvRow[];
     }
 
-    // Agrupar items por invoice_id
-    const itemsByInvoiceId = new Map<string, ItemDbRow[]>();
-    for (const item of itemRows) {
-      if (!itemsByInvoiceId.has(item.invoice_id)) {
-        itemsByInvoiceId.set(item.invoice_id, []);
-      }
-      itemsByInvoiceId.get(item.invoice_id)!.push(item);
+    // Portal client lookup by Holded contact_id
+    const clientByHoldedId = new Map<string, { id: string; name: string | null }>();
+    for (const c of clientRows) {
+      if (c.holded_contact_id) clientByHoldedId.set(c.holded_contact_id, { id: c.id, name: c.name });
     }
 
-    // Conjuntos para saber qué facturas corresponden a cada categoría
+    const holdedInvoiceIds = allHoldedInvoices.map((i) => i.id);
+
+    // --- Line items from holded_invoice_lines ---
+    stage = "items";
+
+    type HoldedLineRow = {
+      invoice_id: string;
+      sku: string | null;
+      description: string | null;
+      quantity: number;
+      subtotal: number;
+      raw: Record<string, unknown>;
+    };
+
+    let allLines: HoldedLineRow[] = [];
+
+    if (holdedInvoiceIds.length > 0) {
+      const { data: linesData, error: linesError } = await db
+        .from("holded_invoice_lines")
+        .select("invoice_id, sku, description, quantity, subtotal, raw")
+        .in("invoice_id", holdedInvoiceIds);
+
+      if (linesError) return json(500, { ok: false, stage, error: linesError.message });
+      allLines = (linesData ?? []) as HoldedLineRow[];
+    }
+
+    const linesByInvoiceId = new Map<string, HoldedLineRow[]>();
+    for (const line of allLines) {
+      if (!linesByInvoiceId.has(line.invoice_id)) linesByInvoiceId.set(line.invoice_id, []);
+      linesByInvoiceId.get(line.invoice_id)!.push(line);
+    }
+
+    // Compute emitted/paid period sets from Holded data
     const emittedInPeriodIds = new Set<string>();
     const paidInPeriodIds = new Set<string>();
 
-    for (const inv of allInvoices) {
-      const id = asString(inv.id) ?? "";
-      const invoiceDate = asString(inv.invoice_date);
-      const mirror = holdedMirror.get(id);
-      const paidDate = mirror?.paidDate ?? asString(inv.paid_date);
-      const paymentsPending = mirror?.paymentsPending ?? asNumber(inv.payments_pending);
-      const isCobrada = (paymentsPending !== null && paymentsPending <= 0) || inv.is_paid === true;
+    for (const hi of allHoldedInvoices) {
+      const raw = (hi.raw ?? {}) as Record<string, unknown>;
+      const liveMeta = computeHoldedLiveMeta(raw, null);
+      const invoiceDate = hi.date ? hi.date.slice(0, 10) : null;
 
       if (invoiceDate && invoiceDate >= bounds.start && invoiceDate < bounds.endExclusive) {
-        emittedInPeriodIds.add(id);
+        emittedInPeriodIds.add(hi.id);
       }
-      if (isCobrada && paidDate && paidDate >= bounds.start && paidDate < bounds.endExclusive) {
-        paidInPeriodIds.add(id);
+      if (liveMeta.is_paid && liveMeta.paid_date && liveMeta.paid_date >= bounds.start && liveMeta.paid_date < bounds.endExclusive) {
+        paidInPeriodIds.add(hi.id);
       }
     }
 
-    // --- Construir filas de facturas ---
+    // --- Build DetailInvoiceRow[] from Holded mirror ---
     stage = "assemble";
 
-    const invoiceDetailRows: DetailInvoiceRow[] = allInvoices.map((inv) => {
-      const id = asString(inv.id) ?? "";
-      // Datos directos de holded_invoices (fuente de verdad)
-      const mirror = holdedMirror.get(id);
-      const invoiceDate = asString(inv.invoice_date);
-      const paidDate = mirror?.paidDate ?? asString(inv.paid_date);
-      const docType = (asString(inv.document_type) ?? "invoice") as "invoice" | "creditnote";
-      const items = itemsByInvoiceId.get(id) ?? [];
+    const invoiceDetailRows: DetailInvoiceRow[] = allHoldedInvoices.map((hi) => {
+      const raw = (hi.raw ?? {}) as Record<string, unknown>;
+      const liveMeta = computeHoldedLiveMeta(raw, null);
 
-      // due_date: de Holded mirror, fallback a invoice_date
-      const dueDate = mirror?.dueDate ?? asString(inv.due_date) ?? invoiceDate;
-      const paymentsPending = mirror?.paymentsPending ?? asNumber(inv.payments_pending);
-      const isPaid = (paymentsPending !== null && paymentsPending <= 0) || inv.is_paid === true;
+      const invoiceDate = hi.date ? hi.date.slice(0, 10) : null;
+      const dueDate = hi.due_date ? hi.due_date.slice(0, 10) : liveMeta.due_date;
+      const docType = hi.is_credit_note ? "creditnote" : "invoice";
+      const paymentsPending = asNumber(raw.paymentsPending);
 
-      let unitsSold = 0;
-      let unitsFoc = 0;
+      const lines = linesByInvoiceId.get(hi.id) ?? [];
+
+      // Classify lines using canonical classifier (SKU-based)
+      const { sold: unitsSold, promo: unitsFoc } = sumInvoiceUnits(lines.map((l) => l.raw ?? {}));
+
       let netCommissionable = 0;
+      let totalRe = 0;
+      let totalVat = 0;
 
-      for (const item of items) {
-        const norm = normByItemId.get(item.id);
-        const normalizedType = (norm?.line_type ?? item.line_type ?? "").toLowerCase();
-        const isCommissionable = norm?.is_commissionable ?? false;
+      for (const line of lines) {
+        const sku = line.sku ?? "";
+        if (SALE_SKUS.has(sku)) netCommissionable += line.subtotal;
 
-        if (normalizedType === "sale" || normalizedType === "product") {
-          unitsSold += item.units;
-          if (isCommissionable) {
-            netCommissionable += item.line_net_amount;
-          }
-        } else if (normalizedType === "promo" || normalizedType === "promotion" || normalizedType === "foc") {
-          unitsFoc += item.units;
+        const lineRaw = (line.raw ?? {}) as Record<string, unknown>;
+        const taxes = Array.isArray(lineRaw.taxes)
+          ? (lineRaw.taxes as Array<Record<string, unknown>>)
+          : [];
+        for (const tax of taxes) {
+          const taxName = String(tax.name ?? "").toLowerCase();
+          const taxPct = asNumber(tax.percentage) ?? 0;
+          const taxAmount = asNumber(tax.amount) ?? (line.subtotal * taxPct) / 100;
+          const isRE =
+            taxName.includes("recargo") ||
+            taxName.startsWith("re ") ||
+            taxPct === 5.2 ||
+            taxPct === 1.4;
+          if (isRE) totalRe += taxAmount;
+          else if (taxPct > 0) totalVat += taxAmount;
         }
       }
 
-      const paymentStatus = inferPaymentStatus(docType, paymentsPending, isPaid ? true : inv.is_paid as boolean | null, dueDate, today);
-      const daysOverdue = computeDaysOverdue(isPaid ? true : inv.is_paid as boolean | null, paymentsPending, dueDate, docType, today);
+      const subtotal = asNumber(raw.subtotal) ?? asNumber(raw.total_net) ?? 0;
+      const portalClient = clientByHoldedId.get(hi.contact_id ?? "");
+
+      const paymentStatus = inferPaymentStatus(docType, paymentsPending, liveMeta.is_paid, dueDate, today);
+      const daysOverdue = computeDaysOverdue(liveMeta.is_paid, paymentsPending, dueDate, docType, today);
 
       return {
-        id,
-        invoice_number: asString(inv.invoice_number) ?? "",
+        id: hi.id,
+        invoice_number: hi.doc_number ?? "",
         invoice_date: invoiceDate,
         due_date: dueDate,
-        paid_date: paidDate,
-        client_id: asString(inv.client_id),
-        client_name: asString(inv.client_name),
+        paid_date: liveMeta.paid_date,
+        client_id: portalClient?.id ?? null,
+        client_name: portalClient?.name ?? hi.contact_name,
         document_type: docType,
         units_sold: unitsSold,
         units_foc: unitsFoc,
         net_commissionable: netCommissionable,
-        total_net: asNumber(inv.total_net) ?? 0,
-        total_vat: asNumber(inv.total_vat) ?? 0,
-        total_gross: asNumber(inv.total_gross) ?? 0,
+        total_net: subtotal,
+        total_vat: totalVat > 0 ? totalVat : Math.max(0, hi.total - subtotal - totalRe),
+        total_gross: hi.total,
+        total_re: totalRe,
         payment_status: paymentStatus,
         days_overdue: daysOverdue,
-        paid_in_period: paidInPeriodIds.has(id),
+        paid_in_period: paidInPeriodIds.has(hi.id),
       };
     });
 

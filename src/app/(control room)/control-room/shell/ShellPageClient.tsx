@@ -84,7 +84,7 @@ function SyncButton() {
     setMsg("");
     try {
       const token = await getAccessToken();
-      const res = await fetch("/api/holded/invoices/import-incremental", {
+      const res = await fetch("/api/holded/sync", {
         method: "POST",
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
         body: JSON.stringify({}),

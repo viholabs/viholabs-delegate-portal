@@ -69,6 +69,7 @@ export type DetailInvoiceRow = {
   net_commissionable: number;
   total_net: number;
   total_vat: number;
+  total_re: number;
   total_gross: number;
   payment_status: PaymentStatus;
   days_overdue: number | null;

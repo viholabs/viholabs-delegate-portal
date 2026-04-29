@@ -273,9 +273,10 @@ export default function TabFacturacion({ invoices, month, period, commissionRule
                   <Th align="right">Ud. promo</Th>
                   <Th align="right">Base neta</Th>
                   <Th align="right">IVA</Th>
+                  <Th align="right">R.E.</Th>
                   <Th align="right">Total</Th>
+                  <Th>Vencimiento</Th>
                   <Th>Fecha cobro</Th>
-                  <Th>Vencimiento / Días</Th>
                   <Th>Estado</Th>
                 </tr>
               </thead>
@@ -293,6 +294,7 @@ export default function TabFacturacion({ invoices, month, period, commissionRule
                   <Td align="right" bold>{filtered.reduce((s, i) => s + i.units_foc, 0)}</Td>
                   <Td align="right" bold>{formatMoney(filtered.reduce((s, i) => s + i.total_net, 0))}</Td>
                   <Td align="right" bold>{formatMoney(filtered.reduce((s, i) => s + i.total_vat, 0))}</Td>
+                  <Td align="right" bold>{formatMoney(filtered.reduce((s, i) => s + i.total_re, 0))}</Td>
                   <Td align="right" bold>{formatMoney(filtered.reduce((s, i) => s + i.total_gross, 0))}</Td>
                   <td colSpan={3} />
                 </tr>
@@ -303,8 +305,7 @@ export default function TabFacturacion({ invoices, month, period, commissionRule
       </div>
 
       <p className="text-xs text-[color:var(--viho-muted)]">
-        * Vencimiento aproximado: fecha de emisión + 30 días (Net30). La fecha real depende de las condiciones
-        acordadas en Holded.
+        * Datos en tiempo real de Holded. Vencimiento, estado de cobro y recargo de equivalencia (R.E.) obtenidos directamente de la factura en Holded.
       </p>
     </div>
   );
@@ -370,12 +371,14 @@ function InvoiceRow({ invoice: inv, viewedMonth }: { invoice: DetailInvoiceRow; 
       </Td>
       <Td align="right">{formatMoney(inv.total_net)}</Td>
       <Td align="right">{formatMoney(inv.total_vat)}</Td>
-      <Td align="right" bold>{formatMoney(inv.total_gross)}</Td>
-      <Td>
-        <span className="text-xs text-[color:var(--viho-muted)]">
-          {inv.paid_date ? formatDate(inv.paid_date) : "—"}
-        </span>
+      <Td align="right">
+        {inv.total_re > 0 ? (
+          <span className="text-xs font-medium text-amber-700">{formatMoney(inv.total_re)}</span>
+        ) : (
+          <span className="text-xs text-[color:var(--viho-muted)]">—</span>
+        )}
       </Td>
+      <Td align="right" bold>{formatMoney(inv.total_gross)}</Td>
       <Td>
         {isCn ? (
           <span className="text-xs text-purple-500">N/A</span>
@@ -396,6 +399,11 @@ function InvoiceRow({ invoice: inv, viewedMonth }: { invoice: DetailInvoiceRow; 
             )}
           </span>
         )}
+      </Td>
+      <Td>
+        <span className="text-xs text-[color:var(--viho-muted)]">
+          {inv.paid_date ? formatDate(inv.paid_date) : "—"}
+        </span>
       </Td>
       <Td>
         <div className="flex flex-col gap-1">
