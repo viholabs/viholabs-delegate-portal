@@ -132,7 +132,12 @@ export function computeHoldedLiveMeta(
 
   const total = asNumber(detail["total"]) ?? 0;
   const paymentsTotal = asNumber(detail["paymentsTotal"]) ?? 0;
-  const paymentsPending = asNumber(detail["paymentsPending"]) ?? 0;
+
+  // Keep the raw nullable value to distinguish "explicitly 0" from "not present".
+  // Holded sets paymentsPending=0 when an invoice is settled via CN (no cash payment),
+  // in which case paymentsTotal remains 0 — so we cannot require paymentsTotal > 0.
+  const paymentsPendingRaw = asNumber(detail["paymentsPending"]);
+  const paymentsPending = paymentsPendingRaw ?? 0;
 
   const paymentsDetail = Array.isArray(detail["paymentsDetail"])
     ? (detail["paymentsDetail"] as Array<Record<string, unknown>>)
@@ -155,9 +160,12 @@ export function computeHoldedLiveMeta(
     asString(detail["payment_method_name"]) ??
     null;
 
+  // Settled if pending amount is explicitly 0 (paid in cash OR cleared by CN),
+  // OR if total payments cover the invoice amount.
+  // Uses paymentsPendingRaw to distinguish explicit 0 from missing field.
   const isPaid =
-    paymentsTotal > 0 &&
-    (paymentsPending <= 0 || paymentsTotal >= total);
+    (paymentsPendingRaw !== null && paymentsPendingRaw <= 0) ||
+    (paymentsTotal > 0 && paymentsTotal >= total);
 
   const holdedStatusLabel: HoldedLiveStatusLabel = isPaid
     ? "Pagado"
