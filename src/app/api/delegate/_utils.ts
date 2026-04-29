@@ -78,6 +78,23 @@ function createServiceClient() {
   });
 }
 
+// Decode JWT payload without signature verification.
+// Used ONLY for x-viholabs-token (already validated by middleware).
+function decodeJwtSub(token: string): { sub: string; exp?: number } | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf8")
+    );
+    if (!payload?.sub || typeof payload.sub !== "string") return null;
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return { sub: payload.sub as string, exp: payload.exp as number | undefined };
+  } catch {
+    return null;
+  }
+}
+
 function getBearerToken(req: Request): string | null {
   // 1. x-viholabs-token: injected by Next.js middleware after session validation.
   //    Runs inside Next.js — nginx cannot strip it. Most reliable path on VPS.
@@ -222,8 +239,32 @@ async function resolveFromBearer(
   const token = getBearerToken(req);
   if (!token) return null;
 
+  // Fast path: x-viholabs-token was injected by our middleware after it already
+  // validated the session. Decode locally to avoid a round-trip to Supabase auth
+  // (which can fail/timeout on VPS even when the token is perfectly valid).
+  const xToken = req.headers.get("x-viholabs-token")?.trim();
+  if (xToken && xToken === token) {
+    const decoded = decodeJwtSub(token);
+    if (decoded?.sub) {
+      const actorLookup = await lookupActiveActorByAuthUserId(supaService, decoded.sub);
+      if (actorLookup.actor) {
+        const supaRls = createBearerAuthClient(token);
+        return {
+          ok: true,
+          supaService,
+          supaRls: (supaRls as unknown) as RouteAuthClient,
+          actor: actorLookup.actor,
+          authUserId: decoded.sub,
+          authMode: "bearer",
+        };
+      }
+    }
+    // x-viholabs-token present but decode/lookup failed — fall through to full validation
+  }
+
+  // Standard path: validate token with Supabase auth server.
   const supaRls = createBearerAuthClient(token);
-  const { data, error } = await supaRls.auth.getUser(token);
+  const { data, error } = await supaRls.auth.getUser();
   const authUserId = data?.user?.id ?? null;
 
   if (error || !authUserId) {
