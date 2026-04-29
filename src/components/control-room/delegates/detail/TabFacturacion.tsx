@@ -317,32 +317,26 @@ export default function TabFacturacion({ invoices, month, period, commissionRule
 function InvoiceRow({ invoice: inv, viewedMonth }: { invoice: DetailInvoiceRow; viewedMonth: string }) {
   const badge = paymentStatusBadge(inv.payment_status);
   const isCn = inv.document_type === "creditnote";
+  void viewedMonth;
 
   const paidInDifferentMonth =
     inv.payment_status === "PAID" && !inv.paid_in_period && inv.paid_date
       ? inv.paid_date.slice(0, 7)
       : null;
 
-  let approxDue = "—";
-  let approxDueDate: Date | null = null;
-  if (!isCn && inv.invoice_date) {
-    const d = new Date(inv.invoice_date);
-    d.setDate(d.getDate() + 30);
-    approxDueDate = d;
-    approxDue = d.toLocaleDateString("es-ES");
-  }
-
-  void viewedMonth;
+  // Fecha de vencimiento real de Holded (ya resuelta en el API con fallback a invoice_date)
+  const dueDateStr = inv.due_date ? new Date(inv.due_date).toLocaleDateString("es-ES") : "—";
+  const dueDateObj = inv.due_date ? new Date(inv.due_date) : null;
+  const daysLeftToDue = dueDateObj
+    ? Math.ceil((dueDateObj.getTime() - Date.now()) / 86_400_000)
+    : null;
 
   const rowClass = isCn
     ? "bg-purple-50/40"
     : inv.payment_status === "OVERDUE"
       ? "bg-red-50/50"
-      : inv.payment_status === "PENDING" && approxDueDate
-        ? (() => {
-            const daysLeft = Math.ceil((approxDueDate.getTime() - Date.now()) / 86_400_000);
-            return daysLeft <= 7 ? "bg-orange-50/40" : "";
-          })()
+      : inv.payment_status === "PENDING" && daysLeftToDue !== null && daysLeftToDue <= 7
+        ? "bg-orange-50/40"
         : inv.paid_in_period
           ? "bg-emerald-50/30"
           : inv.payment_status === "PAID"
@@ -387,7 +381,7 @@ function InvoiceRow({ invoice: inv, viewedMonth }: { invoice: DetailInvoiceRow; 
           <span className="text-xs text-purple-500">N/A</span>
         ) : inv.payment_status === "OVERDUE" ? (
           <span className="text-xs font-semibold text-red-600">
-            {approxDue}
+            {dueDateStr}
             {inv.days_overdue != null && inv.days_overdue > 0 && (
               <span className="ml-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px]">
                 +{inv.days_overdue}d
@@ -396,14 +390,10 @@ function InvoiceRow({ invoice: inv, viewedMonth }: { invoice: DetailInvoiceRow; 
           </span>
         ) : (
           <span className="text-xs text-[color:var(--viho-muted)]">
-            {approxDue}
-            {approxDueDate && (() => {
-              const daysLeft = Math.ceil((approxDueDate!.getTime() - Date.now()) / 86_400_000);
-              if (daysLeft > 0 && daysLeft <= 7) {
-                return <span className="ml-1 font-semibold text-orange-500">({daysLeft}d)</span>;
-              }
-              return null;
-            })()}
+            {dueDateStr}
+            {daysLeftToDue !== null && daysLeftToDue > 0 && daysLeftToDue <= 7 && (
+              <span className="ml-1 font-semibold text-orange-500">({daysLeftToDue}d)</span>
+            )}
           </span>
         )}
       </Td>

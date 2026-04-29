@@ -59,6 +59,7 @@ export type DetailInvoiceRow = {
   id: string;
   invoice_number: string;
   invoice_date: string | null;
+  due_date: string | null;
   paid_date: string | null;
   client_id: string | null;
   client_name: string | null;

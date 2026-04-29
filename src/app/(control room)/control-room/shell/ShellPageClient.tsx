@@ -75,6 +75,55 @@ function SectionCard({
 // Panels
 // ---------------------------------------------------------------------------
 
+function SyncButton() {
+  const [state, setState] = useState<"idle" | "running" | "ok" | "error">("idle");
+  const [msg, setMsg] = useState("");
+
+  const run = async () => {
+    setState("running");
+    setMsg("");
+    try {
+      const token = await getAccessToken();
+      const res = await fetch("/api/holded/invoices/import-incremental", {
+        method: "POST",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j?.ok || res.ok) { setState("ok"); setMsg(j?.message ?? "Sync completado"); }
+      else { setState("error"); setMsg(j?.error ?? `HTTP ${res.status}`); }
+    } catch (e) {
+      setState("error"); setMsg(String(e));
+    }
+    setTimeout(() => setState("idle"), 4000);
+  };
+
+  const colors: Record<string, string> = {
+    idle: "#5A2E3A", running: "#6E5B43", ok: "#059669", error: "#dc2626",
+  };
+  const labels: Record<string, string> = {
+    idle: "↻ Sync Holded", running: "Sincronizando…", ok: "✓ Listo", error: "✗ Error",
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <button
+        onClick={run}
+        disabled={state === "running"}
+        style={{
+          fontSize: 12, fontWeight: 600, padding: "4px 12px",
+          borderRadius: 20, border: `1px solid ${colors[state]}`,
+          color: colors[state], background: "transparent", cursor: state === "running" ? "not-allowed" : "pointer",
+          opacity: state === "running" ? 0.7 : 1,
+        }}
+      >
+        {labels[state]}
+      </button>
+      {msg && <span style={{ fontSize: 11, color: colors[state] }}>{msg}</span>}
+    </div>
+  );
+}
+
 function SituationPanel({ onNavigate }: { onNavigate: (tab: ShellTabId) => void }) {
   const { profile, loading } = useCommunityProfile();
   const role = String(profile.role ?? "").toLowerCase();
@@ -120,8 +169,11 @@ function SituationPanel({ onNavigate }: { onNavigate: (tab: ShellTabId) => void 
   return (
     <section className="rounded-[32px] border border-[#D6C28A] bg-[#FBF6EC]">
       <div className="border-b border-[#D6C28A] px-6 py-5">
-        <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
-          Portal del delegado
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6E5B43]">
+            Portal del delegado
+          </div>
+          {profile.is_melquisedec && <SyncButton />}
         </div>
         <h2 className="mt-2 text-[28px] font-semibold tracking-[-0.02em] text-[#5A2E3A]">
           Bienvenido

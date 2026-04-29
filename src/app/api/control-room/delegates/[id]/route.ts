@@ -75,43 +75,36 @@ function getYearStart(month: string): string {
   return `${month.split("-")[0]}-01-01`;
 }
 
-// Aproxima vencimiento como invoice_date + 30 días (Net30, no hay due_date en DB).
-// REGLA: los CN/abonos (document_type = 'creditnote') NUNCA son OVERDUE ni PAID — son ajustes.
+// Status directo de datos Holded — sin cómputos inventados.
+// payments_pending y due_date vienen del sync con Holded y son la fuente de verdad.
 function inferPaymentStatus(
-  isPaid: boolean | null,
-  invoiceDate: string | null,
   documentType: string,
+  paymentsPending: number | null,
+  isPaid: boolean | null,
+  dueDate: string | null,
   today: string,
-  stateCode?: string | null
 ): PaymentStatus {
   if (documentType === "creditnote") return "CREDIT_NOTE";
-  if (isPaid === true) return "PAID";
-  if (stateCode === "SETTLED" && isPaid === false) return "CANCELLED";
-  if (invoiceDate) {
-    const d = new Date(invoiceDate);
-    d.setDate(d.getDate() + 30);
-    const approxDue = d.toISOString().slice(0, 10);
-    if (today > approxDue) return "OVERDUE";
-  }
+  // Cobrada: Holded dice pending=0 (incluso si fue via CN) o is_paid explícito
+  if (isPaid === true || (paymentsPending !== null && paymentsPending <= 0)) return "PAID";
+  // Vencida: fecha de vencimiento real superada
+  if (dueDate && today > dueDate) return "OVERDUE";
   return "PENDING";
 }
 
 function computeDaysOverdue(
   isPaid: boolean | null,
-  invoiceDate: string | null,
+  paymentsPending: number | null,
+  dueDate: string | null,
   documentType: string,
   today: string
 ): number | null {
-  if (isPaid === true || !invoiceDate) return null;
-  // Credit notes / abonos are never overdue — they are adjustments, not receivables
   if (documentType === "creditnote") return null;
-  const d = new Date(invoiceDate);
-  d.setDate(d.getDate() + 30);
-  const approxDue = d.toISOString().slice(0, 10);
-  if (today <= approxDue) return null;
-  const todayMs = new Date(today).getTime();
-  const dueMs = d.getTime();
-  return Math.max(0, Math.floor((todayMs - dueMs) / 86_400_000));
+  if (isPaid === true || (paymentsPending !== null && paymentsPending <= 0)) return null;
+  if (!dueDate || today <= dueDate) return null;
+  return Math.max(0, Math.floor(
+    (new Date(today).getTime() - new Date(dueDate).getTime()) / 86_400_000
+  ));
 }
 
 // Aplica tier de comisión (primera regla que cubre las unidades; fallback: tier mínimo).
@@ -336,7 +329,7 @@ export async function GET(
     stage = "invoices";
 
     const INVOICE_SELECT =
-      "id, invoice_number, invoice_date, paid_date, client_id, client_name, total_net, total_vat, total_gross, is_paid, state_code, delegate_id, document_type, external_invoice_id, source_provider";
+      "id, invoice_number, invoice_date, due_date, paid_date, client_id, client_name, total_net, total_vat, total_gross, is_paid, payments_pending, payments_total, state_code, delegate_id, document_type, external_invoice_id, source_provider";
 
     let allInvoices: Record<string, unknown>[] = [];
 
@@ -532,11 +525,13 @@ export async function GET(
       const invoiceDate = asString(inv.invoice_date);
       const paidDate = asString(inv.paid_date);
       const isPaid = inv.is_paid === true;
+      const pendingAmt = asNumber(inv.payments_pending);
+      const isCobrada = isPaid || (pendingAmt !== null && pendingAmt <= 0);
 
       if (invoiceDate && invoiceDate >= bounds.start && invoiceDate < bounds.endExclusive) {
         emittedInPeriodIds.add(id);
       }
-      if (isPaid && paidDate && paidDate >= bounds.start && paidDate < bounds.endExclusive) {
+      if (isCobrada && paidDate && paidDate >= bounds.start && paidDate < bounds.endExclusive) {
         paidInPeriodIds.add(id);
       }
     }
@@ -546,13 +541,17 @@ export async function GET(
 
     const invoiceDetailRows: DetailInvoiceRow[] = allInvoices.map((inv) => {
       const id = asString(inv.id) ?? "";
-      // Apply Holded live-status override when available — corrects stale DB `is_paid = false`
       const liveOverride = holdedOverrides.get(id);
-      const isPaid = liveOverride ? liveOverride.isPaid : inv.is_paid === true;
       const invoiceDate = asString(inv.invoice_date);
       const paidDate = liveOverride?.paidDate ?? asString(inv.paid_date);
       const docType = (asString(inv.document_type) ?? "invoice") as "invoice" | "creditnote";
       const items = itemsByInvoiceId.get(id) ?? [];
+
+      // Datos de Holded: due_date real (fallback a invoice_date), payments_pending
+      const rawDueDate = asString(inv.due_date);
+      const dueDate = rawDueDate ?? invoiceDate;
+      const paymentsPending = asNumber(inv.payments_pending);
+      const isPaid = liveOverride ? liveOverride.isPaid : inv.is_paid === true;
 
       let unitsSold = 0;
       let unitsFoc = 0;
@@ -573,14 +572,14 @@ export async function GET(
         }
       }
 
-      const isPaidBool = isPaid ? true : (inv.is_paid as boolean | null);
-      const paymentStatus = inferPaymentStatus(isPaidBool, invoiceDate, docType, today, asString(inv.state_code));
-      const daysOverdue = computeDaysOverdue(isPaidBool, invoiceDate, docType, today);
+      const paymentStatus = inferPaymentStatus(docType, paymentsPending, isPaid ? true : inv.is_paid as boolean | null, dueDate, today);
+      const daysOverdue = computeDaysOverdue(isPaid ? true : inv.is_paid as boolean | null, paymentsPending, dueDate, docType, today);
 
       return {
         id,
         invoice_number: asString(inv.invoice_number) ?? "",
         invoice_date: invoiceDate,
+        due_date: dueDate,
         paid_date: paidDate,
         client_id: asString(inv.client_id),
         client_name: asString(inv.client_name),
