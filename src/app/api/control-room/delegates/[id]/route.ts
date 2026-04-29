@@ -15,7 +15,7 @@ import { getActorFromRequest } from "@/app/api/delegate/_utils";
 import { getEffectivePermissionsByActorId } from "@/lib/auth/permissions";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { isSupervisorRole, normalizeRole } from "@/lib/auth/roles";
-import { asString, asNumber, todayYmdUtc } from "@/lib/holded/holdedPrimitives";
+import { asString, asNumber, todayYmdUtc, unixToDateYmd } from "@/lib/holded/holdedPrimitives";
 import {
   fetchHoldedInvoiceDetail,
   computeHoldedLiveMeta,
@@ -387,53 +387,59 @@ export async function GET(
     // The DB is the canonical store, but imports run periodically — payments made in Holded
     // between import runs show as stale "Pendiente/Vencida" here. This check fixes the display
     // in real time and auto-repairs the DB row as a side-effect.
-    stage = "holded_live_status";
+    // --- Leer estado/fechas desde holded_invoices (fuente de verdad) ---
+    stage = "holded_mirror";
 
-    // Only check invoices that look unpaid AND come from Holded (have an external_invoice_id)
-    const toCheckLive = allInvoices.filter((inv) => {
-      const isPaid = inv.is_paid === true;
-      const isHolded = (asString(inv.source_provider) ?? "").toLowerCase() === "holded";
-      const externalId = asString(inv.external_invoice_id);
-      return !isPaid && isHolded && !!externalId;
-    });
+    // Recoger todos los external_invoice_id (= ID de Holded) de las facturas
+    const externalIds = allInvoices
+      .map((inv) => asString(inv.external_invoice_id))
+      .filter((id): id is string => !!id);
 
-    // invoiceId → { isPaid, paidDate } from Holded live status
-    const holdedOverrides = new Map<string, { isPaid: boolean; paidDate: string | null }>();
+    // invoiceId (portal UUID) → datos de Holded mirror
+    type HoldedMirrorEntry = {
+      paymentsPending: number | null;
+      dueDate: string | null;
+      paidDate: string | null;
+    };
+    const holdedMirror = new Map<string, HoldedMirrorEntry>();
 
-    if (toCheckLive.length > 0) {
-      const tasks = toCheckLive.map((inv) => async () => {
-        const invoiceId = asString(inv.id) ?? "";
-        const externalId = asString(inv.external_invoice_id) ?? "";
-        const detail = await fetchHoldedInvoiceDetail(externalId);
-        if (!detail) return;
-        const meta = computeHoldedLiveMeta(detail, null);
-        holdedOverrides.set(invoiceId, { isPaid: meta.is_paid, paidDate: meta.paid_date });
-      });
+    if (externalIds.length > 0) {
+      const { data: mirrorRows } = await db
+        .from("holded_invoices")
+        .select("id, due_date, raw")
+        .in("id", externalIds);
 
-      await runWithConcurrencyLimit(tasks, 8);
-
-      // Auto-repair: update DB rows that Holded now says are paid
-      // Fire-and-forget — do not await, do not block the response
-      const repairBatch: Array<{ id: string; paidDate: string | null }> = [];
-      for (const [invoiceId, override] of holdedOverrides) {
-        if (override.isPaid) {
-          repairBatch.push({ id: invoiceId, paidDate: override.paidDate });
-        }
+      // externalId → mirror row
+      type MirrorRow = { id: string; due_date: string | null; raw: Record<string, unknown> | null };
+      const mirrorByExternalId = new Map<string, MirrorRow>();
+      for (const row of (mirrorRows ?? []) as MirrorRow[]) {
+        mirrorByExternalId.set(row.id, row);
       }
-      if (repairBatch.length > 0) {
-        const repairDb = supabaseAdmin();
-        void Promise.all(
-          repairBatch.map(({ id, paidDate }) =>
-            repairDb
-              .from("invoices")
-              .update({
-                is_paid: true,
-                state_code: "SETTLED",
-                paid_date: paidDate ?? todayYmdUtc(),
-              })
-              .eq("id", id)
-          )
-        );
+
+      for (const inv of allInvoices) {
+        const portalId = asString(inv.id) ?? "";
+        const extId = asString(inv.external_invoice_id);
+        if (!extId) continue;
+        const mirror = mirrorByExternalId.get(extId);
+        if (!mirror) continue;
+
+        const raw = (mirror.raw ?? {}) as Record<string, unknown>;
+        const paymentsPending = asNumber(raw["paymentsPending"]);
+
+        // due_date: de holded_invoices (timestamp), slice a YYYY-MM-DD
+        const dueDate = mirror.due_date ? mirror.due_date.slice(0, 10) : null;
+
+        // paid_date: extraer de paymentsDetail
+        let paidDate: string | null = null;
+        const detail = Array.isArray(raw["paymentsDetail"])
+          ? (raw["paymentsDetail"] as Array<Record<string, unknown>>)
+          : [];
+        for (const payment of detail) {
+          const d = unixToDateYmd(payment["date"]) ?? unixToDateYmd(payment["paidAt"]);
+          if (d && (!paidDate || d > paidDate)) paidDate = d;
+        }
+
+        holdedMirror.set(portalId, { paymentsPending, dueDate, paidDate });
       }
     }
 
@@ -523,10 +529,10 @@ export async function GET(
     for (const inv of allInvoices) {
       const id = asString(inv.id) ?? "";
       const invoiceDate = asString(inv.invoice_date);
-      const paidDate = asString(inv.paid_date);
-      const isPaid = inv.is_paid === true;
-      const pendingAmt = asNumber(inv.payments_pending);
-      const isCobrada = isPaid || (pendingAmt !== null && pendingAmt <= 0);
+      const mirror = holdedMirror.get(id);
+      const paidDate = mirror?.paidDate ?? asString(inv.paid_date);
+      const paymentsPending = mirror?.paymentsPending ?? asNumber(inv.payments_pending);
+      const isCobrada = (paymentsPending !== null && paymentsPending <= 0) || inv.is_paid === true;
 
       if (invoiceDate && invoiceDate >= bounds.start && invoiceDate < bounds.endExclusive) {
         emittedInPeriodIds.add(id);
@@ -541,17 +547,17 @@ export async function GET(
 
     const invoiceDetailRows: DetailInvoiceRow[] = allInvoices.map((inv) => {
       const id = asString(inv.id) ?? "";
-      const liveOverride = holdedOverrides.get(id);
+      // Datos directos de holded_invoices (fuente de verdad)
+      const mirror = holdedMirror.get(id);
       const invoiceDate = asString(inv.invoice_date);
-      const paidDate = liveOverride?.paidDate ?? asString(inv.paid_date);
+      const paidDate = mirror?.paidDate ?? asString(inv.paid_date);
       const docType = (asString(inv.document_type) ?? "invoice") as "invoice" | "creditnote";
       const items = itemsByInvoiceId.get(id) ?? [];
 
-      // Datos de Holded: due_date real (fallback a invoice_date), payments_pending
-      const rawDueDate = asString(inv.due_date);
-      const dueDate = rawDueDate ?? invoiceDate;
-      const paymentsPending = asNumber(inv.payments_pending);
-      const isPaid = liveOverride ? liveOverride.isPaid : inv.is_paid === true;
+      // due_date: de Holded mirror, fallback a invoice_date
+      const dueDate = mirror?.dueDate ?? asString(inv.due_date) ?? invoiceDate;
+      const paymentsPending = mirror?.paymentsPending ?? asNumber(inv.payments_pending);
+      const isPaid = (paymentsPending !== null && paymentsPending <= 0) || inv.is_paid === true;
 
       let unitsSold = 0;
       let unitsFoc = 0;
