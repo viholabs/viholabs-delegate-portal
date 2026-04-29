@@ -56,10 +56,18 @@ export async function syncAllHoldedInvoices(): Promise<InvoiceSyncResult> {
       );
 
       const docNumber = asString(detail.docNumber ?? detail.number ?? detail.doc_number);
-      const contactId = asString(detail.contactId ?? detail.contact_id);
-      const contactRec = detail.contact as Record<string, unknown> | null | undefined;
+      // Holded sends the contact ID as a plain string in the "contact" field,
+      // NOT as "contactId". Check the string value first, then the named fields.
+      const contactId = asString(
+        (typeof detail.contact === "string" ? detail.contact : null) ??
+        detail.contactId ??
+        detail.contact_id
+      );
+      const contactRec = typeof detail.contact === "object" && detail.contact !== null
+        ? (detail.contact as Record<string, unknown>)
+        : null;
       const contactName = asString(
-        contactRec?.name ?? detail.contactName ?? detail.contact_name
+        detail.contactName ?? detail.contact_name ?? contactRec?.name
       );
 
       const toISO = (unix: number | null): string | null =>
