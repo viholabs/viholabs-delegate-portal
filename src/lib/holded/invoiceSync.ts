@@ -114,19 +114,27 @@ export async function syncAllHoldedInvoices(): Promise<InvoiceSyncResult> {
       await db.from("holded_invoice_lines").delete().eq("invoice_id", id);
 
       if (products.length > 0) {
-        const lines = products.map((p, position) => ({
-          invoice_id: id,
-          position,
-          sku: asString(p.sku ?? p.code),
-          description: asString(p.name ?? p.desc ?? p.description),
-          quantity: asNumber(p.units ?? p.qty ?? p.quantity) ?? 0,
-          unit_price: asNumber(p.price ?? p.unit_price) ?? 0,
-          discount_pct: asNumber(p.discount ?? p.discount_pct) ?? 0,
-          subtotal: asNumber(p.subtotal) ?? 0,
-          tax_id: p.taxes ? JSON.stringify(p.taxes) : null,
-          raw: p,
-          last_synced_at: now,
-        }));
+        const lines = products.map((p, position) => {
+          const price = asNumber(p.price ?? p.unit_price) ?? 0;
+          const units = asNumber(p.units ?? p.qty ?? p.quantity) ?? 0;
+          const discountPct = asNumber(p.discount ?? p.discount_pct) ?? 0;
+          // Holded products don't include a subtotal field — compute it
+          const computedSubtotal = Math.round(price * units * (1 - discountPct / 100) * 100) / 100;
+
+          return {
+            invoice_id: id,
+            position,
+            sku: asString(p.sku ?? p.code),
+            description: asString(p.name ?? p.desc ?? p.description),
+            quantity: units,
+            unit_price: price,
+            discount_pct: discountPct,
+            subtotal: computedSubtotal,
+            tax_id: p.taxes ? JSON.stringify(p.taxes) : null,
+            raw: p,
+            last_synced_at: now,
+          };
+        });
 
         const { error: linesError } = await db
           .from("holded_invoice_lines")

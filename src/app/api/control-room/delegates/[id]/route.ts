@@ -417,33 +417,44 @@ export async function GET(
       // Classify lines using canonical classifier (SKU-based)
       const { sold: unitsSold, promo: unitsFoc } = sumInvoiceUnits(lines.map((l) => l.raw ?? {}));
 
+      // Use invoice-level subtotal — Holded pre-computes this accurately
+      const subtotal = asNumber(raw.subtotal) ?? 0;
+      // raw.tax = IVA + RE combined
+      const taxTotal = asNumber(raw.tax) ?? 0;
+
+      // Net commissionable: sum of SALE_SKU lines, computed from price×units×(1-discount)
       let netCommissionable = 0;
-      let totalRe = 0;
-      let totalVat = 0;
+      // Detect RE percentage from product tax codes — format: "s_rec_14" (1.4%), "s_rec_52" (5.2%)
+      let recPct = 0;
 
       for (const line of lines) {
-        const sku = line.sku ?? "";
-        if (SALE_SKUS.has(sku)) netCommissionable += line.subtotal;
-
         const lineRaw = (line.raw ?? {}) as Record<string, unknown>;
-        const taxes = Array.isArray(lineRaw.taxes)
-          ? (lineRaw.taxes as Array<Record<string, unknown>>)
-          : [];
-        for (const tax of taxes) {
-          const taxName = String(tax.name ?? "").toLowerCase();
-          const taxPct = asNumber(tax.percentage) ?? 0;
-          const taxAmount = asNumber(tax.amount) ?? (line.subtotal * taxPct) / 100;
-          const isRE =
-            taxName.includes("recargo") ||
-            taxName.startsWith("re ") ||
-            taxPct === 5.2 ||
-            taxPct === 1.4;
-          if (isRE) totalRe += taxAmount;
-          else if (taxPct > 0) totalVat += taxAmount;
+        const lineSku = String(lineRaw.sku ?? line.sku ?? "");
+
+        if (SALE_SKUS.has(lineSku)) {
+          const price = asNumber(lineRaw.price) ?? 0;
+          const units = asNumber(lineRaw.units) ?? 0;
+          const disc = asNumber(lineRaw.discount) ?? 0;
+          netCommissionable += price * units * (1 - disc / 100);
+        }
+
+        if (recPct === 0) {
+          const taxes = Array.isArray(lineRaw.taxes)
+            ? (lineRaw.taxes as unknown[]).map((t) => String(t).toLowerCase())
+            : [];
+          for (const code of taxes) {
+            const m = code.match(/rec[_-](\d+)/);
+            if (m) {
+              recPct = parseInt(m[1], 10) / 10; // "s_rec_14" → 1.4, "s_rec_52" → 5.2
+              break;
+            }
+          }
         }
       }
 
-      const subtotal = asNumber(raw.subtotal) ?? asNumber(raw.total_net) ?? 0;
+      const totalRe = recPct > 0 ? Math.round(subtotal * recPct) / 100 : 0;
+      const totalVat = Math.max(0, taxTotal - totalRe);
+
       const portalClient = clientByHoldedId.get(hi.contact_id ?? "");
 
       const paymentStatus = inferPaymentStatus(docType, paymentsPending, liveMeta.is_paid, dueDate, today);
